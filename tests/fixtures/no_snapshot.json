@@ -1,0 +1,8 @@
+{
+  "schema_version": "1.0.0",
+  "error": {
+    "code": "no_snapshot",
+    "message": "No inventory snapshot is available.",
+    "next_command": "paclang refresh --metadata-only"
+  }
+}
