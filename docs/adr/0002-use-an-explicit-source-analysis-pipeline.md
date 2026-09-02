@@ -1,0 +1,3 @@
+# Use an explicit source-analysis pipeline
+
+Paclang reads selected package names from `pacman -Qq` and structured local metadata from `expac`. Source providers resolve official Arch, AUR, and generic source evidence while preserving unsupported package origins as unresolved. Providers parse `.SRCINFO` and never evaluate PKGBUILDs. An explicit `paclang refresh` operation invokes either a configured native `github-linguist` executable or a pinned OCI image. Paclang stores evidence and language profiles in its analysis database, while reports remain offline and temporary source trees are deleted after analysis. This design keeps normal reports fast and prevents an unrequested system-wide source download.

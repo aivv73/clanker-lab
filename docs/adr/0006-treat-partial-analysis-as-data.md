@@ -1,0 +1,3 @@
+# Treat partial analysis as data
+
+Reports and completed refreshes expose unresolved, stale, failed, and resource-limited targets as data rather than command-wide failures. A coherent partial report or published refresh snapshot exits successfully. Reports fail when `--min-coverage` is not met, and refresh fails under `--require-complete` when any target remains incomplete. Before the first snapshot, reports return a structured `no_snapshot` error. An interrupted refresh preserves reusable target analyses, leaves the previous snapshot active, and exits 130. Every TOON and JSON success or error includes an independently versioned `schema_version`, with golden tests guarding serialization changes.

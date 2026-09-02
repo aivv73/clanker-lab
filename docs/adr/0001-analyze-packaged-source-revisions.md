@@ -1,0 +1,3 @@
+# Analyze packaged source revisions
+
+Paclang analyzes the source revision used to build an installed package rather than the current upstream default branch. Package recipes are the preferred evidence, followed by repository metadata and homepage discovery. Evidence is graded as exact, reconstructed, fallback, or override. Equally supported conflicting targets remain ambiguous. Current upstream source is analyzed only when `paclang refresh --allow-current-fallback` explicitly permits it. These rules make reports describe the installed system and prevent current upstream source from silently replacing unavailable packaged source.

@@ -1,0 +1,3 @@
+# Keep refresh read-only and snapshot-based
+
+Paclang never executes fetched PKGBUILDs or other package-recipe code. Providers parse `.SRCINFO` through a maintained parser and preserve the recipe commit and metadata freshness. Dynamic sources remain unresolved unless a trusted provider supplies evaluated data. Each refresh captures one installed-package inventory, reuses successful target analyses, and publishes a report snapshot atomically. Package changes during refresh make the completed snapshot stale rather than mixing inventories. Per-target authentication, analysis, and resource-limit failures remain inspectable without discarding unrelated successes.
