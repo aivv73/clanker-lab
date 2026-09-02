@@ -8,6 +8,10 @@ Issues and specs are tracked in GitHub Issues for `aivv73/clanker-lab`. See `doc
 
 This repo uses the single-context domain-doc layout. See `docs/agents/domain.md`.
 
+### Security and reliability
+
+Before changing runtime, storage, subprocess, or report-output behavior, read `SECURITY.md`.
+
 ### Linked Specs
 
 This project uses the Linked Specs convention; consult the `linked-specs`
