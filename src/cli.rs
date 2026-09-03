@@ -17,4 +17,11 @@ pub struct Cli {
 pub enum Command {
     /// Report the selected installed-package count and analysis coverage.
     Count,
+
+    /// Refresh package metadata and source-language analysis.
+    Refresh {
+        /// Publish installed-package metadata without analyzing source trees.
+        #[arg(long, required = true)]
+        metadata_only: bool,
+    },
 }

@@ -1,0 +1,7 @@
+# Paclang count
+
+- Schema version: `1.0.0`
+- Installed packages: 4
+- Selected population: 4
+- Analyzed: 0
+- Missing source-language analysis: 4

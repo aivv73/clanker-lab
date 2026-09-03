@@ -9,7 +9,19 @@ fn empty_database_has_no_snapshot() {
     let directory = tempfile::tempdir().unwrap();
     let database = Database::open(&directory.path().join("paclang.db")).unwrap();
 
-    assert!(!database.has_published_snapshot().unwrap());
+    assert_eq!(database.published_package_count().unwrap(), None);
+}
+
+#[test]
+fn database_connections_enforce_foreign_keys() {
+    let directory = tempfile::tempdir().unwrap();
+    let database = Database::open(&directory.path().join("paclang.db")).unwrap();
+
+    let enabled: bool = database
+        .connection
+        .pragma_query_value(None, "foreign_keys", |row| row.get(0))
+        .unwrap();
+    assert!(enabled);
 }
 
 #[test]
@@ -19,7 +31,7 @@ fn current_database_reopens() {
     drop(Database::open(&path).unwrap());
 
     let database = Database::open(&path).unwrap();
-    assert!(!database.has_published_snapshot().unwrap());
+    assert_eq!(database.published_package_count().unwrap(), None);
 }
 
 #[test]
@@ -28,7 +40,7 @@ fn malformed_current_database_is_refused_without_mutation() {
     let path = directory.path().join("paclang.db");
     let connection = Connection::open(&path).unwrap();
     connection
-        .execute_batch("CREATE TABLE marker (id INTEGER); PRAGMA user_version = 1;")
+        .execute_batch("CREATE TABLE marker (id INTEGER); PRAGMA user_version = 2;")
         .unwrap();
     drop(connection);
 
@@ -49,7 +61,7 @@ fn malformed_current_database_is_refused_without_mutation() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 1);
+    assert_eq!(version, 2);
     assert_eq!(marker_tables, 1);
 }
 
@@ -59,7 +71,7 @@ fn newer_database_is_refused_without_mutation() {
     let path = directory.path().join("paclang.db");
     let connection = Connection::open(&path).unwrap();
     connection
-        .execute_batch("CREATE TABLE marker (id INTEGER); PRAGMA user_version = 2;")
+        .execute_batch("CREATE TABLE marker (id INTEGER); PRAGMA user_version = 3;")
         .unwrap();
     drop(connection);
 
@@ -70,7 +82,7 @@ fn newer_database_is_refused_without_mutation() {
     assert!(matches!(
         error,
         StorageError::UnsupportedSchemaVersion(version)
-            if version == MigrationVersion::from_database(2)
+            if version == MigrationVersion::from_database(3)
     ));
 
     let connection = Connection::open(&path).unwrap();
@@ -84,7 +96,7 @@ fn newer_database_is_refused_without_mutation() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 2);
+    assert_eq!(version, 3);
     assert_eq!(inventory_tables, 0);
 }
 
@@ -107,12 +119,45 @@ fn concurrent_first_open_runs_one_complete_migration() {
     barrier.wait();
     for handle in handles {
         let database = handle.join().unwrap().unwrap();
-        assert!(!database.has_published_snapshot().unwrap());
+        assert_eq!(database.published_package_count().unwrap(), None);
     }
 
     let connection = Connection::open(path.as_ref()).unwrap();
     let version: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 1);
+    assert_eq!(version, 2);
+}
+
+#[test]
+fn version_one_database_migrates_to_current() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("paclang.db");
+    let connection = Connection::open(&path).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TABLE inventory_snapshots (
+                id INTEGER PRIMARY KEY,
+                published_at TEXT NOT NULL
+             ) STRICT;
+             INSERT INTO inventory_snapshots (published_at) VALUES ('legacy-marker');
+             PRAGMA user_version = 1;",
+        )
+        .unwrap();
+    drop(connection);
+
+    let database = Database::open(&path).unwrap();
+    assert_eq!(database.published_package_count().unwrap(), None);
+
+    let connection = Connection::open(&path).unwrap();
+    let version: u32 = connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, 2);
+    let snapshots: u32 = connection
+        .query_row("SELECT count(*) FROM inventory_snapshots", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(snapshots, 0);
 }
