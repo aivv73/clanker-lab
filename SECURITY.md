@@ -4,7 +4,7 @@ Paclang is a synchronous, non-interactive CLI run with the invoking user's permi
 
 Environment variables, process output, and an existing database are external inputs. Paclang accepts only absolute XDG or home paths. Metadata refresh validates the complete `pacman` and `expac` populations before publishing a snapshot. Paclang validates the SQLite schema version before application queries and refuses databases created by newer unsupported versions without modifying them.
 
-The `%r` field from `expac -Q` identifies the queried local database, not the repository that installed a package. Paclang records package origin as unknown and does not infer historical origin from current repository state.
+The `%r` field from `expac -Q` identifies the queried local database, not the repository that installed a package. Paclang does not load libalpm or parse its local database directly. Paclang records package origin as unknown and does not infer historical origin from current repository state.
 
 Schema version 1 could record only an inventory snapshot marker, not package rows. Migration 2 removes version-1 marker rows in the same transaction that adds installed-package storage, so reports cannot treat an old marker as a valid empty inventory.
 
