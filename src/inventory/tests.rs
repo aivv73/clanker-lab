@@ -1,7 +1,5 @@
-use super::{
-    InstallReason, InventoryError, parse_expac_records, parse_pacman_names,
-    validate_same_population,
-};
+use super::{InventoryError, parse_expac_records, parse_pacman_names, validate_same_population};
+use crate::package::InstallReason;
 
 #[test]
 fn parses_typed_expac_records() {

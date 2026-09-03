@@ -1,5 +1,6 @@
 mod cli;
 mod inventory;
+mod package;
 mod report;
 mod storage;
 
@@ -55,16 +56,21 @@ fn main() -> ExitCode {
     let format = cli
         .format
         .unwrap_or_else(|| Format::for_terminal(io::stdout().is_terminal()));
+    let selection = cli.population_selection();
 
-    match run(cli.command.unwrap_or(Command::Count), format) {
+    match run(cli.command.unwrap_or(Command::Count), format, selection) {
         Ok(rendered) => write_rendered(&rendered),
         Err(error) => write_error(format, &error, FailureExit::Runtime),
     }
 }
 
-fn run(command: Command, format: Format) -> Result<String, AppError> {
+fn run(
+    command: Command,
+    format: Format,
+    selection: report::PopulationSelection,
+) -> Result<String, AppError> {
     match command {
-        Command::Count => render_count(format),
+        Command::Count => render_count(format, selection),
         Command::Refresh { metadata_only: _ } => {
             let packages = inventory::read_installed_packages().map_err(AppError::inventory)?;
             let database_path = storage::database_path().map_err(AppError::storage)?;
@@ -73,27 +79,31 @@ fn run(command: Command, format: Format) -> Result<String, AppError> {
             database
                 .publish_snapshot(&packages)
                 .map_err(AppError::storage)?;
-            render_count_from_database(format, &database)
+            render_count_from_database(format, &database, selection)
         }
     }
 }
 
-fn render_count(format: Format) -> Result<String, AppError> {
+fn render_count(
+    format: Format,
+    selection: report::PopulationSelection,
+) -> Result<String, AppError> {
     let database_path = storage::database_path().map_err(AppError::storage)?;
     let database = storage::Database::open(&database_path).map_err(AppError::storage)?;
-    render_count_from_database(format, &database)
+    render_count_from_database(format, &database, selection)
 }
 
 fn render_count_from_database(
     format: Format,
     database: &storage::Database,
+    selection: report::PopulationSelection,
 ) -> Result<String, AppError> {
-    let installed_total = database
-        .published_package_count()
+    let packages = database
+        .published_packages()
         .map_err(AppError::storage)?
         .ok_or(AppError::NoSnapshot)?;
     format
-        .render_count(&CountReport::new(installed_total))
+        .render_count(&CountReport::from_snapshot(&packages, selection))
         .map_err(AppError::render)
 }
 

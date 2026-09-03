@@ -9,6 +9,7 @@ use std::time::Duration;
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior};
 
 use crate::inventory::InstalledPackage;
+use crate::package::{InstallReason, PackageOrigin, SnapshotPackage};
 
 const MIGRATION_1: &str = "
     CREATE TABLE inventory_snapshots (
@@ -55,6 +56,11 @@ pub(crate) enum StorageError {
     CreateDirectory(std::io::Error),
     UnsupportedSchemaVersion(MigrationVersion),
     InvalidSchema(rusqlite::Error),
+    InvalidPackageMetadata {
+        field: &'static str,
+        value: String,
+        message: &'static str,
+    },
     Sqlite(rusqlite::Error),
 }
 
@@ -76,6 +82,14 @@ impl fmt::Display for StorageError {
             Self::InvalidSchema(error) => {
                 write!(formatter, "database schema is invalid: {error}")
             }
+            Self::InvalidPackageMetadata {
+                field,
+                value,
+                message,
+            } => write!(
+                formatter,
+                "published package has invalid {field} {value:?}: {message}"
+            ),
             Self::Sqlite(error) => write!(formatter, "SQLite returned an error: {error}"),
         }
     }
@@ -118,16 +132,56 @@ impl Database {
         Ok(Self { connection })
     }
 
-    pub(crate) fn published_package_count(&self) -> Result<Option<u64>, StorageError> {
-        self.connection
+    pub(crate) fn published_packages(&self) -> Result<Option<Vec<SnapshotPackage>>, StorageError> {
+        let snapshot_id: Option<i64> = self
+            .connection
             .query_row(
-                "SELECT (SELECT count(*) FROM installed_packages WHERE snapshot_id = inventory_snapshots.id)
-                 FROM inventory_snapshots ORDER BY id DESC LIMIT 1",
+                "SELECT id FROM inventory_snapshots ORDER BY id DESC LIMIT 1",
                 [],
                 |row| row.get(0),
             )
             .optional()
-            .map_err(StorageError::Sqlite)
+            .map_err(StorageError::Sqlite)?;
+        let Some(snapshot_id) = snapshot_id else {
+            return Ok(None);
+        };
+
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT origin, install_reason FROM installed_packages
+                 WHERE snapshot_id = ?1 ORDER BY name",
+            )
+            .map_err(StorageError::Sqlite)?;
+        let rows = statement
+            .query_map([snapshot_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(StorageError::Sqlite)?;
+        let mut packages = Vec::new();
+        for row in rows {
+            let (origin, install_reason) = row.map_err(StorageError::Sqlite)?;
+            let parsed_origin = PackageOrigin::parse(&origin).map_err(|message| {
+                StorageError::InvalidPackageMetadata {
+                    field: "origin",
+                    value: origin,
+                    message,
+                }
+            })?;
+            let parsed_install_reason =
+                InstallReason::parse(&install_reason).map_err(|message| {
+                    StorageError::InvalidPackageMetadata {
+                        field: "install reason",
+                        value: install_reason,
+                        message,
+                    }
+                })?;
+            packages.push(SnapshotPackage {
+                origin: parsed_origin,
+                install_reason: parsed_install_reason,
+            });
+        }
+        Ok(Some(packages))
     }
 
     pub(crate) fn publish_snapshot(
