@@ -70,19 +70,38 @@ impl Format {
             Self::Markdown => Ok(report.render_markdown()),
         }
     }
+
+    pub fn render_count(self, report: &CountReport) -> Result<String, RenderError> {
+        match self {
+            Self::Terminal => Ok(report.render_terminal()),
+            Self::Toon => toon_format::encode_default(&ToonCountReport::from(report))
+                .map_err(RenderError::Toon),
+            Self::Json => serde_json::to_string_pretty(report).map_err(RenderError::Json),
+            Self::Markdown => Ok(report.render_markdown()),
+        }
+    }
 }
 
 #[derive(Debug)]
 pub enum AppError {
     NoSnapshot,
+    Inventory(String),
     Storage(String),
-    UnsupportedSnapshot,
+    Render(String),
     InvalidCli(String),
 }
 
 impl AppError {
     pub fn storage(error: impl fmt::Display) -> Self {
         Self::Storage(error.to_string())
+    }
+
+    pub fn inventory(error: impl fmt::Display) -> Self {
+        Self::Inventory(error.to_string())
+    }
+
+    pub fn render(error: impl fmt::Display) -> Self {
+        Self::Render(error.to_string())
     }
 
     pub fn invalid_cli(message: impl Into<String>) -> Self {
@@ -92,8 +111,9 @@ impl AppError {
     fn code(&self) -> ErrorCode {
         match self {
             Self::NoSnapshot => ErrorCode::NoSnapshot,
+            Self::Inventory(_) => ErrorCode::Inventory,
             Self::Storage(_) => ErrorCode::Storage,
-            Self::UnsupportedSnapshot => ErrorCode::UnsupportedSnapshot,
+            Self::Render(_) => ErrorCode::Render,
             Self::InvalidCli(_) => ErrorCode::InvalidCli,
         }
     }
@@ -101,17 +121,17 @@ impl AppError {
     fn message(&self) -> &str {
         match self {
             Self::NoSnapshot => "No inventory snapshot is available.",
-            Self::Storage(message) | Self::InvalidCli(message) => message,
-            Self::UnsupportedSnapshot => {
-                "The published inventory snapshot is not supported by this build."
-            }
+            Self::Inventory(message)
+            | Self::Storage(message)
+            | Self::Render(message)
+            | Self::InvalidCli(message) => message,
         }
     }
 
     fn next_command(&self) -> Option<&'static str> {
         match self {
             Self::NoSnapshot => Some("paclang refresh --metadata-only"),
-            Self::Storage(_) | Self::UnsupportedSnapshot | Self::InvalidCli(_) => None,
+            Self::Inventory(_) | Self::Storage(_) | Self::Render(_) | Self::InvalidCli(_) => None,
         }
     }
 }
@@ -120,8 +140,9 @@ impl AppError {
 #[serde(rename_all = "snake_case")]
 enum ErrorCode {
     NoSnapshot,
+    Inventory,
     Storage,
-    UnsupportedSnapshot,
+    Render,
     InvalidCli,
 }
 
@@ -129,9 +150,90 @@ impl ErrorCode {
     const fn as_str(self) -> &'static str {
         match self {
             Self::NoSnapshot => "no_snapshot",
+            Self::Inventory => "inventory",
             Self::Storage => "storage",
-            Self::UnsupportedSnapshot => "unsupported_snapshot",
+            Self::Render => "render",
             Self::InvalidCli => "invalid_cli",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ReportKind {
+    Count,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CountReport {
+    schema_version: ReportSchemaVersion,
+    report: ReportKind,
+    installed_total: u64,
+    selected_population: u64,
+    coverage: Coverage,
+}
+
+impl CountReport {
+    pub const fn new(installed_total: u64) -> Self {
+        Self {
+            schema_version: ReportSchemaVersion::CURRENT,
+            report: ReportKind::Count,
+            installed_total,
+            selected_population: installed_total,
+            coverage: Coverage {
+                analyzed: 0,
+                missing_source_language_analysis: installed_total,
+            },
+        }
+    }
+
+    fn render_terminal(&self) -> String {
+        format!(
+            "Installed packages: {}\nSelected population: {}\nAnalyzed: {}\nMissing source-language analysis: {}",
+            self.installed_total,
+            self.selected_population,
+            self.coverage.analyzed,
+            self.coverage.missing_source_language_analysis
+        )
+    }
+
+    fn render_markdown(&self) -> String {
+        format!(
+            "# Paclang count\n\n- Schema version: `{}`\n- Installed packages: {}\n- Selected population: {}\n- Analyzed: {}\n- Missing source-language analysis: {}",
+            self.schema_version.as_str(),
+            self.installed_total,
+            self.selected_population,
+            self.coverage.analyzed,
+            self.coverage.missing_source_language_analysis
+        )
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct Coverage {
+    analyzed: u64,
+    missing_source_language_analysis: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct ToonCountReport<'a> {
+    schema_version: ReportSchemaVersion,
+    toon_specification_version: ToonSpecificationVersion,
+    report: ReportKind,
+    installed_total: u64,
+    selected_population: u64,
+    coverage: &'a Coverage,
+}
+
+impl<'a> From<&'a CountReport> for ToonCountReport<'a> {
+    fn from(report: &'a CountReport) -> Self {
+        Self {
+            schema_version: report.schema_version,
+            toon_specification_version: ToonSpecificationVersion::CURRENT,
+            report: report.report,
+            installed_total: report.installed_total,
+            selected_population: report.selected_population,
+            coverage: &report.coverage,
         }
     }
 }

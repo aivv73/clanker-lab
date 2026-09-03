@@ -1,4 +1,5 @@
 mod cli;
+mod inventory;
 mod report;
 mod storage;
 
@@ -9,7 +10,7 @@ use std::process::ExitCode;
 use clap::{Parser, error::ErrorKind};
 
 use crate::cli::{Cli, Command};
-use crate::report::{AppError, Format};
+use crate::report::{AppError, CountReport, Format};
 
 #[derive(Clone, Copy)]
 enum FailureExit {
@@ -55,27 +56,53 @@ fn main() -> ExitCode {
         .format
         .unwrap_or_else(|| Format::for_terminal(io::stdout().is_terminal()));
 
-    match run(cli.command.unwrap_or(Command::Count)) {
-        Ok(()) => ExitCode::SUCCESS,
+    match run(cli.command.unwrap_or(Command::Count), format) {
+        Ok(rendered) => write_rendered(&rendered),
         Err(error) => write_error(format, &error, FailureExit::Runtime),
     }
 }
 
-fn run(command: Command) -> Result<(), AppError> {
+fn run(command: Command, format: Format) -> Result<String, AppError> {
     match command {
-        Command::Count => {
+        Command::Count => render_count(format),
+        Command::Refresh { metadata_only: _ } => {
+            let packages = inventory::read_installed_packages().map_err(AppError::inventory)?;
             let database_path = storage::database_path().map_err(AppError::storage)?;
-            let database = storage::Database::open(&database_path).map_err(AppError::storage)?;
-
-            if database
-                .has_published_snapshot()
-                .map_err(AppError::storage)?
-            {
-                return Err(AppError::UnsupportedSnapshot);
-            }
-
-            Err(AppError::NoSnapshot)
+            let mut database =
+                storage::Database::open(&database_path).map_err(AppError::storage)?;
+            database
+                .publish_snapshot(&packages)
+                .map_err(AppError::storage)?;
+            render_count_from_database(format, &database)
         }
+    }
+}
+
+fn render_count(format: Format) -> Result<String, AppError> {
+    let database_path = storage::database_path().map_err(AppError::storage)?;
+    let database = storage::Database::open(&database_path).map_err(AppError::storage)?;
+    render_count_from_database(format, &database)
+}
+
+fn render_count_from_database(
+    format: Format,
+    database: &storage::Database,
+) -> Result<String, AppError> {
+    let installed_total = database
+        .published_package_count()
+        .map_err(AppError::storage)?
+        .ok_or(AppError::NoSnapshot)?;
+    format
+        .render_count(&CountReport::new(installed_total))
+        .map_err(AppError::render)
+}
+
+fn write_rendered(rendered: &str) -> ExitCode {
+    let stdout = io::stdout();
+    if writeln!(stdout.lock(), "{rendered}").is_err() {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
     }
 }
 
@@ -87,12 +114,11 @@ fn write_error(format: Format, error: &AppError, failure: FailureExit) -> ExitCo
             return ExitCode::from(1);
         }
     };
-    let stdout = io::stdout();
-    if writeln!(stdout.lock(), "{rendered}").is_err() {
-        return ExitCode::from(1);
+    if write_rendered(&rendered) == ExitCode::SUCCESS {
+        ExitCode::from(failure.code())
+    } else {
+        ExitCode::from(1)
     }
-
-    ExitCode::from(failure.code())
 }
 
 fn format_from_arguments() -> Option<Format> {

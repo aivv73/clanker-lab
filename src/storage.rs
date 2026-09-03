@@ -8,10 +8,27 @@ use std::time::Duration;
 
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior};
 
+use crate::inventory::InstalledPackage;
+
 const MIGRATION_1: &str = "
     CREATE TABLE inventory_snapshots (
         id INTEGER PRIMARY KEY,
         published_at TEXT NOT NULL
+    ) STRICT;
+";
+
+const MIGRATION_2: &str = "
+    -- Version 1 snapshots were markers without package metadata.
+    DELETE FROM inventory_snapshots;
+    CREATE TABLE installed_packages (
+        snapshot_id INTEGER NOT NULL REFERENCES inventory_snapshots(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        version TEXT NOT NULL,
+        package_base TEXT,
+        origin TEXT NOT NULL,
+        install_reason TEXT NOT NULL CHECK (install_reason IN ('explicit', 'dependency')),
+        installed_bytes INTEGER NOT NULL CHECK (installed_bytes >= 0),
+        PRIMARY KEY (snapshot_id, name)
     ) STRICT;
 ";
 
@@ -20,7 +37,8 @@ pub(crate) struct MigrationVersion(u32);
 
 impl MigrationVersion {
     const EMPTY: Self = Self(0);
-    const CURRENT: Self = Self(1);
+    const VERSION_1: Self = Self(1);
+    const CURRENT: Self = Self(2);
 
     const fn from_database(value: u32) -> Self {
         Self(value)
@@ -100,16 +118,56 @@ impl Database {
         Ok(Self { connection })
     }
 
-    pub(crate) fn has_published_snapshot(&self) -> Result<bool, StorageError> {
+    pub(crate) fn published_package_count(&self) -> Result<Option<u64>, StorageError> {
         self.connection
             .query_row(
-                "SELECT 1 FROM inventory_snapshots ORDER BY id DESC LIMIT 1",
+                "SELECT (SELECT count(*) FROM installed_packages WHERE snapshot_id = inventory_snapshots.id)
+                 FROM inventory_snapshots ORDER BY id DESC LIMIT 1",
                 [],
-                |_| Ok(()),
+                |row| row.get(0),
             )
             .optional()
-            .map(|row| row.is_some())
             .map_err(StorageError::Sqlite)
+    }
+
+    pub(crate) fn publish_snapshot(
+        &mut self,
+        packages: &[InstalledPackage],
+    ) -> Result<(), StorageError> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(StorageError::Sqlite)?;
+        transaction
+            .execute(
+                "INSERT INTO inventory_snapshots (published_at) VALUES (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+                [],
+            )
+            .map_err(StorageError::Sqlite)?;
+        let snapshot_id = transaction.last_insert_rowid();
+        {
+            let mut statement = transaction
+                .prepare(
+                    "INSERT INTO installed_packages (
+                        snapshot_id, name, version, package_base, origin, install_reason, installed_bytes
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                )
+                .map_err(StorageError::Sqlite)?;
+            for package in packages {
+                statement
+                    .execute((
+                        snapshot_id,
+                        package.name(),
+                        package.version(),
+                        package.package_base(),
+                        package.origin(),
+                        package.install_reason(),
+                        package.installed_bytes(),
+                    ))
+                    .map_err(StorageError::Sqlite)?;
+            }
+        }
+        transaction.commit().map_err(StorageError::Sqlite)
     }
 }
 
@@ -133,13 +191,34 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
             .pragma_update(
                 None,
                 "user_version",
+                MigrationVersion::VERSION_1.as_database_value(),
+            )
+            .map_err(StorageError::Sqlite)?;
+    }
+
+    if version <= MigrationVersion::VERSION_1 {
+        transaction
+            .execute_batch(MIGRATION_2)
+            .map_err(StorageError::Sqlite)?;
+        transaction
+            .pragma_update(
+                None,
+                "user_version",
                 MigrationVersion::CURRENT.as_database_value(),
             )
             .map_err(StorageError::Sqlite)?;
     }
 
     transaction
-        .prepare("SELECT id, published_at FROM inventory_snapshots LIMIT 0")
+        .prepare(
+            "SELECT inventory_snapshots.id, inventory_snapshots.published_at,
+                    installed_packages.name, installed_packages.version,
+                    installed_packages.package_base, installed_packages.origin,
+                    installed_packages.install_reason, installed_packages.installed_bytes
+             FROM inventory_snapshots
+             LEFT JOIN installed_packages ON installed_packages.snapshot_id = inventory_snapshots.id
+             LIMIT 0",
+        )
         .map_err(StorageError::InvalidSchema)?;
 
     transaction.commit().map_err(StorageError::Sqlite)

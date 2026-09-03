@@ -13,7 +13,7 @@ An Arch-derived installation whose local package state is managed by ALPM, inclu
 _Avoid_: Arch/AUR system
 
 **Package origin**:
-The repository or foreign-package status from which an installed package entered the ALPM system.
+Package origin is the repository or foreign-package status from which an installed package entered the ALPM system. It is unknown when installed metadata does not expose that fact, and a match in current repository metadata is not a package origin.
 _Avoid_: Upstream, source repository
 
 **Source provider**:
@@ -81,7 +81,7 @@ The selected installed-package inventory captured at the start of a refresh. Rep
 _Avoid_: Analysis cache, live inventory
 
 **Metadata-only refresh**:
-A refresh that stops after source resolution so the user can inspect coverage without acquiring or analyzing source trees.
+An explicit operation that publishes installed-package inventory metadata without resolving, acquiring, or analyzing primary sources.
 _Avoid_: Dry run, offline refresh
 
 **Report model**:
