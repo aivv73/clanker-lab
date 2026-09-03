@@ -58,6 +58,23 @@ fn refresh(arguments: &[&str], data_home: &Path, fixture_bin: &Path) -> Output {
         .unwrap()
 }
 
+fn assign_fixture_origins(data_home: &Path) {
+    let connection = Connection::open(data_home.join("paclang/paclang.db")).unwrap();
+    for (name, origin) in [
+        ("alpha", "core"),
+        ("foreign-tool", "foreign"),
+        ("suite-cli", "extra"),
+        ("suite-docs", "extra"),
+    ] {
+        connection
+            .execute(
+                "UPDATE installed_packages SET origin = ?1 WHERE name = ?2",
+                [origin, name],
+            )
+            .unwrap();
+    }
+}
+
 fn read_pty(reader: &mut File) -> String {
     let mut bytes = Vec::new();
     let mut buffer = [0_u8; 1024];
@@ -169,13 +186,13 @@ fn invalid_cli_use_is_structured_and_exits_two() {
         match expected_format {
             "json" => {
                 let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
-                assert_eq!(value["schema_version"], "1.0.0");
+                assert_eq!(value["schema_version"], "1.1.0");
                 assert_eq!(value["error"]["code"], "invalid_cli");
             }
             "markdown" => assert!(stdout.contains("- Code: `invalid_cli`")),
             "toon" => {
                 let value: serde_json::Value = toon_format::decode_default(&stdout).unwrap();
-                assert_eq!(value["schema_version"], "1.0.0");
+                assert_eq!(value["schema_version"], "1.1.0");
                 assert_eq!(value["error"]["code"], "invalid_cli");
             }
             _ => unreachable!(),
@@ -290,6 +307,186 @@ fn count_reads_the_snapshot_without_running_inventory_commands() {
 
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(value["installed_total"], 4);
+}
+
+#[test]
+fn count_filters_individual_install_reasons() {
+    let data_home = tempfile::tempdir().unwrap();
+    let fixture_bin = fixture_bin();
+    assert!(
+        refresh(&["--format", "json"], data_home.path(), fixture_bin.path())
+            .status
+            .success()
+    );
+
+    for (filter, expected_reason) in [("--explicit", "explicit"), ("--dependency", "dependency")] {
+        let output = run(&["count", filter, "--format", "json"], data_home.path());
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+
+        assert!(output.status.success(), "filter: {filter}");
+        assert_eq!(report["selection"]["install_reason"], expected_reason);
+        assert_eq!(report["selected_population"], 2);
+        assert_eq!(report["coverage"]["denominator"], 2);
+        assert_eq!(report["coverage"]["missing_source_language_analysis"], 2);
+    }
+}
+
+#[test]
+fn repeated_origins_select_their_union() {
+    let data_home = tempfile::tempdir().unwrap();
+    let fixture_bin = fixture_bin();
+    assert!(
+        refresh(&["--format", "json"], data_home.path(), fixture_bin.path())
+            .status
+            .success()
+    );
+    assign_fixture_origins(data_home.path());
+
+    let output = run(
+        &[
+            "count", "--origin", "extra", "--origin", "core", "--format", "json",
+        ],
+        data_home.path(),
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+
+    assert!(output.status.success());
+    assert_eq!(
+        report["selection"]["origins"],
+        serde_json::json!(["core", "extra"])
+    );
+    assert_eq!(report["selected_population"], 3);
+}
+
+#[test]
+fn human_formats_quote_origins_that_resemble_filter_syntax() {
+    let data_home = tempfile::tempdir().unwrap();
+    let fixture_bin = fixture_bin();
+    assert!(
+        refresh(&["--format", "json"], data_home.path(), fixture_bin.path())
+            .status
+            .success()
+    );
+    let connection = Connection::open(data_home.path().join("paclang/paclang.db")).unwrap();
+    connection
+        .execute(
+            "UPDATE installed_packages SET origin = 'all' WHERE name = 'alpha'",
+            [],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "UPDATE installed_packages SET origin = 'core, extra' WHERE name = 'foreign-tool'",
+            [],
+        )
+        .unwrap();
+
+    for format in ["terminal", "markdown"] {
+        let output = run(
+            &[
+                "count",
+                "--origin",
+                "core, extra",
+                "--origin",
+                "all",
+                "--format",
+                format,
+            ],
+            data_home.path(),
+        );
+        let stdout = String::from_utf8(output.stdout).unwrap();
+
+        assert!(output.status.success(), "format: {format}");
+        assert!(stdout.contains("origins = [\"all\", \"core, extra\"]"));
+        assert!(stdout.contains("Selected population: 2"));
+    }
+}
+
+#[test]
+fn unmatched_origin_is_an_explicit_successful_zero_report() {
+    let data_home = tempfile::tempdir().unwrap();
+    let fixture_bin = fixture_bin();
+    assert!(
+        refresh(&["--format", "json"], data_home.path(), fixture_bin.path())
+            .status
+            .success()
+    );
+
+    let output = run(
+        &["count", "--origin", "does-not-exist", "--format", "json"],
+        data_home.path(),
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+
+    assert!(output.status.success());
+    assert_eq!(report["installed_total"], 4);
+    assert_eq!(report["selected_population"], 0);
+    assert_eq!(report["coverage"]["denominator"], 0);
+    assert_eq!(report["coverage"]["missing_source_language_analysis"], 0);
+}
+
+#[test]
+fn install_reason_filters_are_mutually_exclusive() {
+    let data_home = tempfile::tempdir().unwrap();
+    let output = run(
+        &["count", "--explicit", "--dependency", "--format", "json"],
+        data_home.path(),
+    );
+    let error: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(error["error"]["code"], "invalid_cli");
+}
+
+#[test]
+fn filtered_report_facts_match_in_every_format() {
+    let data_home = tempfile::tempdir().unwrap();
+    let fixture_bin = fixture_bin();
+    assert!(
+        refresh(&["--format", "json"], data_home.path(), fixture_bin.path())
+            .status
+            .success()
+    );
+    assign_fixture_origins(data_home.path());
+
+    for format in ["terminal", "toon", "json", "markdown"] {
+        let output = run(
+            &[
+                "count",
+                "--explicit",
+                "--origin",
+                "core",
+                "--format",
+                format,
+            ],
+            data_home.path(),
+        );
+        let stdout = String::from_utf8(output.stdout).unwrap();
+
+        assert!(output.status.success(), "format: {format}");
+        match format {
+            "json" => {
+                let report: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+                assert_eq!(report["selection"]["install_reason"], "explicit");
+                assert_eq!(report["selection"]["origins"], serde_json::json!(["core"]));
+                assert_eq!(report["selected_population"], 1);
+                assert_eq!(report["coverage"]["denominator"], 1);
+            }
+            "toon" => {
+                let report: serde_json::Value = toon_format::decode_default(&stdout).unwrap();
+                assert_eq!(report["selection"]["install_reason"], "explicit");
+                assert_eq!(report["selection"]["origins"], serde_json::json!(["core"]));
+                assert_eq!(report["selected_population"], 1);
+                assert_eq!(report["coverage"]["denominator"], 1);
+            }
+            "terminal" | "markdown" => {
+                assert!(stdout.contains("install reason = explicit; origins = [\"core\"]"));
+                assert!(stdout.contains("Selected population: 1"));
+                assert!(stdout.contains("Coverage denominator: 1"));
+            }
+            _ => unreachable!(),
+        }
+    }
 }
 
 #[test]

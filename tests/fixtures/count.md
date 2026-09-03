@@ -1,7 +1,9 @@
 # Paclang count
 
-- Schema version: `1.0.0`
+- Schema version: `1.1.0`
+- Selection: install reason = all; origins = any
 - Installed packages: 4
 - Selected population: 4
+- Coverage denominator: 4
 - Analyzed: 0
 - Missing source-language analysis: 4

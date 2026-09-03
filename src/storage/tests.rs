@@ -9,7 +9,7 @@ fn empty_database_has_no_snapshot() {
     let directory = tempfile::tempdir().unwrap();
     let database = Database::open(&directory.path().join("paclang.db")).unwrap();
 
-    assert_eq!(database.published_package_count().unwrap(), None);
+    assert_eq!(database.published_packages().unwrap(), None);
 }
 
 #[test]
@@ -31,7 +31,7 @@ fn current_database_reopens() {
     drop(Database::open(&path).unwrap());
 
     let database = Database::open(&path).unwrap();
-    assert_eq!(database.published_package_count().unwrap(), None);
+    assert_eq!(database.published_packages().unwrap(), None);
 }
 
 #[test]
@@ -119,7 +119,7 @@ fn concurrent_first_open_runs_one_complete_migration() {
     barrier.wait();
     for handle in handles {
         let database = handle.join().unwrap().unwrap();
-        assert_eq!(database.published_package_count().unwrap(), None);
+        assert_eq!(database.published_packages().unwrap(), None);
     }
 
     let connection = Connection::open(path.as_ref()).unwrap();
@@ -147,7 +147,7 @@ fn version_one_database_migrates_to_current() {
     drop(connection);
 
     let database = Database::open(&path).unwrap();
-    assert_eq!(database.published_package_count().unwrap(), None);
+    assert_eq!(database.published_packages().unwrap(), None);
 
     let connection = Connection::open(&path).unwrap();
     let version: u32 = connection

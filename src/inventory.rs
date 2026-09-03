@@ -5,6 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::process::{Command, Output};
 
+use crate::package::{InstallReason, PackageOrigin};
+
 // expac fields: name, version, package base, queried database, install reason,
 // installed bytes. Keep this order aligned with LocalExpacRecord::parse.
 const LOCAL_EXPAC_LAYOUT: &str = r"%n\t%v\t%e\t%r\t%w\t%m";
@@ -166,42 +168,6 @@ impl PackageBase {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-enum PackageOrigin {
-    Unknown,
-}
-
-impl PackageOrigin {
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::Unknown => "unknown",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-enum InstallReason {
-    Explicit,
-    Dependency,
-}
-
-impl InstallReason {
-    fn parse(value: &str) -> Result<Self, &'static str> {
-        match value {
-            "explicit" => Ok(Self::Explicit),
-            "dependency" => Ok(Self::Dependency),
-            _ => Err("install reason is neither explicit nor dependency"),
-        }
-    }
-
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::Explicit => "explicit",
-            Self::Dependency => "dependency",
-        }
-    }
-}
-
 #[derive(Debug)]
 struct InstalledBytes(i64);
 
@@ -256,7 +222,7 @@ impl<'a> LocalExpacRecord<'a> {
             name: PackageName::parse(self.name)?,
             version: PackageVersion::parse(self.version)?,
             package_base: PackageBase::parse_optional(self.package_base)?,
-            origin: PackageOrigin::Unknown,
+            origin: PackageOrigin::unknown(),
             install_reason: InstallReason::parse(self.install_reason)?,
             installed_bytes: InstalledBytes::parse(self.installed_bytes)?,
         })

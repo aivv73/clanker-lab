@@ -1,23 +1,26 @@
 #[cfg(test)]
 mod tests;
 
+use std::collections::BTreeSet;
 use std::fmt;
 
 use clap::ValueEnum;
 use serde::Serialize;
 
+use crate::package::{InstallReason, PackageOrigin, SnapshotPackage};
+
 #[derive(Clone, Copy, Debug, Serialize)]
 enum ReportSchemaVersion {
-    #[serde(rename = "1.0.0")]
-    V1_0_0,
+    #[serde(rename = "1.1.0")]
+    V1_1_0,
 }
 
 impl ReportSchemaVersion {
-    const CURRENT: Self = Self::V1_0_0;
+    const CURRENT: Self = Self::V1_1_0;
 
     const fn as_str(self) -> &'static str {
         match self {
-            Self::V1_0_0 => "1.0.0",
+            Self::V1_1_0 => "1.1.0",
         }
     }
 }
@@ -164,34 +167,111 @@ enum ReportKind {
     Count,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum InstallReasonSelection {
+    All,
+    Explicit,
+    Dependency,
+}
+
+impl InstallReasonSelection {
+    const fn includes(self, reason: InstallReason) -> bool {
+        matches!(
+            (self, reason),
+            (Self::All, _)
+                | (Self::Explicit, InstallReason::Explicit)
+                | (Self::Dependency, InstallReason::Dependency)
+        )
+    }
+
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Explicit => "explicit",
+            Self::Dependency => "dependency",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub(crate) struct PopulationSelection {
+    install_reason: InstallReasonSelection,
+    origins: BTreeSet<PackageOrigin>,
+}
+
+impl PopulationSelection {
+    pub(crate) fn new(
+        install_reason: InstallReasonSelection,
+        origins: impl IntoIterator<Item = PackageOrigin>,
+    ) -> Self {
+        Self {
+            install_reason,
+            origins: origins.into_iter().collect(),
+        }
+    }
+
+    fn includes(&self, package: &SnapshotPackage) -> bool {
+        self.install_reason.includes(package.install_reason)
+            && (self.origins.is_empty() || self.origins.contains(&package.origin))
+    }
+
+    fn render(&self) -> String {
+        let origins = if self.origins.is_empty() {
+            "any".to_owned()
+        } else {
+            let origins = self
+                .origins
+                .iter()
+                .map(PackageOrigin::as_str)
+                .collect::<Vec<_>>();
+            format!("{origins:?}")
+        };
+        format!(
+            "install reason = {}; origins = {origins}",
+            self.install_reason.as_str()
+        )
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct CountReport {
     schema_version: ReportSchemaVersion,
     report: ReportKind,
+    selection: PopulationSelection,
     installed_total: u64,
     selected_population: u64,
     coverage: Coverage,
 }
 
 impl CountReport {
-    pub const fn new(installed_total: u64) -> Self {
+    pub fn from_snapshot(packages: &[SnapshotPackage], selection: PopulationSelection) -> Self {
+        let installed_total = packages.len() as u64;
+        let selected_population = packages
+            .iter()
+            .filter(|package| selection.includes(package))
+            .count() as u64;
         Self {
             schema_version: ReportSchemaVersion::CURRENT,
             report: ReportKind::Count,
+            selection,
             installed_total,
-            selected_population: installed_total,
+            selected_population,
             coverage: Coverage {
+                denominator: selected_population,
                 analyzed: 0,
-                missing_source_language_analysis: installed_total,
+                missing_source_language_analysis: selected_population,
             },
         }
     }
 
     fn render_terminal(&self) -> String {
         format!(
-            "Installed packages: {}\nSelected population: {}\nAnalyzed: {}\nMissing source-language analysis: {}",
+            "Selection: {}\nInstalled packages: {}\nSelected population: {}\nCoverage denominator: {}\nAnalyzed: {}\nMissing source-language analysis: {}",
+            self.selection.render(),
             self.installed_total,
             self.selected_population,
+            self.coverage.denominator,
             self.coverage.analyzed,
             self.coverage.missing_source_language_analysis
         )
@@ -199,10 +279,12 @@ impl CountReport {
 
     fn render_markdown(&self) -> String {
         format!(
-            "# Paclang count\n\n- Schema version: `{}`\n- Installed packages: {}\n- Selected population: {}\n- Analyzed: {}\n- Missing source-language analysis: {}",
+            "# Paclang count\n\n- Schema version: `{}`\n- Selection: {}\n- Installed packages: {}\n- Selected population: {}\n- Coverage denominator: {}\n- Analyzed: {}\n- Missing source-language analysis: {}",
             self.schema_version.as_str(),
+            self.selection.render(),
             self.installed_total,
             self.selected_population,
+            self.coverage.denominator,
             self.coverage.analyzed,
             self.coverage.missing_source_language_analysis
         )
@@ -211,6 +293,7 @@ impl CountReport {
 
 #[derive(Debug, Serialize)]
 struct Coverage {
+    denominator: u64,
     analyzed: u64,
     missing_source_language_analysis: u64,
 }
@@ -220,6 +303,7 @@ struct ToonCountReport<'a> {
     schema_version: ReportSchemaVersion,
     toon_specification_version: ToonSpecificationVersion,
     report: ReportKind,
+    selection: &'a PopulationSelection,
     installed_total: u64,
     selected_population: u64,
     coverage: &'a Coverage,
@@ -231,6 +315,7 @@ impl<'a> From<&'a CountReport> for ToonCountReport<'a> {
             schema_version: report.schema_version,
             toon_specification_version: ToonSpecificationVersion::CURRENT,
             report: report.report,
+            selection: &report.selection,
             installed_total: report.installed_total,
             selected_population: report.selected_population,
             coverage: &report.coverage,
