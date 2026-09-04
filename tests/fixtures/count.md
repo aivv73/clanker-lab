@@ -1,6 +1,7 @@
 # Paclang count
 
-- Schema version: `1.1.0`
+- Schema version: `1.2.0`
+- Snapshot: current
 - Selection: install reason = all; origins = any
 - Installed packages: 4
 - Selected population: 4

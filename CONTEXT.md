@@ -80,6 +80,10 @@ _Avoid_: Report, scan
 The selected installed-package inventory captured at the start of a refresh. Reports use one published snapshot and never combine results from different inventories.
 _Avoid_: Analysis cache, live inventory
 
+**Snapshot staleness**:
+How the published snapshot used by a report relates to the live inventory: `current` matches `pacman -Q`, `stale` is coherent but no longer matches, and `unknown` means no fingerprint was recorded (pre-migration snapshots, until the next refresh). This describes the snapshot as a whole, unlike stale analysis of one cached profile.
+_Avoid_: Stale analysis
+
 **Metadata-only refresh**:
 An explicit operation that publishes installed-package inventory metadata without resolving, acquiring, or analyzing primary sources.
 _Avoid_: Dry run, offline refresh

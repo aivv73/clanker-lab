@@ -11,16 +11,16 @@ use crate::package::{InstallReason, PackageOrigin, SnapshotPackage};
 
 #[derive(Clone, Copy, Debug, Serialize)]
 enum ReportSchemaVersion {
-    #[serde(rename = "1.1.0")]
-    V1_1_0,
+    #[serde(rename = "1.2.0")]
+    V1_2_0,
 }
 
 impl ReportSchemaVersion {
-    const CURRENT: Self = Self::V1_1_0;
+    const CURRENT: Self = Self::V1_2_0;
 
     const fn as_str(self) -> &'static str {
         match self {
-            Self::V1_1_0 => "1.1.0",
+            Self::V1_2_0 => "1.2.0",
         }
     }
 }
@@ -88,6 +88,7 @@ impl Format {
 #[derive(Debug)]
 pub enum AppError {
     NoSnapshot,
+    Interrupted,
     Inventory(String),
     Storage(String),
     Render(String),
@@ -114,6 +115,7 @@ impl AppError {
     fn code(&self) -> ErrorCode {
         match self {
             Self::NoSnapshot => ErrorCode::NoSnapshot,
+            Self::Interrupted => ErrorCode::Interrupted,
             Self::Inventory(_) => ErrorCode::Inventory,
             Self::Storage(_) => ErrorCode::Storage,
             Self::Render(_) => ErrorCode::Render,
@@ -124,6 +126,7 @@ impl AppError {
     fn message(&self) -> &str {
         match self {
             Self::NoSnapshot => "No inventory snapshot is available.",
+            Self::Interrupted => "Inventory refresh was interrupted.",
             Self::Inventory(message)
             | Self::Storage(message)
             | Self::Render(message)
@@ -134,7 +137,11 @@ impl AppError {
     fn next_command(&self) -> Option<&'static str> {
         match self {
             Self::NoSnapshot => Some("paclang refresh --metadata-only"),
-            Self::Inventory(_) | Self::Storage(_) | Self::Render(_) | Self::InvalidCli(_) => None,
+            Self::Interrupted
+            | Self::Inventory(_)
+            | Self::Storage(_)
+            | Self::Render(_)
+            | Self::InvalidCli(_) => None,
         }
     }
 }
@@ -143,6 +150,7 @@ impl AppError {
 #[serde(rename_all = "snake_case")]
 enum ErrorCode {
     NoSnapshot,
+    Interrupted,
     Inventory,
     Storage,
     Render,
@@ -153,10 +161,37 @@ impl ErrorCode {
     const fn as_str(self) -> &'static str {
         match self {
             Self::NoSnapshot => "no_snapshot",
+            Self::Interrupted => "interrupted",
             Self::Inventory => "inventory",
             Self::Storage => "storage",
             Self::Render => "render",
             Self::InvalidCli => "invalid_cli",
+        }
+    }
+}
+
+/// How the published snapshot used by a report relates to the live inventory.
+///
+/// Distinct from stale analysis (a cached source-language profile that no
+/// longer matches its package); this describes the snapshot as a whole.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum SnapshotStaleness {
+    /// The snapshot fingerprint matches the live `pacman -Q` fingerprint.
+    Current,
+    /// The snapshot is coherent but no longer matches live inventory.
+    Stale,
+    /// No fingerprint was recorded (snapshots published before migration 3);
+    /// re-evaluate after the next refresh.
+    Unknown,
+}
+
+impl SnapshotStaleness {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Current => "current",
+            Self::Stale => "stale",
+            Self::Unknown => "unknown",
         }
     }
 }
@@ -238,6 +273,7 @@ impl PopulationSelection {
 pub struct CountReport {
     schema_version: ReportSchemaVersion,
     report: ReportKind,
+    snapshot_staleness: SnapshotStaleness,
     selection: PopulationSelection,
     installed_total: u64,
     selected_population: u64,
@@ -245,7 +281,11 @@ pub struct CountReport {
 }
 
 impl CountReport {
-    pub fn from_snapshot(packages: &[SnapshotPackage], selection: PopulationSelection) -> Self {
+    pub fn from_snapshot(
+        packages: &[SnapshotPackage],
+        snapshot_staleness: SnapshotStaleness,
+        selection: PopulationSelection,
+    ) -> Self {
         let installed_total = packages.len() as u64;
         let selected_population = packages
             .iter()
@@ -254,6 +294,7 @@ impl CountReport {
         Self {
             schema_version: ReportSchemaVersion::CURRENT,
             report: ReportKind::Count,
+            snapshot_staleness,
             selection,
             installed_total,
             selected_population,
@@ -267,7 +308,8 @@ impl CountReport {
 
     fn render_terminal(&self) -> String {
         format!(
-            "Selection: {}\nInstalled packages: {}\nSelected population: {}\nCoverage denominator: {}\nAnalyzed: {}\nMissing source-language analysis: {}",
+            "Snapshot: {}\nSelection: {}\nInstalled packages: {}\nSelected population: {}\nCoverage denominator: {}\nAnalyzed: {}\nMissing source-language analysis: {}",
+            self.snapshot_staleness.as_str(),
             self.selection.render(),
             self.installed_total,
             self.selected_population,
@@ -279,8 +321,9 @@ impl CountReport {
 
     fn render_markdown(&self) -> String {
         format!(
-            "# Paclang count\n\n- Schema version: `{}`\n- Selection: {}\n- Installed packages: {}\n- Selected population: {}\n- Coverage denominator: {}\n- Analyzed: {}\n- Missing source-language analysis: {}",
+            "# Paclang count\n\n- Schema version: `{}`\n- Snapshot: {}\n- Selection: {}\n- Installed packages: {}\n- Selected population: {}\n- Coverage denominator: {}\n- Analyzed: {}\n- Missing source-language analysis: {}",
             self.schema_version.as_str(),
+            self.snapshot_staleness.as_str(),
             self.selection.render(),
             self.installed_total,
             self.selected_population,
@@ -303,6 +346,7 @@ struct ToonCountReport<'a> {
     schema_version: ReportSchemaVersion,
     toon_specification_version: ToonSpecificationVersion,
     report: ReportKind,
+    snapshot_staleness: SnapshotStaleness,
     selection: &'a PopulationSelection,
     installed_total: u64,
     selected_population: u64,
@@ -315,6 +359,7 @@ impl<'a> From<&'a CountReport> for ToonCountReport<'a> {
             schema_version: report.schema_version,
             toon_specification_version: ToonSpecificationVersion::CURRENT,
             report: report.report,
+            snapshot_staleness: report.snapshot_staleness,
             selection: &report.selection,
             installed_total: report.installed_total,
             selected_population: report.selected_population,

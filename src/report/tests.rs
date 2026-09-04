@@ -1,6 +1,8 @@
 use proptest::prelude::*;
 
-use super::{AppError, CountReport, Format, InstallReasonSelection, PopulationSelection};
+use super::{
+    AppError, CountReport, Format, InstallReasonSelection, PopulationSelection, SnapshotStaleness,
+};
 use crate::package::{InstallReason, PackageOrigin, SnapshotPackage};
 
 fn package(origin: &str, install_reason: InstallReason) -> SnapshotPackage {
@@ -25,7 +27,7 @@ fn json_error_has_stable_schema() {
     let rendered = Format::Json.render_error(&AppError::NoSnapshot).unwrap();
     let value: serde_json::Value = serde_json::from_str(&rendered).unwrap();
 
-    assert_eq!(value["schema_version"], "1.1.0");
+    assert_eq!(value["schema_version"], "1.2.0");
     assert_eq!(value["error"]["code"], "no_snapshot");
     assert_eq!(
         value["error"]["next_command"],
@@ -49,12 +51,14 @@ fn json_count_has_honest_missing_analysis_coverage() {
         .collect::<Vec<_>>();
     let report = CountReport::from_snapshot(
         &packages,
+        SnapshotStaleness::Current,
         PopulationSelection::new(InstallReasonSelection::All, []),
     );
     let rendered = Format::Json.render_count(&report).unwrap();
     let value: serde_json::Value = serde_json::from_str(&rendered).unwrap();
 
     assert_eq!(value["report"], "count");
+    assert_eq!(value["snapshot_staleness"], "current");
     assert_eq!(value["installed_total"], 7);
     assert_eq!(value["selected_population"], 7);
     assert_eq!(value["selection"]["install_reason"], "all");
@@ -70,8 +74,12 @@ fn selection_count(
     install_reason: InstallReasonSelection,
     origins: impl IntoIterator<Item = PackageOrigin>,
 ) -> u64 {
-    CountReport::from_snapshot(packages, PopulationSelection::new(install_reason, origins))
-        .selected_population
+    CountReport::from_snapshot(
+        packages,
+        SnapshotStaleness::Current,
+        PopulationSelection::new(install_reason, origins),
+    )
+    .selected_population
 }
 
 proptest! {
