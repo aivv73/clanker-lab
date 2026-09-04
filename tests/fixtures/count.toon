@@ -11,3 +11,6 @@ coverage:
   denominator: 4
   analyzed: 0
   missing_source_language_analysis: 4
+  rows[2]{state,count}:
+    missing_source_language_analysis,4
+    analyzed,0

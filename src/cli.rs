@@ -22,6 +22,11 @@ pub struct Cli {
     #[arg(long, global = true, value_name = "NAME")]
     origin: Vec<PackageOrigin>,
 
+    /// Exit 1 when analyzed coverage is below this percent. The report facts
+    /// are unchanged; only the exit status signals the unmet threshold.
+    #[arg(long, global = true, value_name = "PERCENT", value_parser = parse_min_coverage)]
+    pub min_coverage: Option<f64>,
+
     #[command(subcommand)]
     pub command: Option<Command>,
 }
@@ -49,4 +54,14 @@ pub enum Command {
         #[arg(long, required = true)]
         metadata_only: bool,
     },
+}
+
+fn parse_min_coverage(value: &str) -> Result<f64, String> {
+    let percent = value
+        .parse::<f64>()
+        .map_err(|_| format!("{value:?} is not a number between 0 and 100"))?;
+    if !percent.is_finite() || !(0.0..=100.0).contains(&percent) {
+        return Err(format!("{value:?} is not a number between 0 and 100"));
+    }
+    Ok(percent)
 }

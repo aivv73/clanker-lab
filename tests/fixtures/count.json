@@ -11,6 +11,16 @@
   "coverage": {
     "denominator": 4,
     "analyzed": 0,
-    "missing_source_language_analysis": 4
+    "missing_source_language_analysis": 4,
+    "rows": [
+      {
+        "state": "missing_source_language_analysis",
+        "count": 4
+      },
+      {
+        "state": "analyzed",
+        "count": 0
+      }
+    ]
   }
 }

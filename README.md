@@ -9,3 +9,13 @@ Run `paclang refresh --metadata-only` to read installed package metadata from `p
 Run `paclang count` to report the installed total, the selected population, and missing source-language analysis from the latest published snapshot. The report compares the snapshot with `pacman -Q` and marks it `current` or `stale`. Snapshots created by an older database version report `unknown` until the next refresh. Before the first refresh, the report returns `no_snapshot` and suggests the refresh command.
 
 Use `--explicit` or `--dependency` to select one install reason. Repeat `--origin <name>` to select the union of named package origins. You can combine an install-reason filter with origin filters. An origin that is not in the snapshot selects zero packages. The current metadata refresh records every package origin as `unknown`, so `--origin unknown` is the only origin that can select packages from a snapshot created by this version.
+
+## Report formats and stability
+
+One typed report model feeds all four formats: `terminal`, `toon`, `json`, and `markdown`. Format selection never changes the reported facts. A TTY selects `terminal`, redirected stdout selects `toon`, and an explicit `--format` always wins.
+
+JSON is the durable interchange contract for automation: working-draft TOON changes never break it. Every structured success and error carries `schema_version` (currently `1.2.0`); reject output whose schema version you do not understand. TOON output additionally declares `toon_specification_version` (currently `3.0`, the working-draft TOON specification the serializer targets).
+
+Structured output carries integer numerators and denominators, so agents and scripts can compute exact shares. Human output shows percentages rounded deterministically to one decimal place; the coverage rows total 100.0% for any non-empty selection (an empty selection reports 0.0% rows). Coverage rows sort by count descending and state name ascending, and their counts always sum to the coverage denominator.
+
+Pass `--min-coverage <percent>` (0 to 100) to make a report fail when analyzed coverage is below the threshold. The report facts are unchanged; only the exit status becomes 1. An empty selection is vacuously complete and always satisfies the threshold.

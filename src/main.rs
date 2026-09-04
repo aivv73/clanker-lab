@@ -23,6 +23,9 @@ enum FailureExit {
 
 struct RunOutput {
     rendered: String,
+    /// False when `--min-coverage` was not met. The rendered report facts are
+    /// unchanged; only the exit status signals the unmet threshold.
+    meets_coverage: bool,
     /// Holds the snapshot's shared sidecar lock until the response is written,
     /// so retention cannot prune the snapshot being reported. `None` on the
     /// refresh path, which publishes rather than reads. Never read by design;
@@ -78,8 +81,21 @@ fn main() -> ExitCode {
         );
     }
 
-    match run(cli.command.unwrap_or(Command::Count), format, selection) {
-        Ok(output) => write_rendered(&output.rendered),
+    match run(
+        cli.command.unwrap_or(Command::Count),
+        format,
+        selection,
+        cli.min_coverage,
+    ) {
+        Ok(output) => {
+            if write_rendered(&output.rendered) != ExitCode::SUCCESS {
+                ExitCode::from(1)
+            } else if output.meets_coverage {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(1)
+            }
+        }
         Err(error) => {
             let failure = if matches!(error, AppError::Interrupted) {
                 FailureExit::Interrupted
@@ -95,9 +111,10 @@ fn run(
     command: Command,
     format: Format,
     selection: report::PopulationSelection,
+    min_coverage: Option<f64>,
 ) -> Result<RunOutput, AppError> {
     match command {
-        Command::Count => render_count(format, selection),
+        Command::Count => render_count(format, selection, min_coverage),
         Command::Refresh { metadata_only: _ } => {
             let database_path = storage::database_path().map_err(AppError::storage)?;
             let mut database =
@@ -105,22 +122,22 @@ fn run(
             let refresh = database.begin_refresh().map_err(map_storage_error)?;
             let inventory =
                 inventory::capture_installed_inventory().map_err(map_inventory_error)?;
-            let rendered = format
-                .render_count(&CountReport::from_snapshot(
-                    &inventory.snapshot_packages(),
-                    if inventory.is_stale() {
-                        SnapshotStaleness::Stale
-                    } else {
-                        SnapshotStaleness::Current
-                    },
-                    selection,
-                ))
-                .map_err(AppError::render)?;
+            let report = CountReport::from_snapshot(
+                &inventory.snapshot_packages(),
+                if inventory.is_stale() {
+                    SnapshotStaleness::Stale
+                } else {
+                    SnapshotStaleness::Current
+                },
+                selection,
+            );
+            let rendered = format.render_count(&report).map_err(AppError::render)?;
             refresh
                 .publish(inventory.packages(), inventory.fingerprint())
                 .map_err(map_storage_error)?;
             Ok(RunOutput {
                 rendered,
+                meets_coverage: report.meets_coverage(min_coverage),
                 snapshot_read_guard: None,
             })
         }
@@ -130,16 +147,18 @@ fn run(
 fn render_count(
     format: Format,
     selection: report::PopulationSelection,
+    min_coverage: Option<f64>,
 ) -> Result<RunOutput, AppError> {
     let database_path = storage::database_path().map_err(AppError::storage)?;
     let database = storage::Database::open(&database_path).map_err(AppError::storage)?;
-    render_count_from_database(format, &database, selection)
+    render_count_from_database(format, &database, selection, min_coverage)
 }
 
 fn render_count_from_database(
     format: Format,
     database: &storage::Database,
     selection: report::PopulationSelection,
+    min_coverage: Option<f64>,
 ) -> Result<RunOutput, AppError> {
     let snapshot = database
         .published_snapshot()
@@ -151,15 +170,12 @@ fn render_count_from_database(
         Some(_) => SnapshotStaleness::Stale,
         None => SnapshotStaleness::Unknown,
     };
-    let rendered = format
-        .render_count(&CountReport::from_snapshot(
-            &snapshot.packages,
-            staleness,
-            selection,
-        ))
-        .map_err(AppError::render)?;
+    let report = CountReport::from_snapshot(&snapshot.packages, staleness, selection);
+    let rendered = format.render_count(&report).map_err(AppError::render)?;
+    let meets_coverage = report.meets_coverage(min_coverage);
     Ok(RunOutput {
         rendered,
+        meets_coverage,
         snapshot_read_guard: Some(snapshot),
     })
 }
