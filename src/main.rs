@@ -1,4 +1,5 @@
 mod cli;
+mod interrupt;
 mod inventory;
 mod package;
 mod report;
@@ -11,12 +12,23 @@ use std::process::ExitCode;
 use clap::{Parser, error::ErrorKind};
 
 use crate::cli::{Cli, Command};
-use crate::report::{AppError, CountReport, Format};
+use crate::report::{AppError, CountReport, Format, SnapshotStaleness};
 
 #[derive(Clone, Copy)]
 enum FailureExit {
     Runtime,
     InvalidCli,
+    Interrupted,
+}
+
+struct RunOutput {
+    rendered: String,
+    /// Holds the snapshot's shared sidecar lock until the response is written,
+    /// so retention cannot prune the snapshot being reported. `None` on the
+    /// refresh path, which publishes rather than reads. Never read by design;
+    /// the field exists to extend the guard's lifetime to the write.
+    #[allow(dead_code)]
+    snapshot_read_guard: Option<storage::PublishedSnapshot>,
 }
 
 impl FailureExit {
@@ -24,6 +36,7 @@ impl FailureExit {
         match self {
             Self::Runtime => 1,
             Self::InvalidCli => 2,
+            Self::Interrupted => 130,
         }
     }
 }
@@ -57,10 +70,24 @@ fn main() -> ExitCode {
         .format
         .unwrap_or_else(|| Format::for_terminal(io::stdout().is_terminal()));
     let selection = cli.population_selection();
+    if let Err(error) = interrupt::install() {
+        return write_error(
+            format,
+            &AppError::inventory(format!("cannot install the interrupt handler: {error}")),
+            FailureExit::Runtime,
+        );
+    }
 
     match run(cli.command.unwrap_or(Command::Count), format, selection) {
-        Ok(rendered) => write_rendered(&rendered),
-        Err(error) => write_error(format, &error, FailureExit::Runtime),
+        Ok(output) => write_rendered(&output.rendered),
+        Err(error) => {
+            let failure = if matches!(error, AppError::Interrupted) {
+                FailureExit::Interrupted
+            } else {
+                FailureExit::Runtime
+            };
+            write_error(format, &error, failure)
+        }
     }
 }
 
@@ -68,18 +95,34 @@ fn run(
     command: Command,
     format: Format,
     selection: report::PopulationSelection,
-) -> Result<String, AppError> {
+) -> Result<RunOutput, AppError> {
     match command {
         Command::Count => render_count(format, selection),
         Command::Refresh { metadata_only: _ } => {
-            let packages = inventory::read_installed_packages().map_err(AppError::inventory)?;
             let database_path = storage::database_path().map_err(AppError::storage)?;
             let mut database =
                 storage::Database::open(&database_path).map_err(AppError::storage)?;
-            database
-                .publish_snapshot(&packages)
-                .map_err(AppError::storage)?;
-            render_count_from_database(format, &database, selection)
+            let refresh = database.begin_refresh().map_err(map_storage_error)?;
+            let inventory =
+                inventory::capture_installed_inventory().map_err(map_inventory_error)?;
+            let rendered = format
+                .render_count(&CountReport::from_snapshot(
+                    &inventory.snapshot_packages(),
+                    if inventory.is_stale() {
+                        SnapshotStaleness::Stale
+                    } else {
+                        SnapshotStaleness::Current
+                    },
+                    selection,
+                ))
+                .map_err(AppError::render)?;
+            refresh
+                .publish(inventory.packages(), inventory.fingerprint())
+                .map_err(map_storage_error)?;
+            Ok(RunOutput {
+                rendered,
+                snapshot_read_guard: None,
+            })
         }
     }
 }
@@ -87,7 +130,7 @@ fn run(
 fn render_count(
     format: Format,
     selection: report::PopulationSelection,
-) -> Result<String, AppError> {
+) -> Result<RunOutput, AppError> {
     let database_path = storage::database_path().map_err(AppError::storage)?;
     let database = storage::Database::open(&database_path).map_err(AppError::storage)?;
     render_count_from_database(format, &database, selection)
@@ -97,14 +140,44 @@ fn render_count_from_database(
     format: Format,
     database: &storage::Database,
     selection: report::PopulationSelection,
-) -> Result<String, AppError> {
-    let packages = database
-        .published_packages()
+) -> Result<RunOutput, AppError> {
+    let snapshot = database
+        .published_snapshot()
         .map_err(AppError::storage)?
         .ok_or(AppError::NoSnapshot)?;
-    format
-        .render_count(&CountReport::from_snapshot(&packages, selection))
-        .map_err(AppError::render)
+    let live_fingerprint = inventory::read_live_fingerprint().map_err(map_inventory_error)?;
+    let staleness = match &snapshot.fingerprint {
+        Some(fingerprint) if *fingerprint == live_fingerprint => SnapshotStaleness::Current,
+        Some(_) => SnapshotStaleness::Stale,
+        None => SnapshotStaleness::Unknown,
+    };
+    let rendered = format
+        .render_count(&CountReport::from_snapshot(
+            &snapshot.packages,
+            staleness,
+            selection,
+        ))
+        .map_err(AppError::render)?;
+    Ok(RunOutput {
+        rendered,
+        snapshot_read_guard: Some(snapshot),
+    })
+}
+
+fn map_inventory_error(error: inventory::InventoryError) -> AppError {
+    if error.is_interrupted() {
+        AppError::Interrupted
+    } else {
+        AppError::inventory(error)
+    }
+}
+
+fn map_storage_error(error: storage::StorageError) -> AppError {
+    if error.is_interrupted() {
+        AppError::Interrupted
+    } else {
+        AppError::storage(error)
+    }
 }
 
 fn write_rendered(rendered: &str) -> ExitCode {

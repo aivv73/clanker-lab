@@ -9,7 +9,7 @@ fn empty_database_has_no_snapshot() {
     let directory = tempfile::tempdir().unwrap();
     let database = Database::open(&directory.path().join("paclang.db")).unwrap();
 
-    assert_eq!(database.published_packages().unwrap(), None);
+    assert!(database.published_snapshot().unwrap().is_none());
 }
 
 #[test]
@@ -31,7 +31,7 @@ fn current_database_reopens() {
     drop(Database::open(&path).unwrap());
 
     let database = Database::open(&path).unwrap();
-    assert_eq!(database.published_packages().unwrap(), None);
+    assert!(database.published_snapshot().unwrap().is_none());
 }
 
 #[test]
@@ -40,7 +40,7 @@ fn malformed_current_database_is_refused_without_mutation() {
     let path = directory.path().join("paclang.db");
     let connection = Connection::open(&path).unwrap();
     connection
-        .execute_batch("CREATE TABLE marker (id INTEGER); PRAGMA user_version = 2;")
+        .execute_batch("CREATE TABLE marker (id INTEGER); PRAGMA user_version = 3;")
         .unwrap();
     drop(connection);
 
@@ -61,8 +61,89 @@ fn malformed_current_database_is_refused_without_mutation() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 2);
+    assert_eq!(version, 3);
     assert_eq!(marker_tables, 1);
+}
+
+#[test]
+fn malformed_version_one_database_is_refused_without_migration_mutation() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("paclang.db");
+    let connection = Connection::open(&path).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TABLE inventory_snapshots (id INTEGER PRIMARY KEY) STRICT;
+             INSERT INTO inventory_snapshots DEFAULT VALUES;
+             PRAGMA user_version = 1;",
+        )
+        .unwrap();
+    drop(connection);
+
+    assert!(matches!(
+        Database::open(&path),
+        Err(StorageError::InvalidSchema(_))
+    ));
+
+    let connection = Connection::open(&path).unwrap();
+    let version: u32 = connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    let snapshots: u32 = connection
+        .query_row("SELECT count(*) FROM inventory_snapshots", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    let installed_tables: u32 = connection
+        .query_row(
+            "SELECT count(*) FROM sqlite_schema WHERE name = 'installed_packages'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(version, 1);
+    assert_eq!(snapshots, 1);
+    assert_eq!(installed_tables, 0);
+}
+
+#[test]
+fn malformed_version_two_database_is_refused_without_migration_mutation() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("paclang.db");
+    let connection = Connection::open(&path).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TABLE inventory_snapshots (
+                id INTEGER PRIMARY KEY,
+                published_at TEXT NOT NULL
+             ) STRICT;
+             CREATE TABLE installed_packages (
+                snapshot_id INTEGER NOT NULL,
+                name TEXT NOT NULL
+             ) STRICT;
+             PRAGMA user_version = 2;",
+        )
+        .unwrap();
+    drop(connection);
+
+    assert!(matches!(
+        Database::open(&path),
+        Err(StorageError::InvalidSchema(_))
+    ));
+
+    let connection = Connection::open(&path).unwrap();
+    let version: u32 = connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    let fingerprint_columns: u32 = connection
+        .query_row(
+            "SELECT count(*) FROM pragma_table_info('inventory_snapshots')
+             WHERE name = 'inventory_fingerprint'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(version, 2);
+    assert_eq!(fingerprint_columns, 0);
 }
 
 #[test]
@@ -71,7 +152,7 @@ fn newer_database_is_refused_without_mutation() {
     let path = directory.path().join("paclang.db");
     let connection = Connection::open(&path).unwrap();
     connection
-        .execute_batch("CREATE TABLE marker (id INTEGER); PRAGMA user_version = 3;")
+        .execute_batch("CREATE TABLE marker (id INTEGER); PRAGMA user_version = 4;")
         .unwrap();
     drop(connection);
 
@@ -82,7 +163,7 @@ fn newer_database_is_refused_without_mutation() {
     assert!(matches!(
         error,
         StorageError::UnsupportedSchemaVersion(version)
-            if version == MigrationVersion::from_database(3)
+            if version == MigrationVersion::from_database(4)
     ));
 
     let connection = Connection::open(&path).unwrap();
@@ -96,7 +177,7 @@ fn newer_database_is_refused_without_mutation() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 3);
+    assert_eq!(version, 4);
     assert_eq!(inventory_tables, 0);
 }
 
@@ -119,14 +200,14 @@ fn concurrent_first_open_runs_one_complete_migration() {
     barrier.wait();
     for handle in handles {
         let database = handle.join().unwrap().unwrap();
-        assert_eq!(database.published_packages().unwrap(), None);
+        assert!(database.published_snapshot().unwrap().is_none());
     }
 
     let connection = Connection::open(path.as_ref()).unwrap();
     let version: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 2);
+    assert_eq!(version, 3);
 }
 
 #[test]
@@ -147,17 +228,59 @@ fn version_one_database_migrates_to_current() {
     drop(connection);
 
     let database = Database::open(&path).unwrap();
-    assert_eq!(database.published_packages().unwrap(), None);
+    assert!(database.published_snapshot().unwrap().is_none());
 
     let connection = Connection::open(&path).unwrap();
     let version: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 2);
+    assert_eq!(version, 3);
     let snapshots: u32 = connection
         .query_row("SELECT count(*) FROM inventory_snapshots", [], |row| {
             row.get(0)
         })
         .unwrap();
     assert_eq!(snapshots, 0);
+}
+
+#[test]
+fn version_two_snapshot_migrates_with_unknown_staleness() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("paclang.db");
+    let connection = Connection::open(&path).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TABLE inventory_snapshots (
+                id INTEGER PRIMARY KEY,
+                published_at TEXT NOT NULL
+             ) STRICT;
+             CREATE TABLE installed_packages (
+                snapshot_id INTEGER NOT NULL REFERENCES inventory_snapshots(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                version TEXT NOT NULL,
+                package_base TEXT,
+                origin TEXT NOT NULL,
+                install_reason TEXT NOT NULL CHECK (install_reason IN ('explicit', 'dependency')),
+                installed_bytes INTEGER NOT NULL CHECK (installed_bytes >= 0),
+                PRIMARY KEY (snapshot_id, name)
+             ) STRICT;
+             INSERT INTO inventory_snapshots (published_at) VALUES ('old-snapshot');
+             INSERT INTO installed_packages (
+                snapshot_id, name, version, package_base, origin, install_reason, installed_bytes
+             ) VALUES (1, 'alpha', '1.0-1', 'alpha', 'unknown', 'explicit', 42);
+             PRAGMA user_version = 2;",
+        )
+        .unwrap();
+    drop(connection);
+
+    let database = Database::open(&path).unwrap();
+    let snapshot = database.published_snapshot().unwrap().unwrap();
+    assert_eq!(snapshot.packages.len(), 1);
+    assert_eq!(snapshot.fingerprint, None);
+
+    let connection = Connection::open(path).unwrap();
+    let version: u32 = connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, 3);
 }

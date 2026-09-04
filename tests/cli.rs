@@ -1,8 +1,9 @@
 use std::fs::{File, OpenOptions};
-use std::io::Read;
+use std::io::{Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
+use std::time::{Duration, Instant};
 
 use nix::pty::openpty;
 use rusqlite::Connection;
@@ -20,6 +21,14 @@ fn run(arguments: &[&str], data_home: &Path) -> Output {
     command(data_home).args(arguments).output().unwrap()
 }
 
+fn run_with_inventory(arguments: &[&str], data_home: &Path, fixture_bin: &Path) -> Output {
+    command(data_home)
+        .args(arguments)
+        .env("PATH", fixture_bin)
+        .output()
+        .unwrap()
+}
+
 fn write_executable(path: &Path, contents: &str) {
     std::fs::write(path, contents).unwrap();
     let mut permissions = std::fs::metadata(path).unwrap().permissions();
@@ -32,8 +41,14 @@ fn fixture_bin() -> tempfile::TempDir {
     write_executable(
         &directory.path().join("pacman"),
         "#!/bin/sh\n\
-         [ \"$#\" -eq 1 ] && [ \"$1\" = '-Qq' ] || exit 64\n\
-         printf 'alpha\\nforeign-tool\\nsuite-cli\\nsuite-docs\\n'\n",
+         [ \"$#\" -eq 1 ] || exit 64\n\
+         if [ \"$1\" = '-Qq' ]; then\n\
+           printf 'alpha\\nforeign-tool\\nsuite-cli\\nsuite-docs\\n'\n\
+         elif [ \"$1\" = '-Q' ]; then\n\
+           printf 'alpha 1.0-1\\nforeign-tool 3.0-1\\nsuite-cli 2.0-1\\nsuite-docs 2.0-1\\n'\n\
+         else\n\
+           exit 64\n\
+         fi\n",
     );
     write_executable(
         &directory.path().join("expac"),
@@ -89,6 +104,23 @@ fn read_pty(reader: &mut File) -> String {
     String::from_utf8(bytes).unwrap()
 }
 
+fn snapshot_count(data_home: &Path) -> u32 {
+    Connection::open(data_home.join("paclang/paclang.db"))
+        .unwrap()
+        .query_row("SELECT count(*) FROM inventory_snapshots", [], |row| {
+            row.get(0)
+        })
+        .unwrap()
+}
+
+fn wait_for_file(path: &Path) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !path.is_file() {
+        assert!(Instant::now() < deadline, "timed out waiting for {path:?}");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
 #[test]
 fn plain_command_returns_toon_no_snapshot_and_migrates_database() {
     let directory = tempfile::tempdir().unwrap();
@@ -105,7 +137,7 @@ fn plain_command_returns_toon_no_snapshot_and_migrates_database() {
     let version: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 2);
+    assert_eq!(version, 3);
 }
 
 #[test]
@@ -186,13 +218,13 @@ fn invalid_cli_use_is_structured_and_exits_two() {
         match expected_format {
             "json" => {
                 let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
-                assert_eq!(value["schema_version"], "1.1.0");
+                assert_eq!(value["schema_version"], "1.2.0");
                 assert_eq!(value["error"]["code"], "invalid_cli");
             }
             "markdown" => assert!(stdout.contains("- Code: `invalid_cli`")),
             "toon" => {
                 let value: serde_json::Value = toon_format::decode_default(&stdout).unwrap();
-                assert_eq!(value["schema_version"], "1.1.0");
+                assert_eq!(value["schema_version"], "1.2.0");
                 assert_eq!(value["error"]["code"], "invalid_cli");
             }
             _ => unreachable!(),
@@ -291,22 +323,175 @@ fn metadata_refresh_and_count_work_in_every_format() {
 }
 
 #[test]
-fn count_reads_the_snapshot_without_running_inventory_commands() {
+fn refresh_does_not_run_a_fallible_live_probe_after_publication() {
+    let data_home = tempfile::tempdir().unwrap();
+    let fixture_bin = fixture_bin();
+    let state = data_home.path().join("probe-count");
+    std::fs::write(&state, "0\n").unwrap();
+    write_executable(
+        &fixture_bin.path().join("pacman"),
+        "#!/bin/sh\n\
+         [ \"$#\" -eq 1 ] || exit 64\n\
+         if [ \"$1\" = '-Qq' ]; then\n\
+           printf 'alpha\\nforeign-tool\\nsuite-cli\\nsuite-docs\\n'\n\
+         elif [ \"$1\" = '-Q' ]; then\n\
+           IFS= read -r count < \"$PACLANG_STATE\"\n\
+           count=$((count + 1))\n\
+           printf '%s\\n' \"$count\" > \"$PACLANG_STATE\"\n\
+           [ \"$count\" -le 2 ] || exit 70\n\
+           printf 'alpha 1.0-1\\nforeign-tool 3.0-1\\nsuite-cli 2.0-1\\nsuite-docs 2.0-1\\n'\n\
+         else\n\
+           exit 64\n\
+         fi\n",
+    );
+
+    let output = command(data_home.path())
+        .args(["refresh", "--metadata-only", "--format", "json"])
+        .env("PATH", fixture_bin.path())
+        .env("PACLANG_STATE", &state)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    assert_eq!(std::fs::read_to_string(state).unwrap(), "2\n");
+    assert_eq!(snapshot_count(data_home.path()), 1);
+}
+
+#[test]
+fn count_compares_the_snapshot_with_the_live_inventory() {
     let data_home = tempfile::tempdir().unwrap();
     let fixture_bin = fixture_bin();
     let refreshed = refresh(&["--format", "json"], data_home.path(), fixture_bin.path());
     assert_eq!(refreshed.status.code(), Some(0));
 
-    let empty_path = tempfile::tempdir().unwrap();
-    let output = command(data_home.path())
-        .args(["count", "--format", "json"])
-        .env("PATH", empty_path.path())
-        .output()
-        .unwrap();
+    let output = run_with_inventory(
+        &["count", "--format", "json"],
+        data_home.path(),
+        fixture_bin.path(),
+    );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
 
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(value["installed_total"], 4);
+    assert_eq!(value["snapshot_staleness"], "current");
+}
+
+#[test]
+fn package_upgrade_marks_the_published_snapshot_stale() {
+    let data_home = tempfile::tempdir().unwrap();
+    let fixture_bin = fixture_bin();
+    assert!(
+        refresh(&["--format", "json"], data_home.path(), fixture_bin.path())
+            .status
+            .success()
+    );
+    write_executable(
+        &fixture_bin.path().join("pacman"),
+        "#!/bin/sh\n\
+         [ \"$#\" -eq 1 ] || exit 64\n\
+         if [ \"$1\" = '-Qq' ]; then\n\
+           printf 'alpha\\nforeign-tool\\nsuite-cli\\nsuite-docs\\n'\n\
+         elif [ \"$1\" = '-Q' ]; then\n\
+           printf 'alpha 1.1-1\\nforeign-tool 3.0-1\\nsuite-cli 2.0-1\\nsuite-docs 2.0-1\\n'\n\
+         else\n\
+           exit 64\n\
+         fi\n",
+    );
+
+    let output = run_with_inventory(
+        &["count", "--format", "json"],
+        data_home.path(),
+        fixture_bin.path(),
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+
+    assert!(output.status.success());
+    assert_eq!(report["snapshot_staleness"], "stale");
+    assert_eq!(report["installed_total"], 4);
+}
+
+#[test]
+fn inventory_change_during_refresh_publishes_one_coherent_stale_snapshot() {
+    let data_home = tempfile::tempdir().unwrap();
+    let fixture_bin = fixture_bin();
+    assert!(
+        refresh(&["--format", "json"], data_home.path(), fixture_bin.path())
+            .status
+            .success()
+    );
+    let state = data_home.path().join("fingerprint-state");
+    std::fs::write(&state, "0\n").unwrap();
+    write_executable(
+        &fixture_bin.path().join("pacman"),
+        "#!/bin/sh\n\
+         [ \"$#\" -eq 1 ] || exit 64\n\
+         if [ \"$1\" = '-Qq' ]; then\n\
+           printf 'alpha\\nforeign-tool\\nsuite-cli\\nsuite-docs\\n'\n\
+         elif [ \"$1\" = '-Q' ]; then\n\
+           IFS= read -r count < \"$PACLANG_STATE\"\n\
+           count=$((count + 1))\n\
+           printf '%s\\n' \"$count\" > \"$PACLANG_STATE\"\n\
+           version=1.0-1\n\
+           [ \"$count\" -eq 1 ] || version=1.1-1\n\
+           printf 'alpha %s\\nforeign-tool 3.0-1\\nsuite-cli 2.0-1\\nsuite-docs 2.0-1\\n' \"$version\"\n\
+         else\n\
+           exit 64\n\
+         fi\n",
+    );
+
+    let refreshed = command(data_home.path())
+        .args(["refresh", "--metadata-only", "--format", "json"])
+        .env("PATH", fixture_bin.path())
+        .env("PACLANG_STATE", &state)
+        .output()
+        .unwrap();
+    let report: serde_json::Value = serde_json::from_slice(&refreshed.stdout).unwrap();
+
+    assert!(refreshed.status.success());
+    assert_eq!(report["snapshot_staleness"], "stale");
+    assert_eq!(snapshot_count(data_home.path()), 2);
+}
+
+#[test]
+fn metadata_matching_neither_boundary_fingerprint_does_not_publish() {
+    let data_home = tempfile::tempdir().unwrap();
+    let fixture_bin = fixture_bin();
+    assert!(
+        refresh(&["--format", "json"], data_home.path(), fixture_bin.path())
+            .status
+            .success()
+    );
+    let state = data_home.path().join("mixed-fingerprint-state");
+    std::fs::write(&state, "0\n").unwrap();
+    write_executable(
+        &fixture_bin.path().join("pacman"),
+        "#!/bin/sh\n\
+         [ \"$#\" -eq 1 ] || exit 64\n\
+         if [ \"$1\" = '-Qq' ]; then\n\
+           printf 'alpha\\nforeign-tool\\nsuite-cli\\nsuite-docs\\n'\n\
+         elif [ \"$1\" = '-Q' ]; then\n\
+           IFS= read -r count < \"$PACLANG_STATE\"\n\
+           count=$((count + 1))\n\
+           printf '%s\\n' \"$count\" > \"$PACLANG_STATE\"\n\
+           version=0.9-1\n\
+           [ \"$count\" -eq 1 ] || version=1.1-1\n\
+           printf 'alpha %s\\nforeign-tool 3.0-1\\nsuite-cli 2.0-1\\nsuite-docs 2.0-1\\n' \"$version\"\n\
+         else\n\
+           exit 64\n\
+         fi\n",
+    );
+
+    let failed = command(data_home.path())
+        .args(["refresh", "--metadata-only", "--format", "json"])
+        .env("PATH", fixture_bin.path())
+        .env("PACLANG_STATE", &state)
+        .output()
+        .unwrap();
+    let error: serde_json::Value = serde_json::from_slice(&failed.stdout).unwrap();
+
+    assert_eq!(failed.status.code(), Some(1));
+    assert_eq!(error["error"]["code"], "inventory");
+    assert_eq!(snapshot_count(data_home.path()), 1);
 }
 
 #[test]
@@ -320,7 +505,11 @@ fn count_filters_individual_install_reasons() {
     );
 
     for (filter, expected_reason) in [("--explicit", "explicit"), ("--dependency", "dependency")] {
-        let output = run(&["count", filter, "--format", "json"], data_home.path());
+        let output = run_with_inventory(
+            &["count", filter, "--format", "json"],
+            data_home.path(),
+            fixture_bin.path(),
+        );
         let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
 
         assert!(output.status.success(), "filter: {filter}");
@@ -342,11 +531,12 @@ fn repeated_origins_select_their_union() {
     );
     assign_fixture_origins(data_home.path());
 
-    let output = run(
+    let output = run_with_inventory(
         &[
             "count", "--origin", "extra", "--origin", "core", "--format", "json",
         ],
         data_home.path(),
+        fixture_bin.path(),
     );
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
 
@@ -382,7 +572,7 @@ fn human_formats_quote_origins_that_resemble_filter_syntax() {
         .unwrap();
 
     for format in ["terminal", "markdown"] {
-        let output = run(
+        let output = run_with_inventory(
             &[
                 "count",
                 "--origin",
@@ -393,6 +583,7 @@ fn human_formats_quote_origins_that_resemble_filter_syntax() {
                 format,
             ],
             data_home.path(),
+            fixture_bin.path(),
         );
         let stdout = String::from_utf8(output.stdout).unwrap();
 
@@ -412,9 +603,10 @@ fn unmatched_origin_is_an_explicit_successful_zero_report() {
             .success()
     );
 
-    let output = run(
+    let output = run_with_inventory(
         &["count", "--origin", "does-not-exist", "--format", "json"],
         data_home.path(),
+        fixture_bin.path(),
     );
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
 
@@ -450,7 +642,7 @@ fn filtered_report_facts_match_in_every_format() {
     assign_fixture_origins(data_home.path());
 
     for format in ["terminal", "toon", "json", "markdown"] {
-        let output = run(
+        let output = run_with_inventory(
             &[
                 "count",
                 "--explicit",
@@ -460,6 +652,7 @@ fn filtered_report_facts_match_in_every_format() {
                 format,
             ],
             data_home.path(),
+            fixture_bin.path(),
         );
         let stdout = String::from_utf8(output.stdout).unwrap();
 
@@ -505,10 +698,348 @@ fn invalid_metadata_does_not_replace_the_published_snapshot() {
     assert_eq!(failed.status.code(), Some(1));
     assert_eq!(error["error"]["code"], "inventory");
 
-    let count = run(&["count", "--format", "json"], data_home.path());
+    let count = run_with_inventory(
+        &["count", "--format", "json"],
+        data_home.path(),
+        fixture_bin.path(),
+    );
     let report: serde_json::Value = serde_json::from_slice(&count.stdout).unwrap();
     assert_eq!(count.status.code(), Some(0));
     assert_eq!(report["installed_total"], 4);
+}
+
+#[test]
+fn failed_publication_rolls_back_the_whole_snapshot() {
+    let data_home = tempfile::tempdir().unwrap();
+    let fixture_bin = fixture_bin();
+    assert!(
+        refresh(&["--format", "json"], data_home.path(), fixture_bin.path())
+            .status
+            .success()
+    );
+    let connection = Connection::open(data_home.path().join("paclang/paclang.db")).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TRIGGER reject_alpha
+             BEFORE INSERT ON installed_packages
+             WHEN NEW.name = 'alpha'
+             BEGIN
+               SELECT RAISE(ABORT, 'test publication failure');
+             END;",
+        )
+        .unwrap();
+    drop(connection);
+
+    let failed = refresh(&["--format", "json"], data_home.path(), fixture_bin.path());
+    let error: serde_json::Value = serde_json::from_slice(&failed.stdout).unwrap();
+    assert_eq!(failed.status.code(), Some(1));
+    assert_eq!(error["error"]["code"], "storage");
+    assert_eq!(snapshot_count(data_home.path()), 1);
+
+    let count = run_with_inventory(
+        &["count", "--format", "json"],
+        data_home.path(),
+        fixture_bin.path(),
+    );
+    let report: serde_json::Value = serde_json::from_slice(&count.stdout).unwrap();
+    assert!(count.status.success());
+    assert_eq!(report["installed_total"], 4);
+}
+
+#[test]
+fn interrupted_refresh_preserves_the_previous_snapshot_and_exits_130() {
+    let data_home = tempfile::tempdir().unwrap();
+    let fixture_bin = fixture_bin();
+    assert!(
+        refresh(&["--format", "json"], data_home.path(), fixture_bin.path())
+            .status
+            .success()
+    );
+    let marker = data_home.path().join("expac-started");
+    let gate = data_home.path().join("expac-gate");
+    assert!(
+        Command::new("mkfifo")
+            .arg(&gate)
+            .status()
+            .unwrap()
+            .success()
+    );
+    write_executable(
+        &fixture_bin.path().join("expac"),
+        "#!/bin/sh\n\
+         /bin/sleep 30 &\n\
+         : > \"$PACLANG_STARTED\"\n\
+         IFS= read -r _ < \"$PACLANG_GATE\"\n",
+    );
+    let child = command(data_home.path())
+        .args(["refresh", "--metadata-only", "--format", "json"])
+        .env("PATH", fixture_bin.path())
+        .env("PACLANG_STARTED", &marker)
+        .env("PACLANG_GATE", &gate)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    wait_for_file(&marker);
+    let interrupted_at = Instant::now();
+    assert!(
+        Command::new("kill")
+            .args(["-INT", &child.id().to_string()])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let output = child.wait_with_output().unwrap();
+    let error: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+
+    assert_eq!(output.status.code(), Some(130));
+    assert!(interrupted_at.elapsed() < Duration::from_secs(1));
+    assert_eq!(error["error"]["code"], "interrupted");
+    assert_eq!(snapshot_count(data_home.path()), 1);
+
+    let count = run_with_inventory(
+        &["count", "--format", "json"],
+        data_home.path(),
+        fixture_bin.path(),
+    );
+    assert!(count.status.success());
+}
+
+#[test]
+fn concurrent_refresh_cannot_enter_the_writer_transaction() {
+    let data_home = tempfile::tempdir().unwrap();
+    let fixture_bin = fixture_bin();
+    assert!(
+        refresh(&["--format", "json"], data_home.path(), fixture_bin.path())
+            .status
+            .success()
+    );
+    let marker = data_home.path().join("writer-started");
+    let gate = data_home.path().join("writer-gate");
+    assert!(
+        Command::new("mkfifo")
+            .arg(&gate)
+            .status()
+            .unwrap()
+            .success()
+    );
+    write_executable(
+        &fixture_bin.path().join("expac"),
+        "#!/bin/sh\n\
+         : > \"$PACLANG_STARTED\"\n\
+         IFS= read -r _ < \"$PACLANG_GATE\"\n",
+    );
+    let first = command(data_home.path())
+        .args(["refresh", "--metadata-only", "--format", "json"])
+        .env("PATH", fixture_bin.path())
+        .env("PACLANG_STARTED", &marker)
+        .env("PACLANG_GATE", &gate)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    wait_for_file(&marker);
+
+    let count = run_with_inventory(
+        &["count", "--format", "json"],
+        data_home.path(),
+        fixture_bin.path(),
+    );
+    let report: serde_json::Value = serde_json::from_slice(&count.stdout).unwrap();
+    assert!(count.status.success());
+    assert_eq!(report["installed_total"], 4);
+
+    let second = refresh(&["--format", "json"], data_home.path(), fixture_bin.path());
+    let error: serde_json::Value = serde_json::from_slice(&second.stdout).unwrap();
+    assert_eq!(second.status.code(), Some(1));
+    assert_eq!(error["error"]["code"], "storage");
+    assert_eq!(snapshot_count(data_home.path()), 1);
+
+    assert!(
+        Command::new("kill")
+            .args(["-INT", &first.id().to_string()])
+            .status()
+            .unwrap()
+            .success()
+    );
+    assert_eq!(first.wait_with_output().unwrap().status.code(), Some(130));
+}
+
+#[test]
+fn interrupted_writer_lock_wait_exits_130_promptly() {
+    let data_home = tempfile::tempdir().unwrap();
+    let fixture_bin = fixture_bin();
+    assert!(
+        refresh(&["--format", "json"], data_home.path(), fixture_bin.path())
+            .status
+            .success()
+    );
+    let marker = data_home.path().join("lock-holder-started");
+    let gate = data_home.path().join("lock-holder-gate");
+    assert!(
+        Command::new("mkfifo")
+            .arg(&gate)
+            .status()
+            .unwrap()
+            .success()
+    );
+    write_executable(
+        &fixture_bin.path().join("expac"),
+        "#!/bin/sh\n\
+         : > \"$PACLANG_STARTED\"\n\
+         IFS= read -r _ < \"$PACLANG_GATE\"\n",
+    );
+    let holder = command(data_home.path())
+        .args(["refresh", "--metadata-only", "--format", "json"])
+        .env("PATH", fixture_bin.path())
+        .env("PACLANG_STARTED", &marker)
+        .env("PACLANG_GATE", &gate)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    wait_for_file(&marker);
+
+    let waiter = command(data_home.path())
+        .args(["refresh", "--metadata-only", "--format", "json"])
+        .env("PATH", fixture_bin.path())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(100));
+    let interrupted_at = Instant::now();
+    assert!(
+        Command::new("kill")
+            .args(["-INT", &waiter.id().to_string()])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let output = waiter.wait_with_output().unwrap();
+    let error: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(interrupted_at.elapsed() < Duration::from_secs(1));
+    assert_eq!(output.status.code(), Some(130));
+    assert_eq!(error["error"]["code"], "interrupted");
+
+    assert!(
+        Command::new("kill")
+            .args(["-INT", &holder.id().to_string()])
+            .status()
+            .unwrap()
+            .success()
+    );
+    assert_eq!(holder.wait_with_output().unwrap().status.code(), Some(130));
+    assert_eq!(snapshot_count(data_home.path()), 1);
+}
+
+#[test]
+fn retention_waits_until_an_overlapping_report_finishes() {
+    let data_home = tempfile::tempdir().unwrap();
+    let baseline_bin = fixture_bin();
+    for _ in 0..10 {
+        assert!(
+            refresh(&["--format", "json"], data_home.path(), baseline_bin.path())
+                .status
+                .success()
+        );
+    }
+
+    let report_bin = fixture_bin();
+    let report_started = data_home.path().join("report-started");
+    let report_gate = data_home.path().join("report-gate");
+    assert!(
+        Command::new("mkfifo")
+            .arg(&report_gate)
+            .status()
+            .unwrap()
+            .success()
+    );
+    write_executable(
+        &report_bin.path().join("pacman"),
+        "#!/bin/sh\n\
+         [ \"$1\" = '-Q' ] || exit 64\n\
+         : > \"$PACLANG_STARTED\"\n\
+         IFS= read -r _ < \"$PACLANG_GATE\"\n\
+         printf 'alpha 1.0-1\\nforeign-tool 3.0-1\\nsuite-cli 2.0-1\\nsuite-docs 2.0-1\\n'\n",
+    );
+    let report = command(data_home.path())
+        .args(["count", "--format", "json"])
+        .env("PATH", report_bin.path())
+        .env("PACLANG_STARTED", &report_started)
+        .env("PACLANG_GATE", &report_gate)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    wait_for_file(&report_started);
+
+    let refresh_bin = fixture_bin();
+    let capture_state = data_home.path().join("capture-state");
+    let capture_done = data_home.path().join("capture-done");
+    std::fs::write(&capture_state, "0\n").unwrap();
+    write_executable(
+        &refresh_bin.path().join("pacman"),
+        "#!/bin/sh\n\
+         [ \"$#\" -eq 1 ] || exit 64\n\
+         if [ \"$1\" = '-Qq' ]; then\n\
+           printf 'alpha\\nforeign-tool\\nsuite-cli\\nsuite-docs\\n'\n\
+         elif [ \"$1\" = '-Q' ]; then\n\
+           IFS= read -r count < \"$PACLANG_STATE\"\n\
+           count=$((count + 1))\n\
+           printf '%s\\n' \"$count\" > \"$PACLANG_STATE\"\n\
+           [ \"$count\" -ne 2 ] || : > \"$PACLANG_CAPTURED\"\n\
+           printf 'alpha 1.0-1\\nforeign-tool 3.0-1\\nsuite-cli 2.0-1\\nsuite-docs 2.0-1\\n'\n\
+         else\n\
+           exit 64\n\
+         fi\n",
+    );
+    let mut refreshing = command(data_home.path())
+        .args(["refresh", "--metadata-only", "--format", "json"])
+        .env("PATH", refresh_bin.path())
+        .env("PACLANG_STATE", &capture_state)
+        .env("PACLANG_CAPTURED", &capture_done)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    wait_for_file(&capture_done);
+    std::thread::sleep(Duration::from_millis(100));
+    assert!(refreshing.try_wait().unwrap().is_none());
+    assert_eq!(snapshot_count(data_home.path()), 10);
+
+    OpenOptions::new()
+        .write(true)
+        .open(&report_gate)
+        .unwrap()
+        .write_all(b"continue\n")
+        .unwrap();
+    assert!(report.wait_with_output().unwrap().status.success());
+    assert!(refreshing.wait_with_output().unwrap().status.success());
+    assert_eq!(snapshot_count(data_home.path()), 10);
+}
+
+#[test]
+fn refresh_retains_only_the_latest_ten_published_snapshots() {
+    let data_home = tempfile::tempdir().unwrap();
+    let fixture_bin = fixture_bin();
+
+    for _ in 0..12 {
+        let output = refresh(&["--format", "json"], data_home.path(), fixture_bin.path());
+        assert!(output.status.success());
+    }
+
+    assert_eq!(snapshot_count(data_home.path()), 10);
+    let connection = Connection::open(data_home.path().join("paclang/paclang.db")).unwrap();
+    let orphaned_packages: u32 = connection
+        .query_row(
+            "SELECT count(*) FROM installed_packages
+             WHERE snapshot_id NOT IN (SELECT id FROM inventory_snapshots)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(orphaned_packages, 0);
 }
 
 #[test]
@@ -597,6 +1128,60 @@ fn version_one_snapshot_marker_migrates_to_no_snapshot() {
             row.get(0)
         })
         .unwrap();
-    assert_eq!(version, 2);
+    assert_eq!(version, 3);
     assert_eq!(snapshots, 0);
+}
+
+#[test]
+fn version_two_snapshot_migrates_and_reports_unknown_staleness() {
+    let data_home = tempfile::tempdir().unwrap();
+    let fixture_bin = fixture_bin();
+    let database_directory = data_home.path().join("paclang");
+    std::fs::create_dir(&database_directory).unwrap();
+    let database_path = database_directory.join("paclang.db");
+    let connection = Connection::open(&database_path).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TABLE inventory_snapshots (
+                id INTEGER PRIMARY KEY,
+                published_at TEXT NOT NULL
+             ) STRICT;
+             CREATE TABLE installed_packages (
+                snapshot_id INTEGER NOT NULL REFERENCES inventory_snapshots(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                version TEXT NOT NULL,
+                package_base TEXT,
+                origin TEXT NOT NULL,
+                install_reason TEXT NOT NULL CHECK (install_reason IN ('explicit', 'dependency')),
+                installed_bytes INTEGER NOT NULL CHECK (installed_bytes >= 0),
+                PRIMARY KEY (snapshot_id, name)
+             ) STRICT;
+             INSERT INTO inventory_snapshots (published_at) VALUES ('old-snapshot');
+             INSERT INTO installed_packages (
+                snapshot_id, name, version, package_base, origin, install_reason, installed_bytes
+             ) VALUES
+                (1, 'alpha', '1.0-1', 'alpha', 'unknown', 'explicit', 120),
+                (1, 'foreign-tool', '3.0-1', 'foreign-tool', 'unknown', 'explicit', 40),
+                (1, 'suite-cli', '2.0-1', 'suite', 'unknown', 'dependency', 300),
+                (1, 'suite-docs', '2.0-1', 'suite', 'unknown', 'dependency', 80);
+             PRAGMA user_version = 2;",
+        )
+        .unwrap();
+    drop(connection);
+
+    let output = run_with_inventory(
+        &["count", "--format", "json"],
+        data_home.path(),
+        fixture_bin.path(),
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(output.status.success());
+    assert_eq!(report["snapshot_staleness"], "unknown");
+    assert_eq!(report["installed_total"], 4);
+
+    let connection = Connection::open(database_path).unwrap();
+    let version: u32 = connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, 3);
 }

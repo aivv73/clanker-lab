@@ -3,9 +3,13 @@ mod tests;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::process::{Command, Output};
+use std::os::unix::process::CommandExt;
+use std::process::{Command, Output, Stdio};
 
-use crate::package::{InstallReason, PackageOrigin};
+use sha2::{Digest, Sha256};
+
+use crate::interrupt;
+use crate::package::{InstallReason, PackageOrigin, SnapshotPackage};
 
 // expac fields: name, version, package base, queried database, install reason,
 // installed bytes. Keep this order aligned with LocalExpacRecord::parse.
@@ -13,6 +17,7 @@ const LOCAL_EXPAC_LAYOUT: &str = r"%n\t%v\t%e\t%r\t%w\t%m";
 
 #[derive(Debug)]
 pub(crate) enum InventoryError {
+    Interrupted,
     StartCommand {
         command: &'static str,
         source: std::io::Error,
@@ -23,7 +28,12 @@ pub(crate) enum InventoryError {
         stderr: String,
     },
     NonUtf8Output(&'static str),
+    ReadCommandOutput {
+        command: &'static str,
+        source: std::io::Error,
+    },
     InvalidPacmanLine(usize),
+    InvalidPacmanFingerprintLine(usize),
     DuplicatePacmanName(String),
     InvalidExpacRecord {
         line: usize,
@@ -34,11 +44,13 @@ pub(crate) enum InventoryError {
         missing_metadata: Vec<String>,
         unexpected_metadata: Vec<String>,
     },
+    InventoryChanged,
 }
 
 impl fmt::Display for InventoryError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Interrupted => formatter.write_str("inventory refresh was interrupted"),
             Self::StartCommand { command, source } => {
                 write!(formatter, "cannot start {command}: {source}")
             }
@@ -56,12 +68,19 @@ impl fmt::Display for InventoryError {
             Self::NonUtf8Output(command) => {
                 write!(formatter, "{command} returned output that is not UTF-8")
             }
+            Self::ReadCommandOutput { command, source } => {
+                write!(formatter, "cannot read {command} output: {source}")
+            }
             Self::InvalidPacmanLine(line) => {
                 write!(
                     formatter,
                     "pacman returned an invalid package name on line {line}"
                 )
             }
+            Self::InvalidPacmanFingerprintLine(line) => write!(
+                formatter,
+                "pacman returned an invalid name and version on line {line}"
+            ),
             Self::DuplicatePacmanName(name) => {
                 write!(formatter, "pacman returned package {name:?} more than once")
             }
@@ -83,7 +102,15 @@ impl fmt::Display for InventoryError {
                 display_names(missing_metadata),
                 display_names(unexpected_metadata)
             ),
+            Self::InventoryChanged => formatter
+                .write_str("the installed package inventory changed while refresh was reading it"),
         }
+    }
+}
+
+impl InventoryError {
+    pub(crate) const fn is_interrupted(&self) -> bool {
+        matches!(self, Self::Interrupted)
     }
 }
 
@@ -103,6 +130,71 @@ pub(crate) struct InstalledPackage {
     origin: PackageOrigin,
     install_reason: InstallReason,
     installed_bytes: InstalledBytes,
+}
+
+/// SHA-256 digest over sorted `name + NUL + version + newline` entries.
+/// A lightweight sample of the live `pacman -Q` population used to detect
+/// package changes around metadata capture.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct InventoryFingerprint(String);
+
+impl InventoryFingerprint {
+    fn from_name_versions<'a>(values: impl IntoIterator<Item = (&'a str, &'a str)>) -> Self {
+        let mut digest = Sha256::new();
+        for (name, version) in values {
+            digest.update(name.as_bytes());
+            digest.update([0]);
+            digest.update(version.as_bytes());
+            digest.update(b"\n");
+        }
+        Self(format!("{:x}", digest.finalize()))
+    }
+
+    pub(crate) fn parse(value: &str) -> Result<Self, &'static str> {
+        if value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err("inventory fingerprint is not a SHA-256 digest");
+        }
+        Ok(Self(value.to_owned()))
+    }
+
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// A coherent package capture: its fingerprint matched at least one of the
+/// lightweight `pacman -Q` samples taken before and after the metadata read.
+/// `stale` is true when the capture matched the earlier sample only, meaning
+/// packages changed after the snapshot was read.
+#[derive(Debug)]
+pub(crate) struct CapturedInventory {
+    packages: Vec<InstalledPackage>,
+    fingerprint: InventoryFingerprint,
+    stale: bool,
+}
+
+impl CapturedInventory {
+    pub(crate) fn packages(&self) -> &[InstalledPackage] {
+        &self.packages
+    }
+
+    pub(crate) fn fingerprint(&self) -> &InventoryFingerprint {
+        &self.fingerprint
+    }
+
+    pub(crate) const fn is_stale(&self) -> bool {
+        self.stale
+    }
+
+    pub(crate) fn snapshot_packages(&self) -> Vec<SnapshotPackage> {
+        self.packages
+            .iter()
+            .map(|package| SnapshotPackage {
+                origin: package.origin.clone(),
+                install_reason: package.install_reason,
+            })
+            .collect()
+    }
 }
 
 impl InstalledPackage {
@@ -251,23 +343,78 @@ fn parse_plain_field(value: &str, field: &'static str) -> Result<(), &'static st
     Ok(())
 }
 
-pub(crate) fn read_installed_packages() -> Result<Vec<InstalledPackage>, InventoryError> {
+pub(crate) fn capture_installed_inventory() -> Result<CapturedInventory, InventoryError> {
+    let before = read_live_fingerprint()?;
     let pacman_output = run_command("pacman", &["-Qq"])?;
     let local_expac_output = run_command("expac", &["-Q", LOCAL_EXPAC_LAYOUT])?;
-    let pacman_stdout = parse_stdout("pacman", &pacman_output)?;
-    let local_expac_stdout = parse_stdout("expac", &local_expac_output)?;
+    let pacman_stdout = parse_stdout("pacman", &pacman_output.stdout)?;
+    let local_expac_stdout = parse_stdout("expac", &local_expac_output.stdout)?;
     let pacman_names = parse_pacman_names(pacman_stdout)?;
     let packages = parse_expac_records(local_expac_stdout)?;
     validate_same_population(&pacman_names, &packages)?;
+    let fingerprint = InventoryFingerprint::from_name_versions(
+        packages
+            .values()
+            .map(|package| (package.name(), package.version())),
+    );
+    let after = read_live_fingerprint()?;
+    if interrupt::is_requested() {
+        return Err(InventoryError::Interrupted);
+    }
+    if fingerprint != before && fingerprint != after {
+        return Err(InventoryError::InventoryChanged);
+    }
+    let stale = fingerprint != after;
 
-    Ok(packages.into_values().collect())
+    Ok(CapturedInventory {
+        packages: packages.into_values().collect(),
+        fingerprint,
+        stale,
+    })
+}
+
+pub(crate) fn read_live_fingerprint() -> Result<InventoryFingerprint, InventoryError> {
+    let output = run_command("pacman", &["-Q"])?;
+    let stdout = parse_stdout("pacman", &output.stdout)?;
+    let mut packages = BTreeMap::new();
+    for (index, line) in stdout.lines().enumerate() {
+        let (name, version) = line
+            .split_once(' ')
+            .ok_or(InventoryError::InvalidPacmanFingerprintLine(index + 1))?;
+        let name = PackageName::parse(name)
+            .map_err(|_| InventoryError::InvalidPacmanFingerprintLine(index + 1))?;
+        let version = PackageVersion::parse(version)
+            .map_err(|_| InventoryError::InvalidPacmanFingerprintLine(index + 1))?;
+        if packages.insert(name.0.clone(), version.0).is_some() {
+            return Err(InventoryError::DuplicatePacmanName(name.0));
+        }
+    }
+    Ok(InventoryFingerprint::from_name_versions(
+        packages
+            .iter()
+            .map(|(name, version)| (name.as_str(), version.as_str())),
+    ))
 }
 
 fn run_command(command: &'static str, arguments: &[&str]) -> Result<Output, InventoryError> {
-    let output = Command::new(command)
+    if interrupt::is_requested() {
+        return Err(InventoryError::Interrupted);
+    }
+    let child = Command::new(command)
         .args(arguments)
-        .output()
+        .process_group(0)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(|source| InventoryError::StartCommand { command, source })?;
+    let active_group = interrupt::ActiveProcessGroup::register(child.id());
+    let output = child
+        .wait_with_output()
+        .map_err(|source| InventoryError::ReadCommandOutput { command, source })?;
+    drop(active_group);
+    if interrupt::is_requested() {
+        return Err(InventoryError::Interrupted);
+    }
     if output.status.success() {
         return Ok(output);
     }
@@ -279,8 +426,8 @@ fn run_command(command: &'static str, arguments: &[&str]) -> Result<Output, Inve
     })
 }
 
-fn parse_stdout<'a>(command: &'static str, output: &'a Output) -> Result<&'a str, InventoryError> {
-    std::str::from_utf8(&output.stdout).map_err(|_| InventoryError::NonUtf8Output(command))
+fn parse_stdout<'a>(command: &'static str, stdout: &'a [u8]) -> Result<&'a str, InventoryError> {
+    std::str::from_utf8(stdout).map_err(|_| InventoryError::NonUtf8Output(command))
 }
 
 fn parse_pacman_names(stdout: &str) -> Result<BTreeSet<String>, InventoryError> {
