@@ -1,4 +1,5 @@
 mod cli;
+mod expac_parser;
 mod interrupt;
 mod inventory;
 mod package;
