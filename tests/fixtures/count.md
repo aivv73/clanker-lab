@@ -6,5 +6,5 @@
 - Installed packages: 4
 - Selected population: 4
 - Coverage denominator: 4
-- Analyzed: 0
-- Missing source-language analysis: 4
+- Missing source-language analysis: 4 (100.0%)
+- Analyzed: 0 (0.0%)

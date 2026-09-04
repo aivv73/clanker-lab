@@ -298,39 +298,64 @@ impl CountReport {
             selection,
             installed_total,
             selected_population,
-            coverage: Coverage {
-                denominator: selected_population,
-                analyzed: 0,
-                missing_source_language_analysis: selected_population,
-            },
+            coverage: Coverage::missing_only(selected_population),
+        }
+    }
+
+    /// Exact analyzed share in percent. An empty selection is vacuously
+    /// complete so `--min-coverage` does not fail explicit zero reports.
+    pub fn analyzed_coverage_percent(&self) -> f64 {
+        self.coverage.analyzed_percent()
+    }
+
+    pub fn meets_coverage(&self, minimum: Option<f64>) -> bool {
+        match minimum {
+            Some(minimum) => self.analyzed_coverage_percent() >= minimum,
+            None => true,
         }
     }
 
     fn render_terminal(&self) -> String {
-        format!(
-            "Snapshot: {}\nSelection: {}\nInstalled packages: {}\nSelected population: {}\nCoverage denominator: {}\nAnalyzed: {}\nMissing source-language analysis: {}",
+        let mut rendered = format!(
+            "Snapshot: {}\nSelection: {}\nInstalled packages: {}\nSelected population: {}\nCoverage denominator: {}",
             self.snapshot_staleness.as_str(),
             self.selection.render(),
             self.installed_total,
             self.selected_population,
             self.coverage.denominator,
-            self.coverage.analyzed,
-            self.coverage.missing_source_language_analysis
-        )
+        );
+        let tenths = self.coverage.percentage_tenths();
+        for (row, share) in self.coverage.rows.iter().zip(tenths) {
+            rendered.push_str(&format!(
+                "\n{}: {} ({})",
+                row.state.human_label(),
+                row.count,
+                format_tenths(share)
+            ));
+        }
+        rendered
     }
 
     fn render_markdown(&self) -> String {
-        format!(
-            "# Paclang count\n\n- Schema version: `{}`\n- Snapshot: {}\n- Selection: {}\n- Installed packages: {}\n- Selected population: {}\n- Coverage denominator: {}\n- Analyzed: {}\n- Missing source-language analysis: {}",
+        let mut rendered = format!(
+            "# Paclang count\n\n- Schema version: `{}`\n- Snapshot: {}\n- Selection: {}\n- Installed packages: {}\n- Selected population: {}\n- Coverage denominator: {}",
             self.schema_version.as_str(),
             self.snapshot_staleness.as_str(),
             self.selection.render(),
             self.installed_total,
             self.selected_population,
             self.coverage.denominator,
-            self.coverage.analyzed,
-            self.coverage.missing_source_language_analysis
-        )
+        );
+        let tenths = self.coverage.percentage_tenths();
+        for (row, share) in self.coverage.rows.iter().zip(tenths) {
+            rendered.push_str(&format!(
+                "\n- {}: {} ({})",
+                row.state.human_label(),
+                row.count,
+                format_tenths(share)
+            ));
+        }
+        rendered
     }
 }
 
@@ -339,6 +364,128 @@ struct Coverage {
     denominator: u64,
     analyzed: u64,
     missing_source_language_analysis: u64,
+    /// Per-state breakdown sorted by count descending and state name
+    /// ascending. The counts always sum to `denominator`.
+    rows: Vec<CoverageRow>,
+}
+
+/// Canonical coverage-state names shared by every output format.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum CoverageState {
+    Analyzed,
+    MissingSourceLanguageAnalysis,
+}
+
+impl CoverageState {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Analyzed => "analyzed",
+            Self::MissingSourceLanguageAnalysis => "missing_source_language_analysis",
+        }
+    }
+
+    const fn human_label(self) -> &'static str {
+        match self {
+            Self::Analyzed => "Analyzed",
+            Self::MissingSourceLanguageAnalysis => "Missing source-language analysis",
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct CoverageRow {
+    state: CoverageState,
+    /// Integer numerator; the denominator is [`Coverage::denominator`].
+    count: u64,
+}
+
+impl Coverage {
+    fn missing_only(denominator: u64) -> Self {
+        let mut rows = vec![
+            CoverageRow {
+                state: CoverageState::Analyzed,
+                count: 0,
+            },
+            CoverageRow {
+                state: CoverageState::MissingSourceLanguageAnalysis,
+                count: denominator,
+            },
+        ];
+        // Rows sort by metric descending and canonical name ascending so
+        // repeated reports are stable and diffable.
+        rows.sort_by(|left, right| {
+            right
+                .count
+                .cmp(&left.count)
+                .then_with(|| left.state.as_str().cmp(right.state.as_str()))
+        });
+        debug_assert_eq!(rows.iter().map(|row| row.count).sum::<u64>(), denominator);
+        Self {
+            denominator,
+            analyzed: 0,
+            missing_source_language_analysis: denominator,
+            rows,
+        }
+    }
+
+    fn analyzed_percent(&self) -> f64 {
+        if self.denominator == 0 {
+            100.0
+        } else {
+            self.analyzed as f64 * 100.0 / self.denominator as f64
+        }
+    }
+
+    /// Human percentages in tenths of a percent for each row, deterministically
+    /// rounded with the largest-remainder method so they total exactly 100.0%
+    /// (or 0.0% for an empty selection). Row order is preserved.
+    fn percentage_tenths(&self) -> Vec<u64> {
+        percentage_tenths(&self.rows.iter().map(|row| row.count).collect::<Vec<_>>())
+    }
+}
+
+/// Largest-remainder rounding of `counts` to tenths of a percent. The result
+/// sums to exactly 1000 tenths when the total is nonzero and to 0 otherwise.
+/// Ties break toward the earlier row, so callers must pre-sort rows for
+/// deterministic output.
+fn percentage_tenths(counts: &[u64]) -> Vec<u64> {
+    let total = counts.iter().sum::<u64>();
+    if total == 0 {
+        return vec![0; counts.len()];
+    }
+    let total = u128::from(total);
+    let mut bases = Vec::with_capacity(counts.len());
+    let mut remainders = Vec::with_capacity(counts.len());
+    for count in counts {
+        let scaled = u128::from(*count) * 1000;
+        bases.push(scaled / total);
+        remainders.push(scaled % total);
+    }
+    let mut tenths = bases
+        .iter()
+        .map(|base| u64::try_from(*base).unwrap_or(u64::MAX))
+        .collect::<Vec<_>>();
+    let mut leftover = 1000_u64.saturating_sub(tenths.iter().sum::<u64>());
+    let mut order = (0..counts.len()).collect::<Vec<_>>();
+    // Largest fractional remainder first; row order breaks ties.
+    order.sort_by(|left, right| {
+        remainders[*right]
+            .cmp(&remainders[*left])
+            .then_with(|| left.cmp(right))
+    });
+    for index in order {
+        if leftover == 0 {
+            break;
+        }
+        tenths[index] = tenths[index].saturating_add(1);
+        leftover -= 1;
+    }
+    tenths
+}
+
+fn format_tenths(tenths: u64) -> String {
+    format!("{}.{}%", tenths / 10, tenths % 10)
 }
 
 #[derive(Debug, Serialize)]

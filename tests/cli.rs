@@ -683,6 +683,103 @@ fn filtered_report_facts_match_in_every_format() {
 }
 
 #[test]
+fn unmet_coverage_threshold_exits_one_without_changing_report_facts() {
+    let data_home = tempfile::tempdir().unwrap();
+    let fixture_bin = fixture_bin();
+    assert!(
+        refresh(&["--format", "json"], data_home.path(), fixture_bin.path())
+            .status
+            .success()
+    );
+
+    let baseline = run_with_inventory(
+        &["count", "--format", "json"],
+        data_home.path(),
+        fixture_bin.path(),
+    );
+    assert_eq!(baseline.status.code(), Some(0));
+
+    // Metadata-only snapshots carry no analyzed packages, so any positive
+    // threshold fails while leaving the report facts untouched.
+    let gated = run_with_inventory(
+        &["count", "--format", "json", "--min-coverage", "50"],
+        data_home.path(),
+        fixture_bin.path(),
+    );
+    assert_eq!(gated.status.code(), Some(1));
+    assert!(gated.stderr.is_empty());
+    assert_eq!(gated.stdout, baseline.stdout);
+
+    let satisfied = run_with_inventory(
+        &["count", "--format", "json", "--min-coverage", "0"],
+        data_home.path(),
+        fixture_bin.path(),
+    );
+    assert_eq!(satisfied.status.code(), Some(0));
+    assert_eq!(satisfied.stdout, baseline.stdout);
+}
+
+#[test]
+fn coverage_threshold_passes_for_an_empty_selection() {
+    let data_home = tempfile::tempdir().unwrap();
+    let fixture_bin = fixture_bin();
+    assert!(
+        refresh(&["--format", "json"], data_home.path(), fixture_bin.path())
+            .status
+            .success()
+    );
+
+    let output = run_with_inventory(
+        &[
+            "count",
+            "--origin",
+            "does-not-exist",
+            "--format",
+            "json",
+            "--min-coverage",
+            "100",
+        ],
+        data_home.path(),
+        fixture_bin.path(),
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(report["selected_population"], 0);
+}
+
+#[test]
+fn invalid_coverage_thresholds_exit_two() {
+    for threshold in ["101", "-1", "not-a-number", "nan", "inf"] {
+        let data_home = tempfile::tempdir().unwrap();
+        let output = run(
+            &["count", "--format", "json", "--min-coverage", threshold],
+            data_home.path(),
+        );
+        let error: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+
+        assert_eq!(output.status.code(), Some(2), "threshold: {threshold}");
+        assert_eq!(error["error"]["code"], "invalid_cli");
+    }
+}
+
+#[test]
+fn refresh_with_an_unmet_threshold_still_publishes_and_exits_one() {
+    let data_home = tempfile::tempdir().unwrap();
+    let fixture_bin = fixture_bin();
+
+    let output = refresh(
+        &["--format", "json", "--min-coverage", "50"],
+        data_home.path(),
+        fixture_bin.path(),
+    );
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stderr.is_empty());
+    assert_eq!(snapshot_count(data_home.path()), 1);
+}
+
+#[test]
 fn invalid_metadata_does_not_replace_the_published_snapshot() {
     let data_home = tempfile::tempdir().unwrap();
     let fixture_bin = fixture_bin();
