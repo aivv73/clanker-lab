@@ -4,6 +4,10 @@ mod interrupt;
 mod inventory;
 mod package;
 mod report;
+// Not yet called: the Arch source provider uses this module to validate
+// fetched recipe metadata (issue #16). Remove the allowance once it does.
+#[allow(dead_code)]
+mod srcinfo;
 mod storage;
 
 use std::env;

@@ -11,3 +11,7 @@ libfuzzer-sys = "0.4"
 [[bin]]
 name = "expac_parser"
 path = "fuzz_targets/expac_parser.rs"
+
+[[bin]]
+name = "srcinfo"
+path = "fuzz_targets/srcinfo.rs"
