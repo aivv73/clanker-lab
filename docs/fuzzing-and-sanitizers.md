@@ -1,9 +1,10 @@
 # Fuzzing and sanitizers
 
 This note documents the periodic dynamic-testing jobs for Paclang's
-untrusted-input boundary: the structured `expac` record parser. Ordinary
-`cargo test` runs stay deterministic and offline (see below); the jobs here
-run on a schedule or before releases, not on every change.
+untrusted-input boundary: the structured `expac` record parser and the
+`.SRCINFO` recipe-metadata parser. Ordinary `cargo test` runs stay
+deterministic and offline (see below); the jobs here run on a schedule or
+before releases, not on every change.
 
 ## What is covered
 
@@ -19,9 +20,17 @@ allocation:
 - Retained process stderr in failure messages: 2 KiB with a `[truncated]`
   marker (`MAX_RETAINED_STDERR_BYTES`).
 
-Every malformed input yields a typed error (`ParseError`, mapped to the
-adapter's `InventoryError`); no input panics. A failed refresh never replaces
-the published snapshot.
+The `.SRCINFO` parser lives in `src/srcinfo.rs` and treats fetched recipe
+metadata as untrusted until validated. It enforces its own bounds before
+any large allocation:
+
+- `.SRCINFO` input: 1 MiB total (`MAX_SRCINFO_BYTES`).
+- One recipe line: 8 KiB (`MAX_LINE_BYTES`).
+- Package sections per document: 1,024 (`MAX_PACKAGES`).
+
+Every malformed input yields a typed error (`ParseError`/`SrcinfoError`,
+mapped to the adapter's `InventoryError`); no input panics. A failed refresh
+never replaces the published snapshot.
 
 ## Ordinary tests (every change)
 
@@ -33,7 +42,7 @@ cargo test
 
 - Unit tests cover valid records, malformed rows, non-local databases,
   duplicates, and population mismatches.
-- Property tests (`src/inventory/tests.rs`) cover malformed sizes, duplicate
+- Property tests (`src/inventory/tests.rs`, `src/srcinfo.rs`) cover malformed sizes, duplicate
   records, conflicting records for one package name, arbitrary input
   ordering, and arbitrary byte strings (bounded, never panicking).
 - CLI tests (`tests/cli.rs`) use fixture `pacman`/`expac` executables with
@@ -43,26 +52,27 @@ cargo test
   preservation. They never depend on live Arch, AUR, GitHub, or upstream
   services.
 
-## Fuzz target (periodic)
+## Fuzz targets (periodic)
 
-Target: `fuzz/fuzz_targets/expac_parser.rs`. It includes
-`src/expac_parser.rs` directly with `#[path]`, so it always exercises the
-real parser, and feeds it arbitrary bytes with the allocation-limit
-assertions inline.
+Targets: `fuzz/fuzz_targets/expac_parser.rs` and
+`fuzz/fuzz_targets/srcinfo.rs`. Each includes its `src/` parser directly
+with `#[path]`, so the targets always exercise the real parsers, and feed
+each arbitrary bytes with the allocation-limit assertions inline.
 
 ```sh
 cargo install cargo-fuzz
 cd fuzz
 cargo fuzz run expac_parser -- -max_total_time=60        # quick check
+cargo fuzz run srcinfo -- -max_total_time=60             # quick check
 cargo fuzz run expac_parser -- -max_total_time=3600      # periodic budget
 ```
 
 `cargo fuzz` builds with AddressSanitizer by default, so the periodic
-one-hour run doubles as the sanitizer pass over the parser. Run it weekly
+one-hour run doubles as the sanitizer pass over the parsers. Run it weekly
 and before any release that touches `src/expac_parser.rs`,
-`src/inventory.rs`, or the `fuzz/` target. Keep the corpus in the fuzzer's
-default directory and check in only minimal regression seeds as ordinary
-fixture tests.
+`src/srcinfo.rs`, `src/inventory.rs`, or the `fuzz/` targets. Keep the
+corpus in the fuzzer's default directory and check in only minimal
+regression seeds as ordinary fixture tests.
 
 ## Sanitizers (periodic)
 
