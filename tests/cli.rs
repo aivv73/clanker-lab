@@ -1282,3 +1282,301 @@ fn version_two_snapshot_migrates_and_reports_unknown_staleness() {
         .unwrap();
     assert_eq!(version, 3);
 }
+
+fn bin_with_only(tool: &str, source_bin: &Path) -> tempfile::TempDir {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::copy(source_bin.join(tool), directory.path().join(tool)).unwrap();
+    directory
+}
+
+fn write_expac(directory: &Path, script_body: &str) {
+    write_executable(&directory.join("expac"), script_body);
+}
+
+#[test]
+fn missing_pacman_produces_a_typed_adapter_error() {
+    let data_home = tempfile::tempdir().unwrap();
+    let fixture_bin = fixture_bin();
+    let only_expac = bin_with_only("expac", fixture_bin.path());
+
+    let output = command(data_home.path())
+        .args(["refresh", "--metadata-only", "--format", "json"])
+        .env("PATH", only_expac.path())
+        .output()
+        .unwrap();
+    let error: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stderr.is_empty());
+    assert_eq!(error["error"]["code"], "inventory");
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("cannot start pacman"),
+        "message: {}",
+        error["error"]["message"]
+    );
+}
+
+#[test]
+fn missing_expac_produces_a_typed_adapter_error() {
+    let data_home = tempfile::tempdir().unwrap();
+    let fixture_bin = fixture_bin();
+    let only_pacman = bin_with_only("pacman", fixture_bin.path());
+
+    let output = command(data_home.path())
+        .args(["refresh", "--metadata-only", "--format", "json"])
+        .env("PATH", only_pacman.path())
+        .output()
+        .unwrap();
+    let error: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stderr.is_empty());
+    assert_eq!(error["error"]["code"], "inventory");
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("cannot start expac"),
+        "message: {}",
+        error["error"]["message"]
+    );
+}
+
+#[test]
+fn nonzero_adapter_exit_keeps_diagnostic_context_and_the_prior_snapshot() {
+    let data_home = tempfile::tempdir().unwrap();
+    let fixture_bin = fixture_bin();
+    assert!(
+        refresh(&["--format", "json"], data_home.path(), fixture_bin.path())
+            .status
+            .success()
+    );
+    write_expac(
+        fixture_bin.path(),
+        "#!/bin/sh\n\
+         echo 'expac database is locked' >&2\n\
+         exit 1\n",
+    );
+
+    let failed = refresh(&["--format", "json"], data_home.path(), fixture_bin.path());
+    let error: serde_json::Value = serde_json::from_slice(&failed.stdout).unwrap();
+
+    assert_eq!(failed.status.code(), Some(1));
+    assert_eq!(error["error"]["code"], "inventory");
+    let message = error["error"]["message"].as_str().unwrap();
+    assert!(message.contains("expac"), "message: {message}");
+    assert!(
+        message.contains("expac database is locked"),
+        "message: {message}"
+    );
+    assert_eq!(snapshot_count(data_home.path()), 1);
+
+    // Restore the working adapter for the follow-up report.
+    std::fs::remove_file(fixture_bin.path().join("expac")).unwrap();
+    write_executable(
+        &fixture_bin.path().join("expac"),
+        "#!/bin/sh\n\
+         [ \"$#\" -eq 2 ] && [ \"$1\" = '-Q' ] || exit 64\n\
+         printf 'alpha\\t1.0-1\\talpha\\tlocal\\texplicit\\t120\\n\
+foreign-tool\\t3.0-1\\tforeign-tool\\tlocal\\texplicit\\t40\\n\
+suite-cli\\t2.0-1\\tsuite\\tlocal\\tdependency\\t300\\n\
+suite-docs\\t2.0-1\\tsuite\\tlocal\\tdependency\\t80\\n'\n",
+    );
+    let count = run_with_inventory(
+        &["count", "--format", "json"],
+        data_home.path(),
+        fixture_bin.path(),
+    );
+    let report: serde_json::Value = serde_json::from_slice(&count.stdout).unwrap();
+    assert!(count.status.success());
+    assert_eq!(report["installed_total"], 4);
+}
+
+#[test]
+fn unbounded_adapter_stderr_is_truncated_not_leaked() {
+    let data_home = tempfile::tempdir().unwrap();
+    let fixture_bin = fixture_bin();
+    assert!(
+        refresh(&["--format", "json"], data_home.path(), fixture_bin.path())
+            .status
+            .success()
+    );
+    write_expac(
+        fixture_bin.path(),
+        "#!/bin/sh\n\
+         pad='xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'\n\
+         chunk=\"$pad$pad$pad$pad$pad$pad$pad$pad\"\n\
+         chunk=\"$chunk$chunk$chunk$chunk\"\n\
+         while [ \"${#chunk}\" -lt 102400 ]; do chunk=\"$chunk$chunk\"; done\n\
+         printf '%s' \"$chunk\" >&2\n\
+         exit 1\n",
+    );
+
+    let failed = refresh(&["--format", "json"], data_home.path(), fixture_bin.path());
+    let error: serde_json::Value = serde_json::from_slice(&failed.stdout).unwrap();
+    let message = error["error"]["message"].as_str().unwrap();
+
+    assert_eq!(failed.status.code(), Some(1));
+    assert_eq!(error["error"]["code"], "inventory");
+    assert!(message.contains("[truncated]"), "message tail: {message}");
+    assert!(
+        message.len() < 8 * 1024,
+        "diagnostic context must stay bounded, got {} bytes",
+        message.len()
+    );
+    assert_eq!(snapshot_count(data_home.path()), 1);
+}
+
+#[test]
+fn invalid_utf8_adapter_output_cannot_publish() {
+    let data_home = tempfile::tempdir().unwrap();
+    let fixture_bin = fixture_bin();
+    assert!(
+        refresh(&["--format", "json"], data_home.path(), fixture_bin.path())
+            .status
+            .success()
+    );
+    write_expac(
+        fixture_bin.path(),
+        "#!/bin/sh\nprintf '\\xff\\xfe\\x00broken\\n'\n",
+    );
+
+    let failed = refresh(&["--format", "json"], data_home.path(), fixture_bin.path());
+    let error: serde_json::Value = serde_json::from_slice(&failed.stdout).unwrap();
+
+    assert_eq!(failed.status.code(), Some(1));
+    assert_eq!(error["error"]["code"], "inventory");
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("not UTF-8"),
+        "message: {}",
+        error["error"]["message"]
+    );
+    assert_eq!(snapshot_count(data_home.path()), 1);
+}
+
+#[test]
+fn malformed_metadata_variants_cannot_replace_the_published_snapshot() {
+    // Each case replaces the fixture `expac` with output that must be
+    // rejected: malformed rows, invalid names, invalid sizes, duplicate
+    // rows, and conflicting rows for one package name.
+    let cases: &[(&str, &str)] = &[
+        ("malformed row", "alpha\tbroken\n"),
+        (
+            "invalid name with whitespace",
+            "bad name\t1.0-1\tbad name\tlocal\texplicit\t10\n",
+        ),
+        (
+            "invalid name with slash",
+            "bad/name\t1.0-1\tbad/name\tlocal\texplicit\t10\n",
+        ),
+        (
+            "non-numeric size",
+            "alpha\t1.0-1\talpha\tlocal\texplicit\tlots\n",
+        ),
+        (
+            "negative size",
+            "alpha\t1.0-1\talpha\tlocal\texplicit\t-5\n",
+        ),
+        (
+            "overflowing size",
+            "alpha\t1.0-1\talpha\tlocal\texplicit\t18446744073709551616\n",
+        ),
+        (
+            "size exceeding sqlite range",
+            "alpha\t1.0-1\talpha\tlocal\texplicit\t9223372036854775808\n",
+        ),
+        (
+            "duplicate rows",
+            "alpha\t1.0-1\talpha\tlocal\texplicit\t120\n\
+             alpha\t1.0-1\talpha\tlocal\texplicit\t120\n",
+        ),
+        (
+            "conflicting rows",
+            "alpha\t1.0-1\talpha\tlocal\texplicit\t120\n\
+             alpha\t2.0-1\talpha\tlocal\tdependency\t999\n",
+        ),
+        (
+            "unexpected install reason",
+            "alpha\t1.0-1\talpha\tlocal\tsomeday\t120\n",
+        ),
+        (
+            "non-local queried database",
+            "alpha\t1.0-1\talpha\textra\texplicit\t120\n",
+        ),
+    ];
+
+    for (label, body) in cases {
+        let data_home = tempfile::tempdir().unwrap();
+        let fixture_bin = fixture_bin();
+        assert!(
+            refresh(&["--format", "json"], data_home.path(), fixture_bin.path())
+                .status
+                .success(),
+            "setup failed for case: {label}"
+        );
+        let escaped = body.replace('\\', "\\\\").replace('\'', "'\\''");
+        write_expac(
+            fixture_bin.path(),
+            &format!("#!/bin/sh\nprintf '{escaped}'\n"),
+        );
+
+        let failed = refresh(&["--format", "json"], data_home.path(), fixture_bin.path());
+        let error: serde_json::Value = serde_json::from_slice(&failed.stdout).unwrap();
+        assert_eq!(failed.status.code(), Some(1), "case: {label}");
+        assert_eq!(error["error"]["code"], "inventory", "case: {label}");
+        assert_eq!(snapshot_count(data_home.path()), 1, "case: {label}");
+
+        let count = run_with_inventory(
+            &["count", "--format", "json"],
+            data_home.path(),
+            fixture_bin.path(),
+        );
+        // The follow-up report still reads live inventory through the broken
+        // expac fixture for nothing: `count` only needs `pacman -Q`, so it
+        // succeeds against the preserved snapshot.
+        let report: serde_json::Value = serde_json::from_slice(&count.stdout).unwrap();
+        assert!(count.status.success(), "case: {label}");
+        assert_eq!(report["installed_total"], 4, "case: {label}");
+    }
+}
+
+#[test]
+fn oversized_adapter_output_is_rejected_without_publishing() {
+    let data_home = tempfile::tempdir().unwrap();
+    let fixture_bin = fixture_bin();
+    assert!(
+        refresh(&["--format", "json"], data_home.path(), fixture_bin.path())
+            .status
+            .success()
+    );
+    write_expac(
+        fixture_bin.path(),
+        "#!/bin/sh\n\
+         pad='xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'\n\
+         chunk=\"$pad$pad$pad$pad$pad$pad$pad$pad\"\n\
+         chunk=\"$chunk$chunk$chunk$chunk\"\n\
+         while [ \"${#chunk}\" -le 16777216 ]; do chunk=\"$chunk$chunk\"; done\n\
+         printf '%s' \"$chunk\"\n",
+    );
+
+    let failed = refresh(&["--format", "json"], data_home.path(), fixture_bin.path());
+    let error: serde_json::Value = serde_json::from_slice(&failed.stdout).unwrap();
+
+    assert_eq!(failed.status.code(), Some(1));
+    assert_eq!(error["error"]["code"], "inventory");
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("capture limit"),
+        "message: {}",
+        error["error"]["message"]
+    );
+    assert_eq!(snapshot_count(data_home.path()), 1);
+}

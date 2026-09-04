@@ -8,11 +8,12 @@ use std::process::{Command, Output, Stdio};
 
 use sha2::{Digest, Sha256};
 
+use crate::expac_parser;
 use crate::interrupt;
 use crate::package::{InstallReason, PackageOrigin, SnapshotPackage};
 
 // expac fields: name, version, package base, queried database, install reason,
-// installed bytes. Keep this order aligned with LocalExpacRecord::parse.
+// installed bytes. Keep this order aligned with expac_parser::parse_record_line.
 const LOCAL_EXPAC_LAYOUT: &str = r"%n\t%v\t%e\t%r\t%w\t%m";
 
 #[derive(Debug)]
@@ -28,6 +29,15 @@ pub(crate) enum InventoryError {
         stderr: String,
     },
     NonUtf8Output(&'static str),
+    OutputTooLarge {
+        command: &'static str,
+        limit: usize,
+        actual: usize,
+    },
+    TooManyPackages {
+        command: &'static str,
+        limit: usize,
+    },
     ReadCommandOutput {
         command: &'static str,
         source: std::io::Error,
@@ -67,6 +77,17 @@ impl fmt::Display for InventoryError {
             }
             Self::NonUtf8Output(command) => {
                 write!(formatter, "{command} returned output that is not UTF-8")
+            }
+            Self::OutputTooLarge {
+                command,
+                limit,
+                actual,
+            } => write!(
+                formatter,
+                "{command} returned {actual} bytes, which exceeds the {limit}-byte capture limit"
+            ),
+            Self::TooManyPackages { command, limit } => {
+                write!(formatter, "{command} returned more than {limit} packages")
             }
             Self::ReadCommandOutput { command, source } => {
                 write!(formatter, "cannot read {command} output: {source}")
@@ -124,12 +145,12 @@ fn display_names(names: &[String]) -> String {
 
 #[derive(Debug)]
 pub(crate) struct InstalledPackage {
-    name: PackageName,
-    version: PackageVersion,
-    package_base: Option<PackageBase>,
+    name: String,
+    version: String,
+    package_base: Option<String>,
     origin: PackageOrigin,
     install_reason: InstallReason,
-    installed_bytes: InstalledBytes,
+    installed_bytes: i64,
 }
 
 /// SHA-256 digest over sorted `name + NUL + version + newline` entries.
@@ -199,15 +220,15 @@ impl CapturedInventory {
 
 impl InstalledPackage {
     pub(crate) fn name(&self) -> &str {
-        &self.name.0
+        &self.name
     }
 
     pub(crate) fn version(&self) -> &str {
-        &self.version.0
+        &self.version
     }
 
     pub(crate) fn package_base(&self) -> Option<&str> {
-        self.package_base.as_ref().map(|value| value.0.as_str())
+        self.package_base.as_deref()
     }
 
     pub(crate) fn origin(&self) -> &str {
@@ -219,128 +240,8 @@ impl InstalledPackage {
     }
 
     pub(crate) const fn installed_bytes(&self) -> i64 {
-        self.installed_bytes.0
+        self.installed_bytes
     }
-}
-
-#[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
-struct PackageName(String);
-
-impl PackageName {
-    fn parse(value: &str) -> Result<Self, &'static str> {
-        parse_nonempty_field(value, "package name")?;
-        if value.chars().any(char::is_whitespace) {
-            return Err("package name contains whitespace");
-        }
-        Ok(Self(value.to_owned()))
-    }
-}
-
-#[derive(Debug)]
-struct PackageVersion(String);
-
-impl PackageVersion {
-    fn parse(value: &str) -> Result<Self, &'static str> {
-        parse_nonempty_field(value, "package version")?;
-        Ok(Self(value.to_owned()))
-    }
-}
-
-#[derive(Debug)]
-struct PackageBase(String);
-
-impl PackageBase {
-    fn parse_optional(value: &str) -> Result<Option<Self>, &'static str> {
-        if value.is_empty() {
-            Ok(None)
-        } else {
-            parse_plain_field(value, "package base")?;
-            Ok(Some(Self(value.to_owned())))
-        }
-    }
-}
-
-#[derive(Debug)]
-struct InstalledBytes(i64);
-
-impl InstalledBytes {
-    fn parse(value: &str) -> Result<Self, &'static str> {
-        let bytes = value
-            .parse::<u64>()
-            .map_err(|_| "installed bytes is not an unsigned integer")?;
-        let bytes = i64::try_from(bytes).map_err(|_| "installed bytes exceeds SQLite's range")?;
-        Ok(Self(bytes))
-    }
-}
-
-struct LocalExpacRecord<'a> {
-    name: &'a str,
-    version: &'a str,
-    package_base: &'a str,
-    queried_database: &'a str,
-    install_reason: &'a str,
-    installed_bytes: &'a str,
-}
-
-impl<'a> LocalExpacRecord<'a> {
-    fn parse(line: &'a str) -> Result<Self, &'static str> {
-        let fields = line.split('\t').collect::<Vec<_>>();
-        let [
-            name,
-            version,
-            package_base,
-            queried_database,
-            install_reason,
-            installed_bytes,
-        ] = fields.as_slice()
-        else {
-            return Err("expected six tab-delimited fields");
-        };
-        Ok(Self {
-            name,
-            version,
-            package_base,
-            queried_database,
-            install_reason,
-            installed_bytes,
-        })
-    }
-
-    fn into_package(self) -> Result<InstalledPackage, &'static str> {
-        if self.queried_database != "local" {
-            return Err("queried database is not local");
-        }
-        Ok(InstalledPackage {
-            name: PackageName::parse(self.name)?,
-            version: PackageVersion::parse(self.version)?,
-            package_base: PackageBase::parse_optional(self.package_base)?,
-            origin: PackageOrigin::unknown(),
-            install_reason: InstallReason::parse(self.install_reason)?,
-            installed_bytes: InstalledBytes::parse(self.installed_bytes)?,
-        })
-    }
-}
-
-fn parse_nonempty_field(value: &str, field: &'static str) -> Result<(), &'static str> {
-    if value.is_empty() {
-        return match field {
-            "package name" => Err("package name is empty"),
-            "package version" => Err("package version is empty"),
-            _ => Err("required field is empty"),
-        };
-    }
-    parse_plain_field(value, field)
-}
-
-fn parse_plain_field(value: &str, field: &'static str) -> Result<(), &'static str> {
-    if value.chars().any(char::is_control) {
-        return match field {
-            "package base" => Err("package base contains a control character"),
-            "package version" => Err("package version contains a control character"),
-            _ => Err("field contains a control character"),
-        };
-    }
-    Ok(())
 }
 
 pub(crate) fn capture_installed_inventory() -> Result<CapturedInventory, InventoryError> {
@@ -378,15 +279,28 @@ pub(crate) fn read_live_fingerprint() -> Result<InventoryFingerprint, InventoryE
     let stdout = parse_stdout("pacman", &output.stdout)?;
     let mut packages = BTreeMap::new();
     for (index, line) in stdout.lines().enumerate() {
+        let line_number = index + 1;
+        if line.len() > expac_parser::MAX_FIELD_BYTES * 2 {
+            return Err(InventoryError::InvalidPacmanFingerprintLine(line_number));
+        }
         let (name, version) = line
             .split_once(' ')
-            .ok_or(InventoryError::InvalidPacmanFingerprintLine(index + 1))?;
-        let name = PackageName::parse(name)
-            .map_err(|_| InventoryError::InvalidPacmanFingerprintLine(index + 1))?;
-        let version = PackageVersion::parse(version)
-            .map_err(|_| InventoryError::InvalidPacmanFingerprintLine(index + 1))?;
-        if packages.insert(name.0.clone(), version.0).is_some() {
-            return Err(InventoryError::DuplicatePacmanName(name.0));
+            .ok_or(InventoryError::InvalidPacmanFingerprintLine(line_number))?;
+        expac_parser::validate_package_name(name)
+            .map_err(|_| InventoryError::InvalidPacmanFingerprintLine(line_number))?;
+        expac_parser::validate_package_version(version)
+            .map_err(|_| InventoryError::InvalidPacmanFingerprintLine(line_number))?;
+        if packages
+            .insert(name.to_owned(), version.to_owned())
+            .is_some()
+        {
+            return Err(InventoryError::DuplicatePacmanName(name.to_owned()));
+        }
+        if packages.len() > expac_parser::MAX_PACKAGES {
+            return Err(InventoryError::TooManyPackages {
+                command: "pacman",
+                limit: expac_parser::MAX_PACKAGES,
+            });
         }
     }
     Ok(InventoryFingerprint::from_name_versions(
@@ -416,50 +330,118 @@ fn run_command(command: &'static str, arguments: &[&str]) -> Result<Output, Inve
         return Err(InventoryError::Interrupted);
     }
     if output.status.success() {
+        if output.stdout.len() > expac_parser::MAX_STDOUT_BYTES {
+            return Err(InventoryError::OutputTooLarge {
+                command,
+                limit: expac_parser::MAX_STDOUT_BYTES,
+                actual: output.stdout.len(),
+            });
+        }
         return Ok(output);
     }
 
     Err(InventoryError::CommandFailed {
         command,
         status: output.status.to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+        stderr: expac_parser::truncate_stderr_context(&output.stderr),
     })
 }
 
 fn parse_stdout<'a>(command: &'static str, stdout: &'a [u8]) -> Result<&'a str, InventoryError> {
+    if stdout.len() > expac_parser::MAX_STDOUT_BYTES {
+        return Err(InventoryError::OutputTooLarge {
+            command,
+            limit: expac_parser::MAX_STDOUT_BYTES,
+            actual: stdout.len(),
+        });
+    }
     std::str::from_utf8(stdout).map_err(|_| InventoryError::NonUtf8Output(command))
 }
 
 fn parse_pacman_names(stdout: &str) -> Result<BTreeSet<String>, InventoryError> {
+    if stdout.len() > expac_parser::MAX_STDOUT_BYTES {
+        return Err(InventoryError::OutputTooLarge {
+            command: "pacman",
+            limit: expac_parser::MAX_STDOUT_BYTES,
+            actual: stdout.len(),
+        });
+    }
     let mut names = BTreeSet::new();
     for (index, line) in stdout.lines().enumerate() {
-        let name =
-            PackageName::parse(line).map_err(|_| InventoryError::InvalidPacmanLine(index + 1))?;
-        if !names.insert(name.0.clone()) {
-            return Err(InventoryError::DuplicatePacmanName(name.0));
+        let line_number = index + 1;
+        if line.len() > expac_parser::MAX_FIELD_BYTES {
+            return Err(InventoryError::InvalidPacmanLine(line_number));
+        }
+        expac_parser::validate_package_name(line)
+            .map_err(|_| InventoryError::InvalidPacmanLine(line_number))?;
+        if !names.insert(line.to_owned()) {
+            return Err(InventoryError::DuplicatePacmanName(line.to_owned()));
+        }
+        if names.len() > expac_parser::MAX_PACKAGES {
+            return Err(InventoryError::TooManyPackages {
+                command: "pacman",
+                limit: expac_parser::MAX_PACKAGES,
+            });
         }
     }
     Ok(names)
 }
 
 fn parse_expac_records(stdout: &str) -> Result<BTreeMap<String, InstalledPackage>, InventoryError> {
-    let mut packages = BTreeMap::new();
-    for (index, line) in stdout.lines().enumerate() {
-        let line_number = index + 1;
-        let record = LocalExpacRecord::parse(line).map_err(|message| {
-            InventoryError::InvalidExpacRecord {
-                line: line_number,
-                message: message.to_owned(),
+    let parsed =
+        expac_parser::parse_expac_bytes(stdout.as_bytes()).map_err(|error| match error {
+            expac_parser::ParseError::NotUtf8 => InventoryError::NonUtf8Output("expac"),
+            expac_parser::ParseError::OutputTooLarge { limit, actual } => {
+                InventoryError::OutputTooLarge {
+                    command: "expac",
+                    limit,
+                    actual,
+                }
+            }
+            expac_parser::ParseError::TooManyPackages { limit } => {
+                InventoryError::TooManyPackages {
+                    command: "expac",
+                    limit,
+                }
+            }
+            expac_parser::ParseError::RecordTooLong { line, limit } => {
+                InventoryError::InvalidExpacRecord {
+                    line,
+                    message: format!("record exceeds the {limit}-byte limit"),
+                }
+            }
+            expac_parser::ParseError::FieldTooLong { line, limit } => {
+                InventoryError::InvalidExpacRecord {
+                    line,
+                    message: format!("a field exceeds the {limit}-byte limit"),
+                }
+            }
+            expac_parser::ParseError::InvalidRecord { line, message } => {
+                InventoryError::InvalidExpacRecord {
+                    line,
+                    message: message.to_owned(),
+                }
+            }
+            expac_parser::ParseError::DuplicateName { name, .. } => {
+                InventoryError::DuplicateExpacName(name)
             }
         })?;
-        let package =
-            record
-                .into_package()
-                .map_err(|message| InventoryError::InvalidExpacRecord {
-                    line: line_number,
-                    message: message.to_owned(),
-                })?;
+    let mut packages = BTreeMap::new();
+    for record in parsed {
+        let package = InstalledPackage {
+            name: record.name.clone(),
+            version: record.version,
+            package_base: record.package_base,
+            origin: PackageOrigin::unknown(),
+            install_reason: match record.install_reason {
+                expac_parser::ParsedInstallReason::Explicit => InstallReason::Explicit,
+                expac_parser::ParsedInstallReason::Dependency => InstallReason::Dependency,
+            },
+            installed_bytes: record.installed_bytes,
+        };
         let name = package.name().to_owned();
+        // The bounded parser already rejects duplicates, so this insert
+        // cannot fail; keep the check as defense in depth.
         if packages.insert(name.clone(), package).is_some() {
             return Err(InventoryError::DuplicateExpacName(name));
         }
