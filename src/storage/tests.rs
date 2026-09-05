@@ -514,6 +514,46 @@ fn provider_attempt_roundtrip_preserves_resolved_and_unresolved() {
 }
 
 #[test]
+fn resolved_checks_distinguish_missing_unresolved_and_other_providers() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut database = Database::open(&directory.path().join("paclang.db")).unwrap();
+    let refresh = database.begin_refresh().unwrap();
+    let provider = SourceProvider::parse("arch").unwrap();
+    assert!(
+        !refresh
+            .has_resolved_attempt("alpha", "1.0-1", &provider)
+            .unwrap()
+    );
+    refresh
+        .record_provider_attempt(&unresolved_attempt("arch"))
+        .unwrap();
+    assert!(
+        !refresh
+            .has_resolved_attempt("alpha", "1.0-1", &provider)
+            .unwrap()
+    );
+    refresh
+        .record_provider_attempt(&resolved_attempt("arch", EvidenceGrade::Reconstructed))
+        .unwrap();
+    assert!(
+        refresh
+            .has_resolved_attempt("alpha", "1.0-1", &provider)
+            .unwrap()
+    );
+    assert!(
+        !refresh
+            .has_resolved_attempt("alpha", "1.0-1", &SourceProvider::parse("aur").unwrap())
+            .unwrap()
+    );
+    assert!(
+        !refresh
+            .has_resolved_attempt("alpha", "9.9-9", &provider)
+            .unwrap()
+    );
+    refresh.publish(&[], &test_fingerprint()).unwrap();
+}
+
+#[test]
 fn shared_targets_normalize_absent_fields_and_preserve_attempt_grades() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("paclang.db");
