@@ -27,6 +27,7 @@ pub(crate) fn record_attempts<'a, W: io::Write>(
     packages: impl IntoIterator<Item = &'a InstalledPackage>,
     endpoint: &RecipeEndpoint,
     progress: &mut Progress<W>,
+    require_checksums: bool,
 ) -> Result<(), StorageError> {
     let provider = SourceProvider::parse("arch").expect("static provider name is valid");
     let mut groups = BTreeMap::<_, Vec<_>>::new();
@@ -50,7 +51,9 @@ pub(crate) fn record_attempts<'a, W: io::Write>(
         }
         let mut fresh = Vec::new();
         for package in members {
-            if refresh.has_resolved_attempt(package.name(), package.version(), &provider)? {
+            if refresh.has_resolved_attempt(package.name(), package.version(), &provider)?
+                && !(require_checksums && refresh.provider_attempts(package.name(), package.version())?.iter().any(|attempt|
+                    attempt.provider == provider && matches!(&attempt.outcome, AttemptOutcome::Resolved { target, .. } if target.revision.is_none() && target.checksum.is_none()))) {
                 continue;
             }
             fresh.push(*package);

@@ -518,3 +518,132 @@ fn inventory_changes_during_recipe_fetch_mark_the_published_snapshot_stale() {
         "1.0-1"
     );
 }
+
+#[test]
+fn provider_report_exposes_stored_evidence_in_every_format() {
+    let data = tempfile::tempdir().unwrap();
+    let bin = fixture_bin();
+    let (server, endpoint) = listener();
+    let worker = std::thread::spawn(move || serve_initial_recipes(server));
+    full_refresh(data.path(), bin.path(), &endpoint);
+    worker.join().unwrap();
+    let db = Connection::open(data.path().join("paclang/paclang.db")).unwrap();
+    // An older version must not leak into the current package's report.
+    db.execute(
+        "UPDATE provider_attempts SET package_version = 'old' WHERE package_name = 'suite-docs'",
+        [],
+    )
+    .unwrap();
+    // Preserve failures from other providers even when a candidate resolved.
+    db.execute("INSERT INTO provider_attempts (package_name, package_version, provider, outcome, failure_reason, recorded_at, recipe_location, recipe_commit) VALUES ('alpha', '1.0-1', 'other', 'unresolved', 'patch | <unknown> reason', 'now', 'https://example.org/recipe', ?1)", [COMMIT]).unwrap();
+    let inspect = |format: &str, extra: &[&str]| {
+        command(data.path())
+            .args(["providers", "--format", format])
+            .args(extra)
+            .env("PATH", bin.path())
+            .output()
+            .unwrap()
+    };
+    let output = inspect("json", &[]);
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["report"], "providers");
+    assert_eq!(json["snapshot_staleness"], "current");
+    assert_eq!(json["selected_population"], 4);
+    assert_eq!(json["resolved"], 2);
+    assert_eq!(json["unresolved"], 1);
+    assert_eq!(json["not_attempted"], 1);
+    let alpha = &json["packages"][0];
+    assert_eq!(alpha["name"], "alpha");
+    assert_eq!(alpha["outcome"], "resolved");
+    assert_eq!(alpha["attempts"][0]["grade"], "reconstructed");
+    assert_eq!(alpha["attempts"][0]["target"]["revision"], "tag:v1.0");
+    assert_eq!(alpha["attempts"][0]["recipe"]["commit"], COMMIT);
+    assert_eq!(alpha["attempts"][1]["outcome"], "unresolved");
+    assert_eq!(alpha["attempts"][1]["recipe"]["commit"], COMMIT);
+    assert!(json["packages"][1]["attempts"][0]["recipe"].is_null());
+    assert_eq!(json["packages"][3]["outcome"], "not_attempted");
+    assert_eq!(json["packages"][3]["attempts"], serde_json::json!([]));
+    let output = inspect("toon", &[]);
+    assert!(output.status.success());
+    let mut toon: serde_json::Value =
+        toon_format::decode_default(std::str::from_utf8(&output.stdout).unwrap()).unwrap();
+    assert_eq!(
+        toon.as_object_mut()
+            .unwrap()
+            .remove("toon_specification_version")
+            .unwrap(),
+        "3.0"
+    );
+    assert_eq!(toon, json);
+    for format in ["terminal", "markdown"] {
+        let output = inspect(format, &[]);
+        assert!(output.status.success());
+        let text = String::from_utf8(output.stdout).unwrap();
+        for expected in [
+            "Resolved: 2",
+            "Unresolved: 1",
+            "Not attempted: 1",
+            "reconstructed",
+            COMMIT,
+            "tag:v1.0",
+            "Recipe: unavailable",
+        ] {
+            assert!(text.contains(expected), "{format}: {text}");
+        }
+        assert!(!text.contains("<unknown>\nreason"));
+    }
+    let output = inspect("json", &["--explicit", "--origin", "unknown"]);
+    let selected: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(selected["selected_population"], 2);
+    assert_eq!(selected["installed_total"], 4);
+    let output = inspect("json", &["--origin", "absent", "--min-coverage", "100"]);
+    assert!(output.status.success());
+    let empty: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(empty["packages"], serde_json::json!([]));
+    assert_eq!(empty["selected_population"], 0);
+    assert_eq!(
+        inspect("json", &["--min-coverage", "1"]).status.code(),
+        Some(1)
+    );
+    db.execute(
+        "UPDATE installed_packages SET version = 'new' WHERE name = 'alpha'",
+        [],
+    )
+    .unwrap();
+    let output = inspect("json", &[]);
+    let changed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(changed["packages"][0]["outcome"], "not_attempted");
+}
+
+#[test]
+fn provider_report_handles_missing_snapshot_and_unattempted_inventory() {
+    let data = tempfile::tempdir().unwrap();
+    let bin = fixture_bin();
+    let inspect = || {
+        command(data.path())
+            .args(["providers", "--format", "json"])
+            .env("PATH", bin.path())
+            .output()
+            .unwrap()
+    };
+    let output = inspect();
+    assert!(!output.status.success());
+    let error: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(error["error"]["code"], "no_snapshot");
+    assert!(refresh(&[], data.path(), bin.path()).status.success());
+    let output = inspect();
+    assert!(output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["not_attempted"], 4);
+    assert_eq!(report["resolved"], 0);
+    assert_eq!(report["unresolved"], 0);
+    super::write_executable(
+        &bin.path().join("pacman"),
+        "#!/bin/sh\nprintf 'alpha 9.0-1\\n'\n",
+    );
+    let output = inspect();
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["snapshot_staleness"], "stale");
+}

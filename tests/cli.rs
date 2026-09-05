@@ -1,5 +1,7 @@
 #[path = "cli/recipes.rs"]
 mod recipes;
+#[path = "cli/sources.rs"]
+mod sources;
 
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
@@ -140,7 +142,7 @@ fn plain_command_returns_toon_no_snapshot_and_migrates_database() {
     let version: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 5);
+    assert_eq!(version, 6);
 }
 
 #[test]
@@ -221,13 +223,13 @@ fn invalid_cli_use_is_structured_and_exits_two() {
         match expected_format {
             "json" => {
                 let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
-                assert_eq!(value["schema_version"], "1.2.0");
+                assert_eq!(value["schema_version"], "1.4.0");
                 assert_eq!(value["error"]["code"], "invalid_cli");
             }
             "markdown" => assert!(stdout.contains("- Code: `invalid_cli`")),
             "toon" => {
                 let value: serde_json::Value = toon_format::decode_default(&stdout).unwrap();
-                assert_eq!(value["schema_version"], "1.2.0");
+                assert_eq!(value["schema_version"], "1.4.0");
                 assert_eq!(value["error"]["code"], "invalid_cli");
             }
             _ => unreachable!(),
@@ -1228,7 +1230,7 @@ fn version_one_snapshot_marker_migrates_to_no_snapshot() {
             row.get(0)
         })
         .unwrap();
-    assert_eq!(version, 5);
+    assert_eq!(version, 6);
     assert_eq!(snapshots, 0);
 }
 
@@ -1283,7 +1285,7 @@ fn version_two_snapshot_migrates_and_reports_unknown_staleness() {
     let version: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 5);
+    assert_eq!(version, 6);
 }
 
 fn bin_with_only(tool: &str, source_bin: &Path) -> tempfile::TempDir {

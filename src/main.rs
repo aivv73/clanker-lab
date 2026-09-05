@@ -1,3 +1,4 @@
+mod acquisition;
 mod arch_provider;
 mod cli;
 mod expac_parser;
@@ -49,6 +50,16 @@ impl FailureExit {
 }
 
 fn main() -> ExitCode {
+    let mut worker_args = env::args_os().skip(1);
+    if worker_args.next().as_deref() == Some(std::ffi::OsStr::new("--acquisition-worker")) {
+        return match (worker_args.next(), worker_args.next()) {
+            (Some(path), None) if acquisition::worker(std::path::Path::new(&path)) => {
+                ExitCode::SUCCESS
+            }
+            _ => ExitCode::from(1),
+        };
+    }
+
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(error) => {
@@ -118,10 +129,14 @@ fn run(
     min_coverage: Option<f64>,
 ) -> Result<RunOutput, AppError> {
     match command {
-        Command::Count => render_count(format, selection, min_coverage),
+        Command::Count => render_snapshot_report(format, selection, min_coverage, false),
+        Command::Providers => render_snapshot_report(format, selection, min_coverage, true),
         Command::Refresh {
             metadata_only: _,
             recipes_only,
+            sources_only,
+            require_complete,
+            limits,
             arch_api_url,
         } => {
             let database_path = storage::database_path().map_err(AppError::storage)?;
@@ -131,7 +146,8 @@ fn run(
             let inventory =
                 inventory::capture_installed_inventory().map_err(map_inventory_error)?;
             let snapshot_packages = inventory.snapshot_packages();
-            let staleness = if recipes_only {
+            let mut source_acquisition = None;
+            let staleness = if recipes_only || sources_only {
                 let selected = inventory
                     .packages()
                     .iter()
@@ -146,10 +162,27 @@ fn run(
                     selected,
                     &arch_api_url,
                     &mut progress,
+                    sources_only,
                 )
                 .map_err(map_storage_error);
                 progress.finish();
                 result?;
+                if sources_only {
+                    let selected = inventory
+                        .packages()
+                        .iter()
+                        .zip(&snapshot_packages)
+                        .filter_map(|(installed, snapshot)| {
+                            selection.includes(snapshot).then_some(installed)
+                        });
+                    let mut progress =
+                        progress::Progress::stderr("Acquiring sources", "Acquired", "Incomplete");
+                    let result =
+                        acquisition::record_sources(&refresh, selected, &limits, &mut progress)
+                            .map_err(map_storage_error);
+                    progress.finish();
+                    source_acquisition = Some(result?);
+                }
                 if inventory::read_live_fingerprint().map_err(map_inventory_error)?
                     != *inventory.fingerprint()
                 {
@@ -162,27 +195,56 @@ fn run(
             } else {
                 SnapshotStaleness::Current
             };
-            let report = CountReport::from_snapshot(&snapshot_packages, staleness, selection);
+            let sources_complete = source_acquisition
+                .as_ref()
+                .is_none_or(acquisition::AcquisitionSummary::complete);
+            let mut report = CountReport::from_snapshot(&snapshot_packages, staleness, selection);
+            report.source_acquisition = source_acquisition;
             let rendered = format.render_count(&report).map_err(AppError::render)?;
             refresh
                 .publish(inventory.packages(), inventory.fingerprint())
                 .map_err(map_storage_error)?;
             Ok(RunOutput {
                 rendered,
-                meets_coverage: report.meets_coverage(min_coverage),
+                meets_coverage: report.meets_coverage(min_coverage)
+                    && (!require_complete || sources_complete),
                 snapshot_read_guard: None,
             })
         }
     }
 }
 
-fn render_count(
+fn render_snapshot_report(
     format: Format,
     selection: report::PopulationSelection,
     min_coverage: Option<f64>,
+    providers: bool,
 ) -> Result<RunOutput, AppError> {
     let database_path = storage::database_path().map_err(AppError::storage)?;
     let database = storage::Database::open(&database_path).map_err(AppError::storage)?;
+    if providers {
+        let snapshot = database
+            .published_provider_snapshot()
+            .map_err(AppError::storage)?
+            .ok_or(AppError::NoSnapshot)?;
+        let live = inventory::read_live_fingerprint().map_err(map_inventory_error)?;
+        let staleness = match &snapshot.fingerprint {
+            Some(value) if *value == live => SnapshotStaleness::Current,
+            Some(_) => SnapshotStaleness::Stale,
+            None => SnapshotStaleness::Unknown,
+        };
+        let meets_coverage =
+            CountReport::from_snapshot(&snapshot.packages, staleness, selection.clone())
+                .meets_coverage(min_coverage);
+        let report =
+            report::providers::ProviderReport::from_snapshot(&snapshot, staleness, selection);
+        let rendered = report.render(format).map_err(AppError::render)?;
+        return Ok(RunOutput {
+            rendered,
+            meets_coverage,
+            snapshot_read_guard: Some(snapshot),
+        });
+    }
     render_count_from_database(format, &database, selection, min_coverage)
 }
 

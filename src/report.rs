@@ -1,3 +1,4 @@
+pub(crate) mod providers;
 #[cfg(test)]
 mod tests;
 
@@ -11,16 +12,16 @@ use crate::package::{InstallReason, PackageOrigin, SnapshotPackage};
 
 #[derive(Clone, Copy, Debug, Serialize)]
 enum ReportSchemaVersion {
-    #[serde(rename = "1.2.0")]
-    V1_2_0,
+    #[serde(rename = "1.4.0")]
+    V1_4_0,
 }
 
 impl ReportSchemaVersion {
-    const CURRENT: Self = Self::V1_2_0;
+    const CURRENT: Self = Self::V1_4_0;
 
     const fn as_str(self) -> &'static str {
         match self {
-            Self::V1_2_0 => "1.2.0",
+            Self::V1_4_0 => "1.4.0",
         }
     }
 }
@@ -200,6 +201,7 @@ impl SnapshotStaleness {
 #[serde(rename_all = "snake_case")]
 enum ReportKind {
     Count,
+    Providers,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -278,6 +280,8 @@ pub struct CountReport {
     installed_total: u64,
     selected_population: u64,
     coverage: Coverage,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) source_acquisition: Option<crate::acquisition::AcquisitionSummary>,
 }
 
 impl CountReport {
@@ -299,6 +303,7 @@ impl CountReport {
             installed_total,
             selected_population,
             coverage: Coverage::missing_only(selected_population),
+            source_acquisition: None,
         }
     }
 
@@ -333,6 +338,9 @@ impl CountReport {
                 format_tenths(share)
             ));
         }
+        if let Some(summary) = &self.source_acquisition {
+            rendered.push_str(&format!("\n\n{}", summary.render()));
+        }
         rendered
     }
 
@@ -354,6 +362,9 @@ impl CountReport {
                 row.count,
                 format_tenths(share)
             ));
+        }
+        if let Some(summary) = &self.source_acquisition {
+            rendered.push_str(&format!("\n\n{}", summary.render()));
         }
         rendered
     }
@@ -498,6 +509,8 @@ struct ToonCountReport<'a> {
     installed_total: u64,
     selected_population: u64,
     coverage: &'a Coverage,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_acquisition: &'a Option<crate::acquisition::AcquisitionSummary>,
 }
 
 impl<'a> From<&'a CountReport> for ToonCountReport<'a> {
@@ -511,6 +524,7 @@ impl<'a> From<&'a CountReport> for ToonCountReport<'a> {
             installed_total: report.installed_total,
             selected_population: report.selected_population,
             coverage: &report.coverage,
+            source_acquisition: &report.source_acquisition,
         }
     }
 }

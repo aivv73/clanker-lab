@@ -92,6 +92,52 @@ fn uncertain_sources_never_become_current_upstream_fallbacks() {
 }
 
 #[test]
+fn remote_patches_do_not_veto_a_primary_tree_or_supply_one() {
+    for auxiliary in [
+        "https://example.org/fix.patch",
+        "https://example.org/fix.diff?download=1",
+        "fix.patch::https://example.org/download/123",
+        "fix.diff::https://example.org/download/456",
+    ] {
+        assert_eq!(
+            resolve(auxiliary),
+            AttemptOutcome::Unresolved {
+                reason: "primary source is missing or ambiguous in recipe metadata".to_owned(),
+            },
+            "{auxiliary}"
+        );
+        for primary in [
+            "https://example.org/alpha-1.0.tar.gz",
+            "git+https://example.org/alpha.git#tag=v1.0",
+        ] {
+            assert_eq!(
+                resolve(&format!("{primary}\n\tsource = {auxiliary}")),
+                resolve(primary),
+                "{primary} with {auxiliary}"
+            );
+        }
+    }
+    for auxiliary in [
+        "http://example.org/fix.patch",
+        "https://user:secret@example.org/fix.diff",
+        "https://example.org/$pkgver.patch",
+        "https://example.org/unknown.bin",
+        "git+https://example.org/fix.patch",
+        "https://example.org/other-1.0.tar.gz",
+    ] {
+        assert!(
+            matches!(
+                resolve(&format!(
+                    "https://example.org/alpha-1.0.tar.gz\n\tsource = {auxiliary}"
+                )),
+                AttemptOutcome::Unresolved { .. }
+            ),
+            "{auxiliary}"
+        );
+    }
+}
+
+#[test]
 fn matching_split_members_share_targets_and_keep_recipe_commit() {
     let recipe = recipe(
         "pkgbase = suite\n\tpkgver = 2.0\n\tpkgrel = 1\n\tepoch = 3\n\tsource = https://example.org/suite-2.0.tar.gz\n\tsource = https://example.org/suite-2.0.tar.gz.sig\n\tsource = fix.patch\npkgname = suite-cli\npkgname = suite-docs\n",
@@ -224,4 +270,40 @@ fn project_paths_follow_arch_packaging_names() {
     ] {
         assert_eq!(project_path(base), path);
     }
+}
+
+#[test]
+fn archive_checksums_follow_source_positions_and_survive_auxiliary_inputs() {
+    let digest = "a".repeat(64);
+    let AttemptOutcome::Resolved { target, .. } = resolve(&format!(
+        "https://example.org/fix.patch\n\tsource = alpha.tar::https://example.org/alpha-1.0.tar\n\tsha256sums = SKIP\n\tsha256sums = {digest}"
+    )) else {
+        panic!("valid checksum metadata did not resolve");
+    };
+    assert_eq!(target.checksum, Some(format!("sha256:{digest}")));
+    let digest = "B".repeat(128);
+    let AttemptOutcome::Resolved { target, .. } = resolve(&format!(
+        "https://example.org/alpha-1.0.tar\n\tsha512sums = {digest}"
+    )) else {
+        panic!("SHA-512 did not resolve");
+    };
+    assert_eq!(
+        target.checksum,
+        Some(format!("sha512:{}", digest.to_ascii_lowercase()))
+    );
+    for sums in [
+        "\tsha256sums = invalid",
+        "\tsha256sums = SKIP\n\tsha256sums = SKIP",
+    ] {
+        assert!(matches!(
+            resolve(&format!("https://example.org/alpha-1.0.tar\n{sums}")),
+            AttemptOutcome::Unresolved { .. }
+        ));
+    }
+    let AttemptOutcome::Resolved { target, .. } =
+        resolve("https://example.org/alpha-1.0.tar\n\tsha256sums = SKIP")
+    else {
+        panic!("SKIP should preserve resolution, not verification");
+    };
+    assert_eq!(target.checksum, None);
 }

@@ -92,15 +92,49 @@ impl Recipe {
             return unresolved("recipe version does not match installed version");
         }
         let mut targets = Vec::new();
-        for source in document.sources.iter().chain(&member.sources) {
-            match source_target(source, &document.pkgver) {
-                Ok(Some(target)) => {
-                    if !targets.contains(&target) {
-                        targets.push(target);
+        for (sources, sha256, sha512) in [
+            (
+                &document.sources,
+                &document.sha256sums,
+                &document.sha512sums,
+            ),
+            (&member.sources, &member.sha256sums, &member.sha512sums),
+        ] {
+            if [sha256, sha512]
+                .iter()
+                .any(|sums| !sums.is_empty() && sums.len() != sources.len())
+            {
+                return unresolved("recipe checksum count does not match source count");
+            }
+            for (index, source) in sources.iter().enumerate() {
+                match source_target(source, &document.pkgver) {
+                    Ok(Some(mut target)) => {
+                        if target.revision.is_none() {
+                            for (kind, length, sums) in
+                                [("sha512", 128, sha512), ("sha256", 64, sha256)]
+                            {
+                                if let Some(sum) =
+                                    sums.get(index).filter(|sum| sum.as_str() != "SKIP")
+                                {
+                                    if sum.len() != length
+                                        || !sum.bytes().all(|b| b.is_ascii_hexdigit())
+                                    {
+                                        return unresolved("invalid source checksum");
+                                    }
+                                    if target.checksum.is_none() {
+                                        target.checksum =
+                                            Some(format!("{kind}:{}", sum.to_ascii_lowercase()));
+                                    }
+                                }
+                            }
+                        }
+                        if !targets.contains(&target) {
+                            targets.push(target);
+                        }
                     }
+                    Ok(None) => {}
+                    Err(reason) => return unresolved(reason),
                 }
-                Ok(None) => {}
-                Err(reason) => return unresolved(reason),
             }
         }
         if targets.len() != 1 {
@@ -133,7 +167,12 @@ fn source_target(source: &str, version: &str) -> Result<Option<AnalysisTarget>, 
         return Err("source URL contains whitespace");
     }
     let mut url = Url::parse(location).map_err(|_| "invalid source URL")?;
-    if url.scheme() != "https" || !url.username().is_empty() || url.password().is_some() {
+    let loopback = matches!(url.host(), Some(url::Host::Ipv4(ip)) if ip.is_loopback())
+        || matches!(url.host(), Some(url::Host::Ipv6(ip)) if ip.is_loopback());
+    if !(url.scheme() == "https" || url.scheme() == "http" && loopback)
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
         return Err("source URL requires HTTPS without credentials");
     }
     let revision = if is_git {
@@ -158,7 +197,8 @@ fn source_target(source: &str, version: &str) -> Result<Option<AnalysisTarget>, 
         revision
     } else {
         let filename = alias.unwrap_or_else(|| url.path().rsplit('/').next().unwrap_or(""));
-        if [".sig", ".asc"]
+        // Auxiliary downloads do not identify a primary source tree.
+        if [".sig", ".asc", ".patch", ".diff"]
             .iter()
             .any(|suffix| filename.ends_with(suffix))
         {
@@ -199,6 +239,7 @@ fn source_target(source: &str, version: &str) -> Result<Option<AnalysisTarget>, 
         location: url.to_string(),
         revision,
         subdirectory: None,
+        checksum: None,
     }))
 }
 

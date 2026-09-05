@@ -46,6 +46,8 @@ pub struct ParsedSrcinfo {
     pub epoch: Option<String>,
     /// Base-level `source` entries in document order.
     pub sources: Vec<String>,
+    pub sha256sums: Vec<String>,
+    pub sha512sums: Vec<String>,
     /// Architecture-specific source arrays require a later architecture-aware
     /// resolver; their presence must not silently disappear from evidence.
     pub has_arch_specific_sources: bool,
@@ -60,6 +62,8 @@ pub struct ParsedSrcinfoPackage {
     pub name: String,
     /// Package-level `source` entries in document order.
     pub sources: Vec<String>,
+    pub sha256sums: Vec<String>,
+    pub sha512sums: Vec<String>,
 }
 
 /// Typed parse failure. Every variant carries enough context to diagnose the
@@ -163,6 +167,8 @@ struct DocumentBuilder {
     pkgrel: Option<String>,
     epoch: Option<String>,
     sources: Vec<String>,
+    sha256sums: Vec<String>,
+    sha512sums: Vec<String>,
     has_arch_specific_sources: bool,
     packages: Vec<ParsedSrcinfoPackage>,
 }
@@ -201,6 +207,8 @@ impl DocumentBuilder {
             pkgrel,
             epoch: self.epoch,
             sources: self.sources,
+            sha256sums: self.sha256sums,
+            sha512sums: self.sha512sums,
             has_arch_specific_sources: self.has_arch_specific_sources,
             packages: self.packages,
         })
@@ -273,6 +281,8 @@ fn parse_section_line(
             document.packages.push(ParsedSrcinfoPackage {
                 name,
                 sources: Vec::new(),
+                sha256sums: Vec::new(),
+                sha512sums: Vec::new(),
             });
             Ok(())
         }
@@ -302,6 +312,16 @@ fn parse_indented_line(
     let current = document.current_package();
     if key.starts_with("source_") {
         document.has_arch_specific_sources = true;
+        return Ok(());
+    }
+    if matches!(key, "sha256sums" | "sha512sums") {
+        let checksums = match (current, key) {
+            (Some(index), "sha256sums") => &mut document.packages[index].sha256sums,
+            (Some(index), _) => &mut document.packages[index].sha512sums,
+            (None, "sha256sums") => &mut document.sha256sums,
+            (None, _) => &mut document.sha512sums,
+        };
+        checksums.push(parse_source_value(value, line_number)?);
         return Ok(());
     }
     if key == "source" {

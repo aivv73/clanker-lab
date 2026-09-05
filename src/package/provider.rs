@@ -57,11 +57,13 @@ impl EvidenceGrade {
 /// A canonical source location, revision, and optional subdirectory analyzed
 /// once. Several installed packages may share one analysis target; absent
 /// revision or subdirectory is `None` and persists as an empty string.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct AnalysisTarget {
     pub(crate) location: String,
     pub(crate) revision: Option<String>,
     pub(crate) subdirectory: Option<String>,
+    /// Recipe checksum, encoded as sha256:HEX or sha512:HEX.
+    pub(crate) checksum: Option<String>,
 }
 
 /// One source provider's recorded evidence or failure while resolving an
