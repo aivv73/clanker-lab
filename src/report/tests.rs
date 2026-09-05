@@ -35,7 +35,7 @@ fn json_error_has_stable_schema() {
     let rendered = Format::Json.render_error(&AppError::NoSnapshot).unwrap();
     let value: serde_json::Value = serde_json::from_str(&rendered).unwrap();
 
-    assert_eq!(value["schema_version"], "1.4.0");
+    assert_eq!(value["schema_version"], "1.5.0");
     assert_eq!(value["error"]["code"], "no_snapshot");
     assert_eq!(
         value["error"]["next_command"],
@@ -151,7 +151,7 @@ fn toon_report_declares_the_pinned_specification_version() {
     let rendered = Format::Toon.render_count(&report).unwrap();
     let value: serde_json::Value = toon_format::decode_default(&rendered).unwrap();
 
-    assert_eq!(value["schema_version"], "1.4.0");
+    assert_eq!(value["schema_version"], "1.5.0");
     assert_eq!(value["toon_specification_version"], "3.0");
     assert_eq!(
         value["coverage"]["rows"],

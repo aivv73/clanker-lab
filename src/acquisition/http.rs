@@ -29,6 +29,7 @@ pub(super) fn download(
     destination: &Path,
     limits: &Limits,
     record: &mut AcquisitionRecord,
+    proxy: Option<&str>,
 ) -> Result<(), Error> {
     if !curl::Version::get().feature_async_dns() {
         return Err(Error::Failed(
@@ -41,7 +42,7 @@ pub(super) fn download(
         let mut easy = Easy::new();
         let config = |_| Error::Failed("cannot configure source HTTP request");
         easy.url(url.as_str()).map_err(config)?;
-        easy.proxy("").map_err(config)?;
+        easy.proxy(proxy.unwrap_or("")).map_err(config)?;
         easy.follow_location(false).map_err(config)?;
         easy.connect_timeout(Duration::from_secs(15))
             .map_err(config)?;
@@ -87,9 +88,18 @@ pub(super) fn download(
         }
         result.map_err(|error| {
             if error.is_operation_timedout() {
-                Error::Limited("source deadline exceeded")
+                // A timeout before TCP connects is a network reachability
+                // failure, not an exceeded download budget.
+                if easy.connect_time().is_ok_and(|time| !time.is_zero()) {
+                    Error::Limited("source deadline exceeded")
+                } else {
+                    Error::Failed("source connection timed out")
+                }
             } else {
-                Error::Failed("source HTTP transfer failed")
+                Error::Detail(format!(
+                    "source HTTP transfer failed (curl code {})",
+                    error.code()
+                ))
             }
         })?;
         let status = easy.response_code().map_err(config)?;

@@ -5,7 +5,8 @@ use rusqlite::Connection;
 use super::{Database, MigrationVersion, StorageError};
 use crate::inventory::InventoryFingerprint;
 use crate::package::provider::{
-    AnalysisTarget, AttemptOutcome, EvidenceGrade, ProviderAttempt, SourceProvider,
+    AnalysisTarget, AttemptOutcome, EvidenceGrade, ProviderAttempt, RecipeProvenance,
+    SourceProvider,
 };
 
 #[test]
@@ -44,7 +45,7 @@ fn malformed_current_database_is_refused_without_mutation() {
     let path = directory.path().join("paclang.db");
     let connection = Connection::open(&path).unwrap();
     connection
-        .execute_batch("CREATE TABLE marker (id INTEGER); PRAGMA user_version = 6;")
+        .execute_batch("CREATE TABLE marker (id INTEGER); PRAGMA user_version = 7;")
         .unwrap();
     drop(connection);
 
@@ -65,7 +66,7 @@ fn malformed_current_database_is_refused_without_mutation() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
     assert_eq!(marker_tables, 1);
 }
 
@@ -156,7 +157,7 @@ fn newer_database_is_refused_without_mutation() {
     let path = directory.path().join("paclang.db");
     let connection = Connection::open(&path).unwrap();
     connection
-        .execute_batch("CREATE TABLE marker (id INTEGER); PRAGMA user_version = 7;")
+        .execute_batch("CREATE TABLE marker (id INTEGER); PRAGMA user_version = 8;")
         .unwrap();
     drop(connection);
 
@@ -167,7 +168,7 @@ fn newer_database_is_refused_without_mutation() {
     assert!(matches!(
         error,
         StorageError::UnsupportedSchemaVersion(version)
-            if version == MigrationVersion::from_database(7)
+            if version == MigrationVersion::from_database(8)
     ));
 
     let connection = Connection::open(&path).unwrap();
@@ -181,7 +182,7 @@ fn newer_database_is_refused_without_mutation() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 7);
+    assert_eq!(version, 8);
     assert_eq!(inventory_tables, 0);
 }
 
@@ -211,7 +212,7 @@ fn concurrent_first_open_runs_one_complete_migration() {
     let version: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
 }
 
 #[test]
@@ -238,7 +239,7 @@ fn version_one_database_migrates_to_current() {
     let version: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
     let snapshots: u32 = connection
         .query_row("SELECT count(*) FROM inventory_snapshots", [], |row| {
             row.get(0)
@@ -286,7 +287,7 @@ fn version_two_snapshot_migrates_with_unknown_staleness() {
     let version: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
 }
 
 fn table_row_count(connection: &Connection, table: &str) -> u32 {
@@ -404,7 +405,7 @@ fn version_three_snapshot_migrates_with_evidence_tables() {
     let version: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
     assert!(table_exists(&connection, "analysis_targets"));
     assert!(table_exists(&connection, "provider_attempts"));
     let stored = connection.query_row(
@@ -843,7 +844,7 @@ fn version_four_migration_preserves_attempts_and_adds_optional_provenance() {
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
             .unwrap(),
-        6
+        7
     );
     let mut new = old[0].clone();
     new.recipe = Some(
@@ -932,8 +933,14 @@ fn version_five_migration_preserves_attempts_and_adds_acquisition_state() {
         super::read_acquisition(&database.connection, target).unwrap(),
         Some(result)
     );
-    database.connection.execute_batch("DROP TABLE source_acquisitions; ALTER TABLE provider_attempts DROP COLUMN source_checksum; PRAGMA user_version = 5;").unwrap();
     drop(database);
+    let path = directory.path().join("version-five.db");
+    let connection = create_version_four(&path);
+    connection.execute_batch(super::MIGRATION_5).unwrap();
+    connection
+        .execute_batch("PRAGMA user_version = 5;")
+        .unwrap();
+    drop(connection);
     let database = Database::open(&path).unwrap();
     let stored = database
         .provider_attempts(&attempt.package_name, &attempt.package_version)
@@ -947,4 +954,85 @@ fn version_five_migration_preserves_attempts_and_adds_acquisition_state() {
             .unwrap()
             .is_none()
     );
+}
+
+#[test]
+fn version_six_migrates_preserving_targets_attempts_and_acquisitions() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("paclang.db");
+    let connection = create_version_four(&path);
+    connection.execute_batch(super::MIGRATION_5).unwrap();
+    connection.execute_batch(super::MIGRATION_6).unwrap();
+    connection.execute_batch("UPDATE provider_attempts SET source_checksum = 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+        INSERT INTO source_acquisitions (target_id, checksum, state, downloaded_bytes, extracted_bytes, files, recorded_at) VALUES (1, 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'acquired', 100, 200, 1, 'old');
+        INSERT INTO provider_attempts (package_name,package_version,provider,outcome,failure_reason,recorded_at) VALUES ('base','3-3','arch','unresolved','primary source is missing or ambiguous in recipe metadata','old');
+        PRAGMA user_version = 6;").unwrap();
+    drop(connection);
+    let mut database = Database::open(&path).unwrap();
+    assert_eq!(
+        database
+            .connection
+            .pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
+            .unwrap(),
+        7
+    );
+    assert_eq!(
+        table_row_count(&database.connection, "source_acquisitions"),
+        1
+    );
+    assert_eq!(
+        database
+            .connection
+            .query_row(
+                "SELECT id FROM provider_attempts WHERE package_name='alpha'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+        1
+    );
+    let attempt = ProviderAttempt {
+        package_name: "base".into(),
+        package_version: "3-3".into(),
+        provider: SourceProvider::parse("arch").unwrap(),
+        outcome: AttemptOutcome::SourceFree,
+        recipe: Some(RecipeProvenance::new("https://example.org/base", &"a".repeat(40)).unwrap()),
+    };
+    let refresh = database.begin_refresh().unwrap();
+    refresh.record_provider_attempt(&attempt).unwrap();
+    refresh.publish(&[], &test_fingerprint()).unwrap();
+    drop(database);
+    let database = Database::open(&path).unwrap();
+    assert_eq!(
+        database.provider_attempts("base", "3-3").unwrap(),
+        vec![attempt]
+    );
+    assert_eq!(table_row_count(&database.connection, "analysis_targets"), 1);
+    let alpha = database.provider_attempts("alpha", "1.0-1").unwrap();
+    let AttemptOutcome::Resolved { target, .. } = &alpha[0].outcome else {
+        panic!("lost target")
+    };
+    assert_eq!(
+        target.checksum.as_deref(),
+        Some("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+    );
+    assert_eq!(
+        super::read_acquisition(&database.connection, target)
+            .unwrap()
+            .unwrap()
+            .downloaded_bytes,
+        100
+    );
+}
+
+#[test]
+fn source_free_requires_provenance_and_cannot_carry_a_target() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut database = Database::open(&directory.path().join("paclang.db")).unwrap();
+    let mut attempt = unresolved_attempt("arch");
+    attempt.outcome = AttemptOutcome::SourceFree;
+    let refresh = database.begin_refresh().unwrap();
+    assert!(refresh.record_provider_attempt(&attempt).is_err());
+    drop(refresh);
+    assert!(database.connection.execute("INSERT INTO provider_attempts (package_name,package_version,provider,outcome,recorded_at) VALUES ('base','3-3','arch','source_free','now')",[]).is_err());
 }

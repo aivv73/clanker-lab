@@ -414,12 +414,38 @@ fn interrupting_recipe_fetch_rolls_back_completed_attempts_and_keeps_snapshot() 
 fn recipe_mode_is_explicit_and_conflicts_with_metadata_only() {
     for args in [
         vec!["refresh"],
+        vec!["refresh", "--metadata-only", "--cachyos"],
+        vec![
+            "refresh",
+            "--recipes-only",
+            "--cachyos-api-url",
+            "https://example.org",
+        ],
+        vec![
+            "refresh",
+            "--recipes-only",
+            "--cachyos",
+            "--cachyos-api-url",
+            "http://example.org",
+        ],
         vec!["refresh", "--metadata-only", "--recipes-only"],
         vec![
             "refresh",
             "--metadata-only",
             "--arch-api-url",
             "https://example.org",
+        ],
+        vec![
+            "refresh",
+            "--metadata-only",
+            "--proxy-url",
+            "https://proxy.example.org:8080",
+        ],
+        vec![
+            "refresh",
+            "--recipes-only",
+            "--proxy-url",
+            "http://proxy.example.org:8080",
         ],
     ] {
         let data = tempfile::tempdir().unwrap();
@@ -646,4 +672,300 @@ fn provider_report_handles_missing_snapshot_and_unattempted_inventory() {
     let output = inspect();
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["snapshot_staleness"], "stale");
+}
+
+#[test]
+fn cachyos_recipes_and_arch_rebuild_fallbacks_are_acquired() {
+    use sha2::{Digest, Sha256};
+    const BLOB: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    let data = tempfile::tempdir().unwrap();
+    let bin = fixture_bin();
+    // The split package has a CachyOS rebuild suffix; its upstream recipe keeps -1.
+    for name in ["pacman", "expac"] {
+        let path = bin.path().join(name);
+        let text = std::fs::read_to_string(&path)
+            .unwrap()
+            .replace("2.0-1", "2.0-1.1");
+        std::fs::write(path, text).unwrap();
+    }
+    let (listener, endpoint) = listener();
+    let archive_url = endpoint.clone();
+    let thread = std::thread::spawn(move || {
+        let archive = super::sources::tar();
+        let checksum = format!("{:x}", Sha256::digest(&archive));
+        let mut routes = Vec::new();
+        for _ in 0..9 {
+            let mut stream = accept(&listener);
+            let request = request(&mut stream);
+            let route = request.split_whitespace().nth(1).unwrap().to_owned();
+            routes.push(route.clone());
+            let recipe = |base: &str, names: &str, version: &str| {
+                format!(
+                    "pkgbase = {base}\n\tpkgver = {version}\n\tpkgrel = 1\n\tsource = {archive_url}/{base}-{version}.tar\n\tsha256sums = {checksum}\n{names}\n"
+                )
+            };
+            let body = if route == "/api/v4/commits/master" {
+                serde_json::to_vec(&serde_json::json!({"sha": COMMIT})).unwrap()
+            } else if route == format!("/api/v4/git/trees/{COMMIT}?recursive=1") {
+                serde_json::to_vec(&serde_json::json!({"truncated":false,"tree":[{"path":"alpha/.SRCINFO","type":"blob","sha":BLOB}]})).unwrap()
+            } else if route == format!("/api/v4/git/blobs/{BLOB}") {
+                serde_json::to_vec(&serde_json::json!({"sha":BLOB,"encoding":"base64","content":base64::engine::general_purpose::STANDARD.encode(recipe("alpha", "pkgname = alpha", "1.0"))})).unwrap()
+            } else if route.contains("%2Fsuite/") && route.ends_with("?ref=2.0-1") {
+                serve_recipe(
+                    &mut stream,
+                    &recipe("suite", "pkgname = suite-cli\npkgname = suite-docs", "2.0"),
+                );
+                continue;
+            } else if route.ends_with(".tar") {
+                archive.clone()
+            } else {
+                assert!(route.contains("/projects/"), "unexpected request: {route}");
+                stream
+                    .write_all(
+                        b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    )
+                    .unwrap();
+                continue;
+            };
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            )
+            .unwrap();
+            stream.write_all(&body).unwrap();
+        }
+        assert_eq!(
+            routes
+                .iter()
+                .filter(|route| route.contains("/git/blobs/"))
+                .count(),
+            1
+        );
+        assert_eq!(
+            routes
+                .iter()
+                .filter(|route| route.contains("%2Fsuite/") && route.ends_with("?ref=2.0-1"))
+                .count(),
+            1
+        );
+    });
+    let output = command(data.path())
+        .args([
+            "refresh",
+            "--sources-only",
+            "--cachyos",
+            "--arch-api-url",
+            &endpoint,
+            "--cachyos-api-url",
+            &endpoint,
+            "--format",
+            "json",
+        ])
+        .env("PATH", bin.path())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{} {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    thread.join().unwrap();
+    let db = Connection::open(data.path().join("paclang/paclang.db")).unwrap();
+    let rows: Vec<(String,String,String,String)> = db.prepare("SELECT package_name, outcome, coalesce(evidence_grade,''), coalesce(recipe_commit,'') FROM provider_attempts WHERE provider='cachyos' ORDER BY package_name").unwrap().query_map([], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?))).unwrap().map(Result::unwrap).collect();
+    assert_eq!(
+        rows,
+        vec![
+            (
+                "alpha".into(),
+                "resolved".into(),
+                "reconstructed".into(),
+                COMMIT.into()
+            ),
+            (
+                "foreign-tool".into(),
+                "unresolved".into(),
+                "".into(),
+                "".into()
+            ),
+            (
+                "suite-cli".into(),
+                "resolved".into(),
+                "fallback".into(),
+                COMMIT.into()
+            ),
+            (
+                "suite-docs".into(),
+                "resolved".into(),
+                "fallback".into(),
+                COMMIT.into()
+            ),
+        ]
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT count(*) FROM source_acquisitions WHERE state='acquired'",
+            [],
+            |row| row.get::<_, i64>(0)
+        )
+        .unwrap(),
+        2
+    );
+    let provenance: String = db.query_row("SELECT recipe_location FROM provider_attempts WHERE provider='cachyos' AND package_name='alpha'", [], |row| row.get(0)).unwrap();
+    assert!(provenance.ends_with(&format!("/contents/alpha/.SRCINFO?ref={COMMIT}")));
+}
+
+#[test]
+fn interrupting_cachyos_metadata_rolls_back_arch_attempts() {
+    let data = tempfile::tempdir().unwrap();
+    let bin = fixture_bin();
+    assert!(refresh(&[], data.path(), bin.path()).status.success());
+    let (listener, endpoint) = listener();
+    let (started_tx, started_rx) = mpsc::channel();
+    let (finish_tx, finish_rx) = mpsc::channel();
+    let server = std::thread::spawn(move || {
+        for _ in 0..3 {
+            let mut stream = accept(&listener);
+            assert!(request(&mut stream).contains("/projects/"));
+            stream
+                .write_all(
+                    b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
+                .unwrap();
+        }
+        let mut stream = accept(&listener);
+        assert!(request(&mut stream).contains("/commits/master"));
+        started_tx.send(()).unwrap();
+        finish_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    });
+    let child = command(data.path())
+        .args([
+            "refresh",
+            "--recipes-only",
+            "--cachyos",
+            "--arch-api-url",
+            &endpoint,
+            "--cachyos-api-url",
+            &endpoint,
+        ])
+        .env("PATH", bin.path())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    let start = Instant::now();
+    nix::sys::signal::kill(
+        nix::unistd::Pid::from_raw(i32::try_from(child.id()).unwrap()),
+        nix::sys::signal::Signal::SIGINT,
+    )
+    .unwrap();
+    let output = child.wait_with_output().unwrap();
+    finish_tx.send(()).unwrap();
+    server.join().unwrap();
+    assert_eq!(output.status.code(), Some(130));
+    assert!(start.elapsed() < Duration::from_secs(1));
+    assert_eq!(snapshot_count(data.path()), 1);
+    let db = Connection::open(data.path().join("paclang/paclang.db")).unwrap();
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM provider_attempts", [], |row| row
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+}
+
+#[test]
+fn metapackages_need_no_acquisition_or_cachyos_fallback_and_are_cached() {
+    let data = tempfile::tempdir().unwrap();
+    let bin = fixture_bin();
+    let (listener, endpoint) = listener();
+    let thread = std::thread::spawn(move || {
+        for _ in 0..3 {
+            let mut stream = accept(&listener);
+            let route = request(&mut stream);
+            let recipe = if route.contains("%2Falpha/") {
+                "pkgbase = alpha\n\tpkgver = 1.0\n\tpkgrel = 1\n\tdepends = glibc\npkgname = alpha\n"
+            } else if route.contains("%2Fsuite/") {
+                "pkgbase = suite\n\tpkgver = 2.0\n\tpkgrel = 1\n\tdepends = glibc\npkgname = suite-cli\npkgname = suite-docs\n"
+            } else {
+                assert!(route.contains("%2Fforeign-tool/"));
+                "pkgbase = foreign-tool\n\tpkgver = 3.0\n\tpkgrel = 1\n\tdepends = glibc\npkgname = foreign-tool\n"
+            };
+            serve_recipe(&mut stream, recipe);
+        }
+    });
+    for _ in 0..2 {
+        let output = command(data.path())
+            .args([
+                "refresh",
+                "--sources-only",
+                "--cachyos",
+                "--require-complete",
+                "--min-coverage",
+                "100",
+                "--arch-api-url",
+                &endpoint,
+                "--cachyos-api-url",
+                &endpoint,
+                "--format",
+                "json",
+            ])
+            .env("PATH", bin.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{} {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(value["coverage"]["denominator"], 0);
+        assert_eq!(value["coverage"]["source_free_packages"], 4);
+        assert_eq!(value["coverage"]["missing_source_language_analysis"], 0);
+        assert_eq!(value["source_acquisition"]["targets"], 0);
+        assert_eq!(value["source_acquisition"]["unresolved_packages"], 0);
+        assert_eq!(value["source_acquisition"]["source_free_packages"], 4);
+    }
+    thread.join().unwrap();
+    let output = command(data.path())
+        .args(["providers", "--format", "json"])
+        .env("PATH", bin.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["source_free"], 4);
+    assert_eq!(value["unresolved"], 0);
+    for package in value["packages"].as_array().unwrap() {
+        assert_eq!(package["outcome"], "source_free");
+        assert_eq!(package["attempts"].as_array().unwrap().len(), 1);
+        assert!(package["attempts"][0]["target"].is_null());
+        assert!(package["attempts"][0]["failure_reason"].is_null());
+    }
+    let output = command(data.path())
+        .args(["providers", "--format", "terminal"])
+        .env("PATH", bin.path())
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Acquisition: not required"));
+    let output = command(data.path())
+        .args([
+            "count",
+            "--explicit",
+            "--min-coverage",
+            "100",
+            "--format",
+            "json",
+        ])
+        .env("PATH", bin.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["selected_population"], 2);
+    assert_eq!(value["coverage"]["denominator"], 0);
+    assert_eq!(value["coverage"]["source_free_packages"], 2);
 }

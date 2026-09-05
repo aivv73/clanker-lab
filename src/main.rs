@@ -1,11 +1,13 @@
 mod acquisition;
 mod arch_provider;
+mod cachyos_provider;
 mod cli;
 mod expac_parser;
 mod interrupt;
 mod inventory;
 mod package;
 mod progress;
+mod proxy;
 mod report;
 mod srcinfo;
 mod storage;
@@ -138,6 +140,9 @@ fn run(
             require_complete,
             limits,
             arch_api_url,
+            cachyos,
+            cachyos_api_url,
+            proxy_url,
         } => {
             let database_path = storage::database_path().map_err(AppError::storage)?;
             let mut database =
@@ -163,10 +168,34 @@ fn run(
                     &arch_api_url,
                     &mut progress,
                     sources_only,
+                    proxy_url.as_deref(),
                 )
                 .map_err(map_storage_error);
                 progress.finish();
                 result?;
+                if cachyos {
+                    let selected = inventory
+                        .packages()
+                        .iter()
+                        .zip(&snapshot_packages)
+                        .filter_map(|(installed, snapshot)| {
+                            selection.includes(snapshot).then_some(installed)
+                        });
+                    let mut progress =
+                        progress::Progress::stderr("CachyOS recipes", "Resolved", "Unresolved");
+                    let result = cachyos_provider::record_attempts(
+                        &refresh,
+                        selected,
+                        &cachyos_api_url,
+                        &arch_api_url,
+                        &mut progress,
+                        sources_only,
+                        proxy_url.as_deref(),
+                    )
+                    .map_err(map_storage_error);
+                    progress.finish();
+                    result?;
+                }
                 if sources_only {
                     let selected = inventory
                         .packages()
@@ -177,9 +206,14 @@ fn run(
                         });
                     let mut progress =
                         progress::Progress::stderr("Acquiring sources", "Acquired", "Incomplete");
-                    let result =
-                        acquisition::record_sources(&refresh, selected, &limits, &mut progress)
-                            .map_err(map_storage_error);
+                    let result = acquisition::record_sources(
+                        &refresh,
+                        selected,
+                        &limits,
+                        &mut progress,
+                        proxy_url.as_deref(),
+                    )
+                    .map_err(map_storage_error);
                     progress.finish();
                     source_acquisition = Some(result?);
                 }
@@ -198,7 +232,20 @@ fn run(
             let sources_complete = source_acquisition
                 .as_ref()
                 .is_none_or(acquisition::AcquisitionSummary::complete);
-            let mut report = CountReport::from_snapshot(&snapshot_packages, staleness, selection);
+            let mut source_free = 0;
+            for (installed, snapshot) in inventory.packages().iter().zip(&snapshot_packages) {
+                if selection.includes(snapshot)
+                    && package::provider::source_free(
+                        &refresh
+                            .provider_attempts(installed.name(), installed.version())
+                            .map_err(map_storage_error)?,
+                    )
+                {
+                    source_free += 1;
+                }
+            }
+            let mut report = CountReport::from_snapshot(&snapshot_packages, staleness, selection)
+                .with_source_free(source_free);
             report.source_acquisition = source_acquisition;
             let rendered = format.render_count(&report).map_err(AppError::render)?;
             refresh
@@ -234,7 +281,7 @@ fn render_snapshot_report(
             None => SnapshotStaleness::Unknown,
         };
         let meets_coverage =
-            CountReport::from_snapshot(&snapshot.packages, staleness, selection.clone())
+            CountReport::from_provider_snapshot(&snapshot, staleness, selection.clone())
                 .meets_coverage(min_coverage);
         let report =
             report::providers::ProviderReport::from_snapshot(&snapshot, staleness, selection);
@@ -255,7 +302,7 @@ fn render_count_from_database(
     min_coverage: Option<f64>,
 ) -> Result<RunOutput, AppError> {
     let snapshot = database
-        .published_snapshot()
+        .published_provider_snapshot()
         .map_err(AppError::storage)?
         .ok_or(AppError::NoSnapshot)?;
     let live_fingerprint = inventory::read_live_fingerprint().map_err(map_inventory_error)?;
@@ -264,7 +311,7 @@ fn render_count_from_database(
         Some(_) => SnapshotStaleness::Stale,
         None => SnapshotStaleness::Unknown,
     };
-    let report = CountReport::from_snapshot(&snapshot.packages, staleness, selection);
+    let report = CountReport::from_provider_snapshot(&snapshot, staleness, selection);
     let rendered = format.render_count(&report).map_err(AppError::render)?;
     let meets_coverage = report.meets_coverage(min_coverage);
     Ok(RunOutput {

@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.4.0",
+  "schema_version": "1.5.0",
   "report": "count",
   "snapshot_staleness": "current",
   "selection": {
@@ -10,6 +10,7 @@
   "selected_population": 4,
   "coverage": {
     "denominator": 4,
+    "source_free_packages": 0,
     "analyzed": 0,
     "missing_source_language_analysis": 4,
     "rows": [

@@ -57,6 +57,7 @@ pub(crate) struct AcquisitionSummary {
     pub failed: u64,
     pub resource_limited: u64,
     pub unresolved_packages: u64,
+    pub source_free_packages: u64,
 }
 impl AcquisitionSummary {
     pub(crate) fn complete(&self) -> bool {
@@ -64,12 +65,13 @@ impl AcquisitionSummary {
     }
     pub(crate) fn render(&self) -> String {
         format!(
-            "Source targets: {}\nAcquired: {}\nFailed acquisition: {}\nResource limited: {}\nPackages without resolved sources: {}",
+            "Source targets: {}\nAcquired: {}\nFailed acquisition: {}\nResource limited: {}\nPackages without resolved sources: {}\nPackages requiring no sources: {}",
             self.targets,
             self.acquired,
             self.failed,
             self.resource_limited,
-            self.unresolved_packages
+            self.unresolved_packages,
+            self.source_free_packages
         )
     }
 }
@@ -103,6 +105,9 @@ impl From<git2::Error> for Error {
 struct Job {
     target: AnalysisTarget,
     limits: Limits,
+    /// Explicit proxy URL. Workers run with a cleared environment, so this
+    /// serialized value is the only proxy configuration they can see.
+    proxy: Option<String>,
 }
 
 /// A verified Git worktree remains available until this handle is dropped.
@@ -135,12 +140,17 @@ pub(crate) fn record_sources<'a, W: Write>(
     packages: impl IntoIterator<Item = &'a crate::inventory::InstalledPackage>,
     limits: &Limits,
     progress: &mut crate::progress::Progress<W>,
+    proxy: Option<&crate::proxy::ProxyUrl>,
 ) -> Result<AcquisitionSummary, StorageError> {
     let mut summary = AcquisitionSummary::default();
     let mut targets = Vec::new();
     for package in packages {
         let mut resolved = false;
+        let mut source_free = false;
         for attempt in refresh.provider_attempts(package.name(), package.version())? {
+            if matches!(attempt.outcome, AttemptOutcome::SourceFree) {
+                source_free = true;
+            }
             if let AttemptOutcome::Resolved { target, .. } = attempt.outcome {
                 resolved = true;
                 if !targets.contains(&target) {
@@ -148,13 +158,16 @@ pub(crate) fn record_sources<'a, W: Write>(
                 }
             }
         }
-        if !resolved {
+        if !resolved && source_free {
+            summary.source_free_packages += 1;
+        }
+        if !resolved && !source_free {
             summary.unresolved_packages += 1;
         }
     }
     summary.targets = targets.len() as u64;
     progress.set_total(targets.len() as u64);
-    acquire_targets(&targets, limits, |target, result, materialized| {
+    acquire_targets(&targets, limits, proxy, |target, result, materialized| {
         // This is the pipeline handoff: a later language analyzer consumes the
         // repository here, before the disposable handle leaves this callback.
         if let Some(source) = materialized {
@@ -191,6 +204,7 @@ fn cache_directory() -> Result<PathBuf, StorageError> {
 fn acquire_targets(
     targets: &[AnalysisTarget],
     limits: &Limits,
+    proxy: Option<&crate::proxy::ProxyUrl>,
     mut complete: impl FnMut(
         &AnalysisTarget,
         &AcquisitionRecord,
@@ -214,6 +228,7 @@ fn acquire_targets(
             let job = serde_json::to_vec(&Job {
                 target: target.clone(),
                 limits: limits.clone(),
+                proxy: proxy.map(|url| url.as_str().to_owned()),
             })
             .expect("serializable job");
             fs::write(directory.path().join("job.json"), job)
@@ -331,7 +346,13 @@ pub(crate) fn worker(directory: &Path) -> bool {
             }
         }
         let mut record = AcquisitionRecord::default();
-        let result = materialize(&job.target, &job.limits, directory, &mut record);
+        let result = materialize(
+            &job.target,
+            &job.limits,
+            directory,
+            &mut record,
+            job.proxy.as_deref(),
+        );
         match result {
             Ok(()) => record.state = "acquired".to_owned(),
             Err(Error::Detail(reason)) => {
@@ -358,19 +379,20 @@ fn materialize(
     limits: &Limits,
     directory: &Path,
     record: &mut AcquisitionRecord,
+    proxy: Option<&str>,
 ) -> Result<(), Error> {
     http::validate_url(&target.location)?;
     let tree = directory.join("tree");
     fs::create_dir(&tree)?;
     if target.revision.is_some() {
-        git::fetch(target, limits, directory, &tree, record)?;
+        git::fetch(target, limits, directory, &tree, record, proxy)?;
     } else {
         let checksum = target.checksum.as_deref().ok_or(Error::Failed(
             "archive has no supported recipe checksum; refresh recipe evidence",
         ))?;
         validate_checksum(checksum)?;
         let archive = directory.join("download");
-        http::download(&target.location, &archive, limits, record)?;
+        http::download(&target.location, &archive, limits, record, proxy)?;
         let (kind, expected) = checksum.split_once(':').expect("validated checksum");
         let mut file = File::open(&archive)?;
         let mut buffer = [0u8; 65_536];
