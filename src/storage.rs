@@ -498,6 +498,46 @@ impl Database {
         read_provider_attempts(&self.connection, name, version)
     }
 
+    /// Distinct exact-packaged-source analyzed profiles reachable from any
+    /// recorded version of one package name. The source-bytes report uses this
+    /// only for packages whose installed version lacks its own exact profile
+    /// (stale analysis): the cached profile does not match the installed
+    /// package version, but reports include it by default and disclose it
+    /// separately, mirroring `package_analysis_state`.
+    pub(crate) fn stale_exact_profiles(
+        &self,
+        package_name: &str,
+    ) -> Result<Vec<(AnalysisTarget, crate::linguist::LanguageRecord)>, StorageError> {
+        use std::collections::BTreeMap;
+        let mut distinct: BTreeMap<
+            (String, String, String, String),
+            (AnalysisTarget, crate::linguist::LanguageRecord),
+        > = BTreeMap::new();
+        for attempt in read_all_provider_attempts(&self.connection, package_name)? {
+            if let AttemptOutcome::Resolved { target, .. } = &attempt.outcome {
+                match read_language_profile(&self.connection, target)? {
+                    Some(profile)
+                        if profile.state == "analyzed"
+                            && profile.fidelity
+                                == crate::linguist::RevisionFidelity::ExactPackagedSource =>
+                    {
+                        let key = (
+                            target.location.clone(),
+                            target.revision.clone().unwrap_or_default(),
+                            target.subdirectory.clone().unwrap_or_default(),
+                            target.checksum.clone().unwrap_or_default(),
+                        );
+                        distinct
+                            .entry(key)
+                            .or_insert_with(|| (target.clone(), profile));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Ok(distinct.into_values().collect())
+    }
+
     pub(crate) fn begin_refresh(&mut self) -> Result<RefreshTransaction<'_>, StorageError> {
         let transaction = match self
             .connection

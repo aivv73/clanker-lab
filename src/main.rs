@@ -135,6 +135,9 @@ fn run(
 ) -> Result<RunOutput, AppError> {
     match command {
         Command::Count => render_snapshot_report(format, selection, min_coverage, false),
+        Command::SourceBytes { fidelity, all, top } => {
+            render_source_bytes_report(format, selection, min_coverage, fidelity, all, top)
+        }
         Command::Providers => render_snapshot_report(format, selection, min_coverage, true),
         Command::Refresh {
             metadata_only: _,
@@ -340,6 +343,72 @@ fn render_snapshot_report(
         });
     }
     render_count_from_database(format, &database, selection, min_coverage)
+}
+
+fn render_source_bytes_report(
+    format: Format,
+    selection: report::PopulationSelection,
+    min_coverage: Option<f64>,
+    fidelity: report::source_bytes::FidelitySelection,
+    all: bool,
+    top: Option<usize>,
+) -> Result<RunOutput, AppError> {
+    let database_path = storage::database_path().map_err(AppError::storage)?;
+    let database = storage::Database::open(&database_path).map_err(AppError::storage)?;
+    let snapshot = database
+        .published_provider_snapshot()
+        .map_err(AppError::storage)?
+        .ok_or(AppError::NoSnapshot)?;
+    let live_fingerprint = inventory::read_live_fingerprint().map_err(map_inventory_error)?;
+    let staleness = match &snapshot.fingerprint {
+        Some(fingerprint) if *fingerprint == live_fingerprint => SnapshotStaleness::Current,
+        Some(_) => SnapshotStaleness::Stale,
+        None => SnapshotStaleness::Unknown,
+    };
+    // Stale fallbacks mirror package-level stale analysis: only packages in
+    // Stale state contribute older exact profiles, and each unique target is
+    // summed once within the selected population.
+    let mut stale_by_package = std::collections::BTreeMap::new();
+    for (package, evidence) in snapshot.packages.iter().zip(&snapshot.provider_packages) {
+        if !selection.includes(package) {
+            continue;
+        }
+        if crate::package::provider::source_free(&evidence.attempts) {
+            continue;
+        }
+        if evidence.analysis_state != crate::linguist::AnalysisState::Stale {
+            continue;
+        }
+        if stale_by_package.contains_key(&evidence.name) {
+            continue;
+        }
+        let profiles = database
+            .stale_exact_profiles(&evidence.name)
+            .map_err(AppError::storage)?;
+        stale_by_package.insert(
+            evidence.name.clone(),
+            crate::report::source_bytes::stale_breakdown(&profiles),
+        );
+    }
+    let report = crate::report::source_bytes::SourceBytesReport::from_snapshot_with_stale(
+        &snapshot,
+        staleness,
+        selection,
+        &stale_by_package,
+        fidelity,
+    );
+    let rendered = format
+        .render_source_bytes(
+            &report,
+            crate::report::source_bytes::display_limit(all, top),
+        )
+        .map_err(AppError::render)?;
+    let meets_coverage = report.meets_coverage(min_coverage);
+    Ok(RunOutput {
+        rendered,
+        meets_coverage,
+        snapshot_read_guard: Some(snapshot),
+    })
 }
 
 fn render_count_from_database(
