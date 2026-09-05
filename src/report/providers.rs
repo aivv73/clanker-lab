@@ -32,6 +32,7 @@ struct AttemptRow {
     failure_reason: Option<String>,
     target: Option<TargetRow>,
     recipe: Option<RecipeRow>,
+    acquisition: Option<crate::acquisition::AcquisitionRecord>,
 }
 
 #[derive(Debug, Serialize)]
@@ -39,6 +40,7 @@ struct TargetRow {
     location: String,
     revision: Option<String>,
     subdirectory: Option<String>,
+    checksum: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -70,7 +72,7 @@ impl ProviderReport {
                 continue;
             }
             let mut attempts = Vec::new();
-            for attempt in &evidence.attempts {
+            for (attempt, acquisition) in evidence.attempts.iter().zip(&evidence.acquisitions) {
                 let (outcome, grade, failure_reason, target) = match &attempt.outcome {
                     AttemptOutcome::Resolved { target, grade } => (
                         "resolved",
@@ -80,6 +82,7 @@ impl ProviderReport {
                             location: target.location.clone(),
                             revision: target.revision.clone(),
                             subdirectory: target.subdirectory.clone(),
+                            checksum: target.checksum.clone(),
                         }),
                     ),
                     AttemptOutcome::Unresolved { reason } => {
@@ -87,6 +90,7 @@ impl ProviderReport {
                     }
                 };
                 attempts.push(AttemptRow {
+                    acquisition: acquisition.clone(),
                     provider: attempt.provider.as_str().to_owned(),
                     outcome,
                     grade,
@@ -200,6 +204,9 @@ impl ProviderReport {
                 }
                 if let Some(target) = &attempt.target {
                     text.push_str(&format!("\n- Target: {}", quote(&target.location)));
+                    if let Some(checksum) = &target.checksum {
+                        text.push_str(&format!("\n- Recipe checksum: {}", quote(checksum)));
+                    }
                     text.push_str(&format!(
                         "\n- Revision: {}\n- Subdirectory: {}",
                         target
@@ -213,6 +220,20 @@ impl ProviderReport {
                             .map(&quote)
                             .unwrap_or_else(|| "none".to_owned())
                     ));
+                }
+                if let Some(acquisition) = &attempt.acquisition {
+                    text.push_str(&format!("\n- Acquisition: {}\n- Downloaded bytes: {}\n- Extracted bytes: {}\n- Source entries: {}", acquisition.state, acquisition.downloaded_bytes, acquisition.extracted_bytes, acquisition.files));
+                    if let Some(reason) = &acquisition.reason {
+                        text.push_str(&format!("\n- Acquisition reason: {}", quote(reason)));
+                    }
+                    if let Some(revision) = &acquisition.verified_revision {
+                        text.push_str(&format!("\n- Verified revision: {}", quote(revision)));
+                    }
+                    if let Some(digest) = &acquisition.content_sha256 {
+                        text.push_str(&format!("\n- Content SHA-256: {}", quote(digest)));
+                    }
+                } else {
+                    text.push_str("\n- Acquisition: not attempted");
                 }
                 match &attempt.recipe {
                     Some(recipe) => text.push_str(&format!(

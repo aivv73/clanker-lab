@@ -108,6 +108,23 @@ const MAX_REASON_BYTES: usize = 4096;
 
 const RETAINED_SNAPSHOT_COUNT: u32 = 10;
 
+const MIGRATION_6: &str = "
+    ALTER TABLE provider_attempts ADD COLUMN source_checksum TEXT;
+    CREATE TABLE source_acquisitions (
+        target_id INTEGER NOT NULL REFERENCES analysis_targets(id),
+        checksum TEXT NOT NULL,
+        state TEXT NOT NULL CHECK (state IN ('acquired', 'failed', 'resource_limited')),
+        reason TEXT,
+        downloaded_bytes INTEGER NOT NULL,
+        extracted_bytes INTEGER NOT NULL,
+        files INTEGER NOT NULL,
+        verified_revision TEXT,
+        content_sha256 TEXT,
+        recorded_at TEXT NOT NULL,
+        PRIMARY KEY (target_id, checksum)
+    ) STRICT;
+";
+
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) struct MigrationVersion(u32);
 
@@ -117,7 +134,8 @@ impl MigrationVersion {
     const VERSION_2: Self = Self(2);
     const VERSION_3: Self = Self(3);
     const VERSION_4: Self = Self(4);
-    const CURRENT: Self = Self(5);
+    const VERSION_5: Self = Self(5);
+    const CURRENT: Self = Self(6);
 
     const fn from_database(value: u32) -> Self {
         Self(value)
@@ -224,6 +242,7 @@ pub(crate) struct ProviderPackage {
     pub(crate) name: String,
     pub(crate) version: String,
     pub(crate) attempts: Vec<ProviderAttempt>,
+    pub(crate) acquisitions: Vec<Option<crate::acquisition::AcquisitionRecord>>,
 }
 
 pub(crate) struct PublishedSnapshot {
@@ -322,7 +341,17 @@ impl Database {
                 let (origin, install_reason, name, version) = row.map_err(StorageError::Sqlite)?;
                 if include_providers {
                     let attempts = self.provider_attempts(&name, &version)?;
+                    let acquisitions = attempts
+                        .iter()
+                        .map(|attempt| match &attempt.outcome {
+                            AttemptOutcome::Resolved { target, .. } => {
+                                read_acquisition(&transaction, target)
+                            }
+                            _ => Ok(None),
+                        })
+                        .collect::<Result<Vec<_>, StorageError>>()?;
                     provider_packages.push(ProviderPackage {
+                        acquisitions,
                         name,
                         version,
                         attempts,
@@ -373,50 +402,10 @@ impl Database {
     /// retention prunes snapshots, never attempts.
     pub(crate) fn provider_attempts(
         &self,
-        package_name: &str,
-        package_version: &str,
+        name: &str,
+        version: &str,
     ) -> Result<Vec<ProviderAttempt>, StorageError> {
-        let mut attempts = Vec::new();
-        {
-            let mut statement = self
-                .connection
-                .prepare(
-                    "SELECT provider_attempts.provider, provider_attempts.outcome,
-                            analysis_targets.location, analysis_targets.revision,
-                            analysis_targets.subdirectory,
-                            provider_attempts.evidence_grade, provider_attempts.failure_reason,
-                            provider_attempts.recipe_location, provider_attempts.recipe_commit
-                     FROM provider_attempts
-                     LEFT JOIN analysis_targets
-                       ON analysis_targets.id = provider_attempts.target_id
-                     WHERE provider_attempts.package_name = ?1
-                       AND provider_attempts.package_version = ?2
-                     ORDER BY provider_attempts.provider",
-                )
-                .map_err(StorageError::Sqlite)?;
-            let rows = statement
-                .query_map([package_name, package_version], |row| {
-                    Ok(StoredProviderAttempt {
-                        provider: row.get(0)?,
-                        outcome: row.get(1)?,
-                        location: row.get(2)?,
-                        revision: row.get(3)?,
-                        subdirectory: row.get(4)?,
-                        grade: row.get(5)?,
-                        reason: row.get(6)?,
-                        recipe_location: row.get(7)?,
-                        recipe_commit: row.get(8)?,
-                    })
-                })
-                .map_err(StorageError::Sqlite)?;
-            for row in rows {
-                attempts.push(
-                    row.map_err(StorageError::Sqlite)?
-                        .into_attempt(package_name, package_version)?,
-                );
-            }
-        }
-        Ok(attempts)
+        read_provider_attempts(&self.connection, name, version)
     }
 
     pub(crate) fn begin_refresh(&mut self) -> Result<RefreshTransaction<'_>, StorageError> {
@@ -435,7 +424,95 @@ impl Database {
     }
 }
 
+fn read_acquisition(
+    connection: &Connection,
+    target: &AnalysisTarget,
+) -> Result<Option<crate::acquisition::AcquisitionRecord>, StorageError> {
+    connection.query_row("SELECT state, reason, downloaded_bytes, extracted_bytes, files, verified_revision, content_sha256
+        FROM source_acquisitions JOIN analysis_targets ON analysis_targets.id = source_acquisitions.target_id
+        WHERE location = ?1 AND revision = ?2 AND subdirectory = ?3 AND checksum = ?4",
+        rusqlite::params![target.location, optional_text(target.revision.as_deref()), optional_text(target.subdirectory.as_deref()), optional_text(target.checksum.as_deref())],
+        |row| Ok(crate::acquisition::AcquisitionRecord { state: row.get(0)?, reason: row.get(1)?, downloaded_bytes: row.get(2)?, extracted_bytes: row.get(3)?, files: row.get(4)?, verified_revision: row.get(5)?, content_sha256: row.get(6)? }))
+        .optional().map_err(StorageError::Sqlite)
+}
+
+fn read_provider_attempts(
+    connection: &Connection,
+    package_name: &str,
+    package_version: &str,
+) -> Result<Vec<ProviderAttempt>, StorageError> {
+    let mut attempts = Vec::new();
+    {
+        let mut statement = connection
+            .prepare(
+                "SELECT provider_attempts.provider, provider_attempts.outcome,
+                            analysis_targets.location, analysis_targets.revision,
+                            analysis_targets.subdirectory,
+                            provider_attempts.evidence_grade, provider_attempts.failure_reason,
+                            provider_attempts.recipe_location, provider_attempts.recipe_commit,
+                            provider_attempts.source_checksum
+                     FROM provider_attempts
+                     LEFT JOIN analysis_targets
+                       ON analysis_targets.id = provider_attempts.target_id
+                     WHERE provider_attempts.package_name = ?1
+                       AND provider_attempts.package_version = ?2
+                     ORDER BY provider_attempts.provider",
+            )
+            .map_err(StorageError::Sqlite)?;
+        let rows = statement
+            .query_map([package_name, package_version], |row| {
+                Ok(StoredProviderAttempt {
+                    provider: row.get(0)?,
+                    outcome: row.get(1)?,
+                    location: row.get(2)?,
+                    revision: row.get(3)?,
+                    subdirectory: row.get(4)?,
+                    grade: row.get(5)?,
+                    reason: row.get(6)?,
+                    recipe_location: row.get(7)?,
+                    recipe_commit: row.get(8)?,
+                    checksum: row.get(9)?,
+                })
+            })
+            .map_err(StorageError::Sqlite)?;
+        for row in rows {
+            attempts.push(
+                row.map_err(StorageError::Sqlite)?
+                    .into_attempt(package_name, package_version)?,
+            );
+        }
+    }
+    Ok(attempts)
+}
+
 impl RefreshTransaction<'_> {
+    pub(crate) fn provider_attempts(
+        &self,
+        name: &str,
+        version: &str,
+    ) -> Result<Vec<ProviderAttempt>, StorageError> {
+        read_provider_attempts(&self.transaction, name, version)
+    }
+
+    pub(crate) fn record_acquisition(
+        &self,
+        target: &AnalysisTarget,
+        result: &crate::acquisition::AcquisitionRecord,
+    ) -> Result<(), StorageError> {
+        self.transaction.execute(
+            "INSERT INTO source_acquisitions (target_id, checksum, state, reason, downloaded_bytes, extracted_bytes, files, verified_revision, content_sha256, recorded_at)
+             SELECT id, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, strftime('%Y-%m-%dT%H:%M:%fZ', 'now') FROM analysis_targets
+             WHERE location = ?1 AND revision = ?2 AND subdirectory = ?3
+             ON CONFLICT(target_id, checksum) DO UPDATE SET state=excluded.state, reason=excluded.reason,
+             downloaded_bytes=excluded.downloaded_bytes, extracted_bytes=excluded.extracted_bytes, files=excluded.files,
+             verified_revision=excluded.verified_revision, content_sha256=excluded.content_sha256, recorded_at=excluded.recorded_at",
+            rusqlite::params![target.location, optional_text(target.revision.as_deref()), optional_text(target.subdirectory.as_deref()),
+                optional_text(target.checksum.as_deref()), result.state, result.reason, result.downloaded_bytes, result.extracted_bytes,
+                result.files, result.verified_revision, result.content_sha256]
+        ).map_err(StorageError::Sqlite)?;
+        Ok(())
+    }
+
     pub(crate) fn publish(
         self,
         packages: &[InstalledPackage],
@@ -571,9 +648,9 @@ impl RefreshTransaction<'_> {
             .execute(
                 "INSERT INTO provider_attempts (
                     package_name, package_version, provider, outcome,
-                    target_id, evidence_grade, failure_reason, recorded_at, recipe_location, recipe_commit
+                    target_id, evidence_grade, failure_reason, recorded_at, recipe_location, recipe_commit, source_checksum
                  ) VALUES (
-                    ?1, ?2, ?3, ?4, ?5, ?6, ?7, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?8, ?9
+                    ?1, ?2, ?3, ?4, ?5, ?6, ?7, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?8, ?9, ?10
                  )
                  ON CONFLICT (package_name, package_version, provider) DO UPDATE SET
                     outcome = excluded.outcome,
@@ -582,7 +659,8 @@ impl RefreshTransaction<'_> {
                     failure_reason = excluded.failure_reason,
                     recorded_at = excluded.recorded_at,
                     recipe_location = excluded.recipe_location,
-                    recipe_commit = excluded.recipe_commit",
+                    recipe_commit = excluded.recipe_commit,
+                    source_checksum = excluded.source_checksum",
                 (
                     attempt.package_name.as_str(),
                     attempt.package_version.as_str(),
@@ -596,6 +674,7 @@ impl RefreshTransaction<'_> {
                     reason,
                     attempt.recipe.as_ref().map(RecipeProvenance::location),
                     attempt.recipe.as_ref().map(RecipeProvenance::commit),
+                    match &attempt.outcome { AttemptOutcome::Resolved { target, .. } => target.checksum.as_deref(), _ => None },
                 ),
             )
             .map_err(StorageError::Sqlite)?;
@@ -656,6 +735,11 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
                 .execute_batch(MIGRATION_5)
                 .map_err(StorageError::Sqlite)?;
         }
+        if version <= MigrationVersion::VERSION_5 {
+            transaction
+                .execute_batch(MIGRATION_6)
+                .map_err(StorageError::Sqlite)?;
+        }
         transaction
             .pragma_update(
                 None,
@@ -673,6 +757,7 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
 }
 
 fn validate_schema(connection: &Connection) -> Result<(), StorageError> {
+    connection.prepare("SELECT target_id, checksum, state, reason, downloaded_bytes, extracted_bytes, files, verified_revision, content_sha256, recorded_at FROM source_acquisitions LIMIT 0").map_err(StorageError::InvalidSchema)?;
     connection
         .prepare(
             "SELECT inventory_snapshots.id, inventory_snapshots.published_at,
@@ -686,7 +771,7 @@ fn validate_schema(connection: &Connection) -> Result<(), StorageError> {
                     provider_attempts.provider, provider_attempts.outcome,
                     provider_attempts.target_id, provider_attempts.evidence_grade,
                     provider_attempts.failure_reason, provider_attempts.recorded_at,
-                    provider_attempts.recipe_location, provider_attempts.recipe_commit
+                    provider_attempts.recipe_location, provider_attempts.recipe_commit, provider_attempts.source_checksum
              FROM inventory_snapshots
              LEFT JOIN installed_packages ON installed_packages.snapshot_id = inventory_snapshots.id
              LEFT JOIN analysis_targets ON 1 = 0
@@ -724,6 +809,15 @@ fn validate_provider_attempt(attempt: &ProviderAttempt) -> Result<(), StorageErr
     })?;
     match &attempt.outcome {
         AttemptOutcome::Resolved { target, .. } => {
+            if let Some(checksum) = &target.checksum {
+                crate::acquisition::validate_checksum(checksum).map_err(|_| {
+                    StorageError::InvalidProviderAttempt {
+                        field: "checksum",
+                        value: checksum.clone(),
+                        message: "invalid source checksum",
+                    }
+                })?;
+            }
             validate_bounded_text(&target.location, "location", MAX_LOCATION_BYTES, false)?;
             if let Some(revision) = &target.revision {
                 validate_bounded_text(revision, "revision", MAX_REVISION_BYTES, true)?;
@@ -778,6 +872,7 @@ struct StoredProviderAttempt {
     reason: Option<String>,
     recipe_location: Option<String>,
     recipe_commit: Option<String>,
+    checksum: Option<String>,
 }
 
 impl StoredProviderAttempt {
@@ -799,6 +894,7 @@ impl StoredProviderAttempt {
             reason,
             recipe_location,
             recipe_commit,
+            checksum,
         } = self;
         let invalid = |field: &'static str, value: String, message: &'static str| {
             StorageError::InvalidProviderAttempt {
@@ -831,6 +927,7 @@ impl StoredProviderAttempt {
                         location,
                         revision: (!revision.is_empty()).then_some(revision),
                         subdirectory: (!subdirectory.is_empty()).then_some(subdirectory),
+                        checksum,
                     },
                     grade,
                 }

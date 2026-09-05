@@ -56,19 +56,29 @@ pub enum Command {
         /// Publish installed-package metadata without analyzing source trees.
         #[arg(
             long,
-            required_unless_present = "recipes_only",
-            conflicts_with = "recipes_only"
+            required_unless_present_any = ["recipes_only", "sources_only"],
+            conflicts_with_all = ["recipes_only", "sources_only"]
         )]
         metadata_only: bool,
 
         /// Fetch source recipes and record evidence without downloading source trees.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "sources_only")]
         recipes_only: bool,
+
+        /// Fetch recipes and verify/materialize sources without language analysis.
+        #[arg(long)]
+        sources_only: bool,
+
+        /// Exit 1 after publishing if any selected source is incomplete.
+        #[arg(long, requires = "sources_only")]
+        require_complete: bool,
+
+        #[command(flatten)]
+        limits: crate::acquisition::Limits,
 
         /// Arch-compatible GitLab API endpoint used for recipe metadata.
         #[arg(
             long,
-            requires = "recipes_only",
             conflicts_with = "metadata_only",
             default_value = "https://gitlab.archlinux.org/api/v4"
         )]

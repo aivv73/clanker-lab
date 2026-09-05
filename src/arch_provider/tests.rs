@@ -271,3 +271,39 @@ fn project_paths_follow_arch_packaging_names() {
         assert_eq!(project_path(base), path);
     }
 }
+
+#[test]
+fn archive_checksums_follow_source_positions_and_survive_auxiliary_inputs() {
+    let digest = "a".repeat(64);
+    let AttemptOutcome::Resolved { target, .. } = resolve(&format!(
+        "https://example.org/fix.patch\n\tsource = alpha.tar::https://example.org/alpha-1.0.tar\n\tsha256sums = SKIP\n\tsha256sums = {digest}"
+    )) else {
+        panic!("valid checksum metadata did not resolve");
+    };
+    assert_eq!(target.checksum, Some(format!("sha256:{digest}")));
+    let digest = "B".repeat(128);
+    let AttemptOutcome::Resolved { target, .. } = resolve(&format!(
+        "https://example.org/alpha-1.0.tar\n\tsha512sums = {digest}"
+    )) else {
+        panic!("SHA-512 did not resolve");
+    };
+    assert_eq!(
+        target.checksum,
+        Some(format!("sha512:{}", digest.to_ascii_lowercase()))
+    );
+    for sums in [
+        "\tsha256sums = invalid",
+        "\tsha256sums = SKIP\n\tsha256sums = SKIP",
+    ] {
+        assert!(matches!(
+            resolve(&format!("https://example.org/alpha-1.0.tar\n{sums}")),
+            AttemptOutcome::Unresolved { .. }
+        ));
+    }
+    let AttemptOutcome::Resolved { target, .. } =
+        resolve("https://example.org/alpha-1.0.tar\n\tsha256sums = SKIP")
+    else {
+        panic!("SKIP should preserve resolution, not verification");
+    };
+    assert_eq!(target.checksum, None);
+}
