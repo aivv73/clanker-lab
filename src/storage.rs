@@ -13,6 +13,9 @@ use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior};
 
 use crate::interrupt;
 use crate::inventory::{InstalledPackage, InventoryFingerprint};
+use crate::package::provider::{
+    AnalysisTarget, AttemptOutcome, EvidenceGrade, ProviderAttempt, SourceProvider,
+};
 use crate::package::{InstallReason, PackageOrigin, SnapshotPackage};
 
 const MIGRATION_1: &str = "
@@ -41,6 +44,69 @@ const MIGRATION_3: &str = "
     ALTER TABLE inventory_snapshots ADD COLUMN inventory_fingerprint TEXT;
 ";
 
+/// Migration 4 records source-provider evidence globally rather than per
+/// snapshot, so later refreshes reuse successful analyses and snapshot
+/// retention never prunes them (ADR 0005, ADR 0007, ADR 0008).
+/// `analysis_targets` holds canonical source locations keyed by location,
+/// revision, and subdirectory; `provider_attempts` holds one row per
+/// package name, package version, and provider, preserving its latest outcome
+/// including resolved candidates from different providers with no winner selected.
+const MIGRATION_4: &str = "
+    CREATE TABLE analysis_targets (
+        id INTEGER PRIMARY KEY,
+        location TEXT NOT NULL,
+        revision TEXT NOT NULL,
+        subdirectory TEXT NOT NULL,
+        UNIQUE (location, revision, subdirectory)
+    ) STRICT;
+    CREATE TABLE provider_attempts (
+        id INTEGER PRIMARY KEY,
+        package_name TEXT NOT NULL,
+        package_version TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        outcome TEXT NOT NULL CHECK (outcome IN ('resolved', 'unresolved')),
+        target_id INTEGER REFERENCES analysis_targets(id),
+        evidence_grade TEXT CHECK (
+            evidence_grade IN ('exact', 'reconstructed', 'fallback', 'override')
+        ),
+        failure_reason TEXT,
+        recorded_at TEXT NOT NULL,
+        UNIQUE (package_name, package_version, provider),
+        CHECK (
+            (outcome = 'resolved'
+             AND target_id IS NOT NULL
+             AND evidence_grade IS NOT NULL
+             AND failure_reason IS NULL)
+            OR (outcome = 'unresolved'
+             AND target_id IS NULL
+             AND evidence_grade IS NULL
+             AND failure_reason IS NOT NULL)
+        )
+    ) STRICT;
+";
+
+/// Maximum accepted source-location bytes. Recipe locations are short URLs;
+/// this stays generous while keeping error reports bounded.
+// Not yet read: the fetch slice validates fetched recipe metadata against
+// this bound (issue #18). Remove the allowance once it does.
+#[allow(dead_code)]
+const MAX_LOCATION_BYTES: usize = 4096;
+
+/// Maximum accepted source-revision bytes.
+// Not yet read: see MAX_LOCATION_BYTES (issue #18).
+#[allow(dead_code)]
+const MAX_REVISION_BYTES: usize = 1024;
+
+/// Maximum accepted target-subdirectory bytes.
+// Not yet read: see MAX_LOCATION_BYTES (issue #18).
+#[allow(dead_code)]
+const MAX_SUBDIRECTORY_BYTES: usize = 1024;
+
+/// Maximum accepted provider-failure-reason bytes.
+// Not yet read: see MAX_LOCATION_BYTES (issue #18).
+#[allow(dead_code)]
+const MAX_REASON_BYTES: usize = 4096;
+
 const RETAINED_SNAPSHOT_COUNT: u32 = 10;
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -50,7 +116,8 @@ impl MigrationVersion {
     const EMPTY: Self = Self(0);
     const VERSION_1: Self = Self(1);
     const VERSION_2: Self = Self(2);
-    const CURRENT: Self = Self(3);
+    const VERSION_3: Self = Self(3);
+    const CURRENT: Self = Self(4);
 
     const fn from_database(value: u32) -> Self {
         Self(value)
@@ -71,6 +138,14 @@ pub(crate) enum StorageError {
     UnsupportedSchemaVersion(MigrationVersion),
     InvalidSchema(rusqlite::Error),
     InvalidPackageMetadata {
+        field: &'static str,
+        value: String,
+        message: &'static str,
+    },
+    // Not yet constructed outside tests: the fetch slice records attempts
+    // through the storage API (issue #18). Remove the allowance once it does.
+    #[allow(dead_code)]
+    InvalidProviderAttempt {
         field: &'static str,
         value: String,
         message: &'static str,
@@ -108,6 +183,14 @@ impl fmt::Display for StorageError {
             } => write!(
                 formatter,
                 "published package has invalid {field} {value:?}: {message}"
+            ),
+            Self::InvalidProviderAttempt {
+                field,
+                value,
+                message,
+            } => write!(
+                formatter,
+                "provider attempt has invalid {field} {value:?}: {message}"
             ),
             Self::Sqlite(error) => write!(formatter, "SQLite returned an error: {error}"),
         }
@@ -253,6 +336,61 @@ impl Database {
         }))
     }
 
+    /// Every recorded attempt for one installed package version, ordered by
+    /// provider name. Attempts are global, so no snapshot lock is needed:
+    /// retention prunes snapshots, never attempts.
+    // Not yet called: the fetch slice and future reports read attempts
+    // through this API (issue #18). Remove the allowance once they do.
+    #[allow(dead_code)]
+    pub(crate) fn provider_attempts(
+        &self,
+        package_name: &str,
+        package_version: &str,
+    ) -> Result<Vec<ProviderAttempt>, StorageError> {
+        let transaction = self
+            .connection
+            .unchecked_transaction()
+            .map_err(StorageError::Sqlite)?;
+        let mut attempts = Vec::new();
+        {
+            let mut statement = transaction
+                .prepare(
+                    "SELECT provider_attempts.provider, provider_attempts.outcome,
+                            analysis_targets.location, analysis_targets.revision,
+                            analysis_targets.subdirectory,
+                            provider_attempts.evidence_grade, provider_attempts.failure_reason
+                     FROM provider_attempts
+                     LEFT JOIN analysis_targets
+                       ON analysis_targets.id = provider_attempts.target_id
+                     WHERE provider_attempts.package_name = ?1
+                       AND provider_attempts.package_version = ?2
+                     ORDER BY provider_attempts.provider",
+                )
+                .map_err(StorageError::Sqlite)?;
+            let rows = statement
+                .query_map([package_name, package_version], |row| {
+                    Ok(StoredProviderAttempt {
+                        provider: row.get(0)?,
+                        outcome: row.get(1)?,
+                        location: row.get(2)?,
+                        revision: row.get(3)?,
+                        subdirectory: row.get(4)?,
+                        grade: row.get(5)?,
+                        reason: row.get(6)?,
+                    })
+                })
+                .map_err(StorageError::Sqlite)?;
+            for row in rows {
+                attempts.push(
+                    row.map_err(StorageError::Sqlite)?
+                        .into_attempt(package_name, package_version)?,
+                );
+            }
+        }
+        transaction.commit().map_err(StorageError::Sqlite)?;
+        Ok(attempts)
+    }
+
     pub(crate) fn begin_refresh(&mut self) -> Result<RefreshTransaction<'_>, StorageError> {
         let transaction = match self
             .connection
@@ -330,6 +468,84 @@ impl RefreshTransaction<'_> {
         }
         self.transaction.commit().map_err(StorageError::Sqlite)
     }
+
+    /// Record one provider attempt in the refresh transaction. Re-recording
+    /// the same package name, package version, and provider replaces the
+    /// previous outcome, so later refreshes reuse successful analyses by
+    /// overwriting them unchanged. The row commits or rolls back with the
+    /// surrounding refresh transaction.
+    // Not yet called: the fetch slice records attempts through this API
+    // (issue #18). Remove the allowance once it does.
+    #[allow(dead_code)]
+    pub(crate) fn record_provider_attempt(
+        &self,
+        attempt: &ProviderAttempt,
+    ) -> Result<(), StorageError> {
+        if interrupt::is_requested() {
+            return Err(StorageError::Interrupted);
+        }
+        validate_provider_attempt(attempt)?;
+        let (target_id, grade, reason) = match &attempt.outcome {
+            AttemptOutcome::Resolved { target, grade } => {
+                self.transaction
+                    .execute(
+                        "INSERT INTO analysis_targets (location, revision, subdirectory)
+                         VALUES (?1, ?2, ?3)
+                         ON CONFLICT (location, revision, subdirectory) DO NOTHING",
+                        (
+                            target.location.as_str(),
+                            optional_text(target.revision.as_deref()),
+                            optional_text(target.subdirectory.as_deref()),
+                        ),
+                    )
+                    .map_err(StorageError::Sqlite)?;
+                let target_id: i64 = self
+                    .transaction
+                    .query_row(
+                        "SELECT id FROM analysis_targets
+                         WHERE location = ?1 AND revision = ?2 AND subdirectory = ?3",
+                        (
+                            target.location.as_str(),
+                            optional_text(target.revision.as_deref()),
+                            optional_text(target.subdirectory.as_deref()),
+                        ),
+                        |row| row.get(0),
+                    )
+                    .map_err(StorageError::Sqlite)?;
+                (Some(target_id), Some(grade.as_str()), None)
+            }
+            AttemptOutcome::Unresolved { reason } => (None, None, Some(reason.as_str())),
+        };
+        self.transaction
+            .execute(
+                "INSERT INTO provider_attempts (
+                    package_name, package_version, provider, outcome,
+                    target_id, evidence_grade, failure_reason, recorded_at
+                 ) VALUES (
+                    ?1, ?2, ?3, ?4, ?5, ?6, ?7, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                 )
+                 ON CONFLICT (package_name, package_version, provider) DO UPDATE SET
+                    outcome = excluded.outcome,
+                    target_id = excluded.target_id,
+                    evidence_grade = excluded.evidence_grade,
+                    failure_reason = excluded.failure_reason,
+                    recorded_at = excluded.recorded_at",
+                (
+                    attempt.package_name.as_str(),
+                    attempt.package_version.as_str(),
+                    attempt.provider.as_str(),
+                    match &attempt.outcome {
+                        AttemptOutcome::Resolved { .. } => "resolved",
+                        AttemptOutcome::Unresolved { .. } => "unresolved",
+                    },
+                    target_id,
+                    grade,
+                    reason,
+                ),
+            )
+            .map_err(StorageError::Sqlite)?;
+        Ok(())
+    }
 }
 
 fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
@@ -375,6 +591,11 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
                 .execute_batch(MIGRATION_3)
                 .map_err(StorageError::Sqlite)?;
         }
+        if version <= MigrationVersion::VERSION_3 {
+            transaction
+                .execute_batch(MIGRATION_4)
+                .map_err(StorageError::Sqlite)?;
+        }
         transaction
             .pragma_update(
                 None,
@@ -398,13 +619,190 @@ fn validate_schema(connection: &Connection) -> Result<(), StorageError> {
                     inventory_snapshots.inventory_fingerprint,
                     installed_packages.name, installed_packages.version,
                     installed_packages.package_base, installed_packages.origin,
-                    installed_packages.install_reason, installed_packages.installed_bytes
+                    installed_packages.install_reason, installed_packages.installed_bytes,
+                    analysis_targets.location, analysis_targets.revision,
+                    analysis_targets.subdirectory,
+                    provider_attempts.package_name, provider_attempts.package_version,
+                    provider_attempts.provider, provider_attempts.outcome,
+                    provider_attempts.target_id, provider_attempts.evidence_grade,
+                    provider_attempts.failure_reason, provider_attempts.recorded_at
              FROM inventory_snapshots
              LEFT JOIN installed_packages ON installed_packages.snapshot_id = inventory_snapshots.id
+             LEFT JOIN analysis_targets ON 1 = 0
+             LEFT JOIN provider_attempts ON 1 = 0
              LIMIT 0",
         )
         .map_err(StorageError::InvalidSchema)?;
     Ok(())
+}
+
+/// Absent revision and subdirectory persist as empty strings; the read path
+/// maps them back to `None`.
+// Not yet called outside tests: see `record_provider_attempt` (issue #18).
+#[allow(dead_code)]
+fn optional_text(value: Option<&str>) -> &str {
+    value.unwrap_or("")
+}
+
+/// Validate a provider attempt before writing: package names and versions
+/// use the same alphabet as the inventory capture, while locations,
+/// revisions, subdirectories, and failure reasons must be bounded and free
+/// of control characters so reports can render them safely.
+// Not yet called outside tests: see `record_provider_attempt` (issue #18).
+#[allow(dead_code)]
+fn validate_provider_attempt(attempt: &ProviderAttempt) -> Result<(), StorageError> {
+    crate::expac_parser::validate_package_name(&attempt.package_name).map_err(|message| {
+        StorageError::InvalidProviderAttempt {
+            field: "package name",
+            value: attempt.package_name.clone(),
+            message,
+        }
+    })?;
+    crate::expac_parser::validate_package_version(&attempt.package_version).map_err(|message| {
+        StorageError::InvalidProviderAttempt {
+            field: "package version",
+            value: attempt.package_version.clone(),
+            message,
+        }
+    })?;
+    match &attempt.outcome {
+        AttemptOutcome::Resolved { target, .. } => {
+            validate_bounded_text(&target.location, "location", MAX_LOCATION_BYTES, false)?;
+            if let Some(revision) = &target.revision {
+                validate_bounded_text(revision, "revision", MAX_REVISION_BYTES, true)?;
+            }
+            if let Some(subdirectory) = &target.subdirectory {
+                validate_bounded_text(subdirectory, "subdirectory", MAX_SUBDIRECTORY_BYTES, true)?;
+            }
+        }
+        AttemptOutcome::Unresolved { reason } => {
+            validate_bounded_text(reason, "failure reason", MAX_REASON_BYTES, false)?;
+        }
+    }
+    Ok(())
+}
+
+// Not yet called outside tests: see `record_provider_attempt` (issue #18).
+#[allow(dead_code)]
+fn validate_bounded_text(
+    value: &str,
+    field: &'static str,
+    limit: usize,
+    allow_empty: bool,
+) -> Result<(), StorageError> {
+    let invalid = |message: &'static str| StorageError::InvalidProviderAttempt {
+        field,
+        value: value.to_owned(),
+        message,
+    };
+    if value.is_empty() {
+        if allow_empty {
+            return Ok(());
+        }
+        return Err(invalid("value is empty"));
+    }
+    if value.len() > limit {
+        return Err(invalid("value exceeds the length limit"));
+    }
+    if value.chars().any(char::is_control) {
+        return Err(invalid("value contains a control character"));
+    }
+    Ok(())
+}
+
+// Raw SQLite fields are decoded together before entering the typed storage API.
+// Not yet called outside tests: see `provider_attempts` (issue #18).
+#[allow(dead_code)]
+struct StoredProviderAttempt {
+    provider: String,
+    outcome: String,
+    location: Option<String>,
+    revision: Option<String>,
+    subdirectory: Option<String>,
+    grade: Option<String>,
+    reason: Option<String>,
+}
+
+impl StoredProviderAttempt {
+    /// Validate stored values with the same rules as the write boundary.
+    // Not yet called outside tests: see `provider_attempts` (issue #18).
+    #[allow(dead_code)]
+    fn into_attempt(
+        self,
+        package_name: &str,
+        package_version: &str,
+    ) -> Result<ProviderAttempt, StorageError> {
+        let Self {
+            provider,
+            outcome,
+            location,
+            revision,
+            subdirectory,
+            grade,
+            reason,
+        } = self;
+        let invalid = |field: &'static str, value: String, message: &'static str| {
+            StorageError::InvalidProviderAttempt {
+                field,
+                value,
+                message,
+            }
+        };
+        let provider = SourceProvider::parse(&provider)
+            .map_err(|message| invalid("provider", provider, message))?;
+        let outcome = match outcome.as_str() {
+            "resolved" => {
+                let (location, revision, subdirectory, grade) =
+                    match (location, revision, subdirectory, grade, reason) {
+                        (Some(location), Some(revision), Some(subdirectory), Some(grade), None) => {
+                            (location, revision, subdirectory, grade)
+                        }
+                        _ => {
+                            return Err(invalid(
+                                "outcome",
+                                outcome,
+                                "a resolved attempt must reference one target and grade",
+                            ));
+                        }
+                    };
+                let grade = EvidenceGrade::parse(&grade)
+                    .map_err(|message| invalid("evidence grade", grade, message))?;
+                AttemptOutcome::Resolved {
+                    target: AnalysisTarget {
+                        location,
+                        revision: (!revision.is_empty()).then_some(revision),
+                        subdirectory: (!subdirectory.is_empty()).then_some(subdirectory),
+                    },
+                    grade,
+                }
+            }
+            "unresolved" => match (location, revision, subdirectory, grade, reason) {
+                (None, None, None, None, Some(reason)) => AttemptOutcome::Unresolved { reason },
+                _ => {
+                    return Err(invalid(
+                        "outcome",
+                        outcome,
+                        "an unresolved attempt must carry only a failure reason",
+                    ));
+                }
+            },
+            _ => {
+                return Err(invalid(
+                    "outcome",
+                    outcome,
+                    "outcome is neither resolved nor unresolved",
+                ));
+            }
+        };
+        let attempt = ProviderAttempt {
+            package_name: package_name.to_owned(),
+            package_version: package_version.to_owned(),
+            provider,
+            outcome,
+        };
+        validate_provider_attempt(&attempt)?;
+        Ok(attempt)
+    }
 }
 
 fn retry_sqlite_lock(attempt: i32) -> bool {

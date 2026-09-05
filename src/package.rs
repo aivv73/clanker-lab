@@ -1,3 +1,9 @@
+/// Source-provider evidence vocabulary (ADR 0001, ADR 0002, ADR 0005).
+/// Not yet consumed: the fetch slice records and reads these through the
+/// storage API (issue #18). Remove the allowance once it does.
+#[allow(dead_code)]
+pub(crate) mod provider;
+
 use std::str::FromStr;
 
 use serde::Serialize;
