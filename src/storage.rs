@@ -125,6 +125,49 @@ const MIGRATION_6: &str = "
     ) STRICT;
 ";
 
+// Add an explicit successful no-source outcome without fabricating a target.
+const MIGRATION_7: &str = "
+    ALTER TABLE provider_attempts RENAME TO provider_attempts_v6;
+    CREATE TABLE provider_attempts (
+        id INTEGER PRIMARY KEY,
+        package_name TEXT NOT NULL,
+        package_version TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        outcome TEXT NOT NULL CHECK (outcome IN ('resolved', 'unresolved', 'source_free')),
+        target_id INTEGER REFERENCES analysis_targets(id),
+        evidence_grade TEXT CHECK (
+            evidence_grade IN ('exact', 'reconstructed', 'fallback', 'override')
+        ),
+        failure_reason TEXT,
+        recorded_at TEXT NOT NULL,
+        recipe_location TEXT,
+        recipe_commit TEXT CHECK ((recipe_location IS NULL) = (recipe_commit IS NULL)),
+        source_checksum TEXT,
+        UNIQUE (package_name, package_version, provider),
+        CHECK (
+            (outcome = 'resolved'
+             AND target_id IS NOT NULL
+             AND evidence_grade IS NOT NULL
+             AND failure_reason IS NULL)
+            OR (outcome = 'source_free'
+             AND target_id IS NULL AND evidence_grade IS NULL
+             AND failure_reason IS NULL AND source_checksum IS NULL
+             AND recipe_location IS NOT NULL AND recipe_commit IS NOT NULL)
+            OR (outcome = 'unresolved'
+             AND target_id IS NULL
+             AND evidence_grade IS NULL
+             AND failure_reason IS NOT NULL)
+        )
+    ) STRICT;
+
+    INSERT INTO provider_attempts (id, package_name, package_version, provider, outcome,
+        target_id, evidence_grade, failure_reason, recorded_at, recipe_location, recipe_commit, source_checksum)
+    SELECT id, package_name, package_version, provider, outcome,
+        target_id, evidence_grade, failure_reason, recorded_at, recipe_location, recipe_commit, source_checksum
+    FROM provider_attempts_v6;
+    DROP TABLE provider_attempts_v6;
+";
+
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) struct MigrationVersion(u32);
 
@@ -135,7 +178,8 @@ impl MigrationVersion {
     const VERSION_3: Self = Self(3);
     const VERSION_4: Self = Self(4);
     const VERSION_5: Self = Self(5);
-    const CURRENT: Self = Self(6);
+    const VERSION_6: Self = Self(6);
+    const CURRENT: Self = Self(7);
 
     const fn from_database(value: u32) -> Self {
         Self(value)
@@ -285,6 +329,7 @@ impl Database {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn published_snapshot(&self) -> Result<Option<PublishedSnapshot>, StorageError> {
         self.read_snapshot(false)
     }
@@ -597,7 +642,10 @@ impl RefreshTransaction<'_> {
             )
             .optional()
             .map_err(StorageError::Sqlite)?;
-        Ok(outcome.as_deref() == Some("resolved"))
+        Ok(matches!(
+            outcome.as_deref(),
+            Some("resolved" | "source_free")
+        ))
     }
 
     /// Record one provider attempt in the refresh transaction. Re-recording
@@ -643,6 +691,7 @@ impl RefreshTransaction<'_> {
                 (Some(target_id), Some(grade.as_str()), None)
             }
             AttemptOutcome::Unresolved { reason } => (None, None, Some(reason.as_str())),
+            AttemptOutcome::SourceFree => (None, None, None),
         };
         self.transaction
             .execute(
@@ -667,6 +716,7 @@ impl RefreshTransaction<'_> {
                     attempt.provider.as_str(),
                     match &attempt.outcome {
                         AttemptOutcome::Resolved { .. } => "resolved",
+                        AttemptOutcome::SourceFree => "source_free",
                         AttemptOutcome::Unresolved { .. } => "unresolved",
                     },
                     target_id,
@@ -739,6 +789,11 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
             transaction
                 .execute_batch(MIGRATION_6)
                 .map_err(StorageError::Sqlite)?;
+        }
+        if version <= MigrationVersion::VERSION_6 {
+            transaction
+                .execute_batch(MIGRATION_7)
+                .map_err(StorageError::InvalidSchema)?;
         }
         transaction
             .pragma_update(
@@ -824,6 +879,15 @@ fn validate_provider_attempt(attempt: &ProviderAttempt) -> Result<(), StorageErr
             }
             if let Some(subdirectory) = &target.subdirectory {
                 validate_bounded_text(subdirectory, "subdirectory", MAX_SUBDIRECTORY_BYTES, true)?;
+            }
+        }
+        AttemptOutcome::SourceFree => {
+            if attempt.recipe.is_none() {
+                return Err(StorageError::InvalidProviderAttempt {
+                    field: "recipe provenance",
+                    value: String::new(),
+                    message: "source-free evidence requires recipe provenance",
+                });
             }
         }
         AttemptOutcome::Unresolved { reason } => {
@@ -932,6 +996,22 @@ impl StoredProviderAttempt {
                     grade,
                 }
             }
+            "source_free" => {
+                if location.is_some()
+                    || revision.is_some()
+                    || subdirectory.is_some()
+                    || grade.is_some()
+                    || reason.is_some()
+                    || checksum.is_some()
+                {
+                    return Err(invalid(
+                        "outcome",
+                        outcome,
+                        "source-free evidence must not carry a target, grade, checksum, or failure",
+                    ));
+                }
+                AttemptOutcome::SourceFree
+            }
             "unresolved" => match (location, revision, subdirectory, grade, reason) {
                 (None, None, None, None, Some(reason)) => AttemptOutcome::Unresolved { reason },
                 _ => {
@@ -946,7 +1026,7 @@ impl StoredProviderAttempt {
                 return Err(invalid(
                     "outcome",
                     outcome,
-                    "outcome is neither resolved nor unresolved",
+                    "outcome is none of resolved, source_free, or unresolved",
                 ));
             }
         };

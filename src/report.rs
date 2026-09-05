@@ -12,16 +12,16 @@ use crate::package::{InstallReason, PackageOrigin, SnapshotPackage};
 
 #[derive(Clone, Copy, Debug, Serialize)]
 enum ReportSchemaVersion {
-    #[serde(rename = "1.4.0")]
-    V1_4_0,
+    #[serde(rename = "1.5.0")]
+    V1_5_0,
 }
 
 impl ReportSchemaVersion {
-    const CURRENT: Self = Self::V1_4_0;
+    const CURRENT: Self = Self::V1_5_0;
 
     const fn as_str(self) -> &'static str {
         match self {
-            Self::V1_4_0 => "1.4.0",
+            Self::V1_5_0 => "1.5.0",
         }
     }
 }
@@ -307,6 +307,29 @@ impl CountReport {
         }
     }
 
+    pub(crate) fn with_source_free(mut self, count: u64) -> Self {
+        self.coverage = Coverage::missing_only(self.selected_population.saturating_sub(count));
+        self.coverage.source_free_packages = count;
+        self
+    }
+
+    pub(crate) fn from_provider_snapshot(
+        snapshot: &crate::storage::PublishedSnapshot,
+        staleness: SnapshotStaleness,
+        selection: PopulationSelection,
+    ) -> Self {
+        let source_free = snapshot
+            .packages
+            .iter()
+            .zip(&snapshot.provider_packages)
+            .filter(|(package, evidence)| {
+                selection.includes(package)
+                    && crate::package::provider::source_free(&evidence.attempts)
+            })
+            .count() as u64;
+        Self::from_snapshot(&snapshot.packages, staleness, selection).with_source_free(source_free)
+    }
+
     /// Exact analyzed share in percent. An empty selection is vacuously
     /// complete so `--min-coverage` does not fail explicit zero reports.
     pub fn analyzed_coverage_percent(&self) -> f64 {
@@ -329,6 +352,12 @@ impl CountReport {
             self.selected_population,
             self.coverage.denominator,
         );
+        if self.coverage.source_free_packages > 0 {
+            rendered.push_str(&format!(
+                "\nSource-free packages (excluded): {}",
+                self.coverage.source_free_packages
+            ));
+        }
         let tenths = self.coverage.percentage_tenths();
         for (row, share) in self.coverage.rows.iter().zip(tenths) {
             rendered.push_str(&format!(
@@ -354,6 +383,12 @@ impl CountReport {
             self.selected_population,
             self.coverage.denominator,
         );
+        if self.coverage.source_free_packages > 0 {
+            rendered.push_str(&format!(
+                "\n- Source-free packages (excluded): {}",
+                self.coverage.source_free_packages
+            ));
+        }
         let tenths = self.coverage.percentage_tenths();
         for (row, share) in self.coverage.rows.iter().zip(tenths) {
             rendered.push_str(&format!(
@@ -373,6 +408,7 @@ impl CountReport {
 #[derive(Debug, Serialize)]
 struct Coverage {
     denominator: u64,
+    source_free_packages: u64,
     analyzed: u64,
     missing_source_language_analysis: u64,
     /// Per-state breakdown sorted by count descending and state name
@@ -434,6 +470,7 @@ impl Coverage {
         debug_assert_eq!(rows.iter().map(|row| row.count).sum::<u64>(), denominator);
         Self {
             denominator,
+            source_free_packages: 0,
             analyzed: 0,
             missing_source_language_analysis: denominator,
             rows,

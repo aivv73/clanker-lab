@@ -71,6 +71,8 @@ pub(crate) struct AnalysisTarget {
 /// preserved; candidates from different providers have no winner selected.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum AttemptOutcome {
+    /// Matching recipe declares no sources (metapackage or generated package).
+    SourceFree,
     Resolved {
         target: AnalysisTarget,
         grade: EvidenceGrade,
@@ -122,4 +124,14 @@ impl RecipeProvenance {
     pub(crate) fn commit(&self) -> &str {
         &self.commit
     }
+}
+
+/// A concrete source candidate takes precedence over another provider's no-source claim.
+pub(crate) fn source_free(attempts: &[ProviderAttempt]) -> bool {
+    attempts
+        .iter()
+        .any(|attempt| matches!(attempt.outcome, AttemptOutcome::SourceFree))
+        && !attempts
+            .iter()
+            .any(|attempt| matches!(attempt.outcome, AttemptOutcome::Resolved { .. }))
 }

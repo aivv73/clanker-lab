@@ -83,7 +83,33 @@ pub enum Command {
             default_value = "https://gitlab.archlinux.org/api/v4"
         )]
         arch_api_url: crate::arch_provider::RecipeEndpoint,
+
+        /// Try CachyOS recipes and graded Arch rebuild fallbacks for unresolved packages.
+        #[arg(long, conflicts_with = "metadata_only")]
+        cachyos: bool,
+
+        /// GitHub-compatible API for the CachyOS recipe repository.
+        #[arg(
+            long,
+            requires = "cachyos",
+            default_value = "https://api.github.com/repos/CachyOS/CachyOS-PKGBUILDS",
+            value_parser = parse_cachyos_api_url
+        )]
+        cachyos_api_url: Box<crate::arch_provider::RecipeEndpoint>,
+
+        /// Explicit HTTP(S) proxy for recipe, archive, and Git requests.
+        /// Proxy environment variables are never read implicitly. Boxed to
+        /// keep the CLI enum small; see `parse_proxy_url`.
+        #[arg(long, conflicts_with = "metadata_only", value_name = "URL", value_parser = parse_proxy_url)]
+        proxy_url: Option<Box<crate::proxy::ProxyUrl>>,
     },
+}
+
+fn parse_proxy_url(value: &str) -> Result<Box<crate::proxy::ProxyUrl>, String> {
+    value
+        .parse()
+        .map(Box::new)
+        .map_err(|reason: &'static str| reason.to_owned())
 }
 
 fn parse_min_coverage(value: &str) -> Result<f64, String> {
@@ -94,4 +120,11 @@ fn parse_min_coverage(value: &str) -> Result<f64, String> {
         return Err(format!("{value:?} is not a number between 0 and 100"));
     }
     Ok(percent)
+}
+
+fn parse_cachyos_api_url(value: &str) -> Result<Box<crate::arch_provider::RecipeEndpoint>, String> {
+    value
+        .parse()
+        .map(Box::new)
+        .map_err(|reason: &'static str| reason.to_owned())
 }

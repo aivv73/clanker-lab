@@ -307,3 +307,50 @@ fn archive_checksums_follow_source_positions_and_survive_auxiliary_inputs() {
     };
     assert_eq!(target.checksum, None);
 }
+
+#[test]
+fn matching_recipes_without_declared_sources_are_source_free() {
+    for (name, version, release) in [("base", "3", "3"), ("base-devel", "1", "2")] {
+        let recipe = recipe(&format!(
+            "pkgbase = {name}\n\tpkgver = {version}\n\tpkgrel = {release}\n\tdepends = glibc\npkgname = {name}\n"
+        ));
+        assert_eq!(
+            recipe.resolve(RecipePackage {
+                name,
+                base: name,
+                version: &format!("{version}-{release}")
+            }),
+            AttemptOutcome::SourceFree
+        );
+        assert!(matches!(
+            recipe.resolve(RecipePackage {
+                name,
+                base: name,
+                version: "99-1"
+            }),
+            AttemptOutcome::Unresolved { .. }
+        ));
+    }
+}
+
+#[test]
+fn source_free_does_not_hide_unsupported_or_incomplete_source_metadata() {
+    for metadata in [
+        "\tsource = local.patch\n",
+        "\tsource_x86_64 = https://example.org/a.tar.gz\n",
+        "\tsha256sums = SKIP\n",
+        "\tsource = git+https://example.org/a#tag=v1\n\tsource = git+https://example.org/b#tag=v1\n",
+    ] {
+        assert!(matches!(
+            recipe(&format!(
+                "pkgbase = alpha\n\tpkgver = 1.0\n\tpkgrel = 1\n{metadata}pkgname = alpha\n"
+            ))
+            .resolve(RecipePackage {
+                name: "alpha",
+                base: "alpha",
+                version: "1.0-1"
+            }),
+            AttemptOutcome::Unresolved { .. }
+        ));
+    }
+}

@@ -6,10 +6,11 @@ use crate::inventory::InstalledPackage;
 use crate::package::provider::{AnalysisTarget, AttemptOutcome, EvidenceGrade, RecipeProvenance};
 use crate::srcinfo::{self, ParsedSrcinfo};
 
-pub(super) struct RecipePackage<'a> {
-    pub(super) name: &'a str,
-    pub(super) base: &'a str,
-    pub(super) version: &'a str,
+#[derive(Clone, Copy)]
+pub(crate) struct RecipePackage<'a> {
+    pub(crate) name: &'a str,
+    pub(crate) base: &'a str,
+    pub(crate) version: &'a str,
 }
 
 impl<'a> From<&'a InstalledPackage> for RecipePackage<'a> {
@@ -22,7 +23,7 @@ impl<'a> From<&'a InstalledPackage> for RecipePackage<'a> {
     }
 }
 
-pub(super) struct Recipe {
+pub(crate) struct Recipe {
     document: Result<ParsedSrcinfo, &'static str>,
     provenance: RecipeProvenance,
 }
@@ -36,7 +37,7 @@ struct RepositoryFile {
 }
 
 impl Recipe {
-    pub(super) fn decode(bytes: &[u8], url: &Url) -> Result<Self, &'static str> {
+    pub(crate) fn decode(bytes: &[u8], url: &Url) -> Result<Self, &'static str> {
         let file: RepositoryFile =
             serde_json::from_slice(bytes).map_err(|_| "invalid recipe API JSON")?;
         if file.file_path != ".SRCINFO" || file.encoding != "base64" {
@@ -59,11 +60,19 @@ impl Recipe {
         })
     }
 
-    pub(super) fn provenance(&self) -> &RecipeProvenance {
+    pub(crate) fn from_srcinfo(bytes: &[u8], provenance: RecipeProvenance) -> Self {
+        Self {
+            document: srcinfo::parse_srcinfo_bytes(bytes)
+                .map_err(|_| "invalid or oversized .SRCINFO"),
+            provenance,
+        }
+    }
+
+    pub(crate) fn provenance(&self) -> &RecipeProvenance {
         &self.provenance
     }
 
-    pub(super) fn resolve(&self, package: RecipePackage<'_>) -> AttemptOutcome {
+    pub(crate) fn resolve(&self, package: RecipePackage<'_>) -> AttemptOutcome {
         let unresolved = |reason: &str| AttemptOutcome::Unresolved {
             reason: reason.to_owned(),
         };
@@ -90,6 +99,15 @@ impl Recipe {
         };
         if version != package.version {
             return unresolved("recipe version does not match installed version");
+        }
+        if document.sources.is_empty()
+            && member.sources.is_empty()
+            && document.sha256sums.is_empty()
+            && document.sha512sums.is_empty()
+            && member.sha256sums.is_empty()
+            && member.sha512sums.is_empty()
+        {
+            return AttemptOutcome::SourceFree;
         }
         let mut targets = Vec::new();
         for (sources, sha256, sha512) in [
@@ -245,7 +263,7 @@ fn source_target(source: &str, version: &str) -> Result<Option<AnalysisTarget>, 
 
 /// Arch devtools' project-name mapping, including GitLab's reserved `tree`.
 /// See src/lib/api/gitlab.sh::gitlab_project_name_to_path in archlinux/devtools.
-pub(super) fn project_path(base: &str) -> String {
+pub(crate) fn project_path(base: &str) -> String {
     let chars: Vec<_> = base.chars().collect();
     let mut path = String::new();
     let mut index = 0;

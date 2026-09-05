@@ -10,7 +10,7 @@ use std::sync::{
 };
 use std::time::Duration;
 
-fn tar() -> Vec<u8> {
+pub(super) fn tar() -> Vec<u8> {
     let content = b"fn main() {}\n";
     let mut header = [0u8; 512];
     header[..13].copy_from_slice(b"source/lib.rs");

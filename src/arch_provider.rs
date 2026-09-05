@@ -1,5 +1,5 @@
-mod http;
-mod recipe;
+pub(crate) mod http;
+pub(crate) mod recipe;
 #[cfg(test)]
 mod tests;
 
@@ -12,6 +12,7 @@ use crate::interrupt;
 use crate::inventory::InstalledPackage;
 use crate::package::provider::{AttemptOutcome, ProviderAttempt, SourceProvider};
 use crate::progress::Progress;
+use crate::proxy::ProxyUrl;
 use crate::storage::{RefreshTransaction, StorageError};
 
 /// Groups fetched, decoded, and recorded per batch. Bounds retained
@@ -28,6 +29,7 @@ pub(crate) fn record_attempts<'a, W: io::Write>(
     endpoint: &RecipeEndpoint,
     progress: &mut Progress<W>,
     require_checksums: bool,
+    proxy: Option<&ProxyUrl>,
 ) -> Result<(), StorageError> {
     let provider = SourceProvider::parse("arch").expect("static provider name is valid");
     let mut groups = BTreeMap::<_, Vec<_>>::new();
@@ -89,7 +91,7 @@ pub(crate) fn record_attempts<'a, W: io::Write>(
         }
         // Only interruption escapes the batch; any other outer error is
         // recorded as an unresolved reason for every group in the batch.
-        let fetched = match http::fetch_all(&urls) {
+        let fetched = match http::fetch_all(&urls, proxy) {
             Ok(results) => results,
             Err(http::FetchError::Interrupted) => return Err(StorageError::Interrupted),
             Err(error) => urls.iter().map(|_| Err(error.clone())).collect(),
@@ -135,7 +137,7 @@ pub(crate) fn record_attempts<'a, W: io::Write>(
                     }
                 };
                 match &outcome {
-                    AttemptOutcome::Resolved { .. } => resolved += 1,
+                    AttemptOutcome::Resolved { .. } | AttemptOutcome::SourceFree => resolved += 1,
                     AttemptOutcome::Unresolved { .. } => unresolved += 1,
                 }
                 refresh.record_provider_attempt(&ProviderAttempt {

@@ -12,6 +12,7 @@ pub(crate) struct ProviderReport {
     selected_population: usize,
     resolved: usize,
     unresolved: usize,
+    source_free: usize,
     not_attempted: usize,
     packages: Vec<PackageRow>,
 }
@@ -64,6 +65,7 @@ impl ProviderReport {
             selected_population: 0,
             resolved: 0,
             unresolved: 0,
+            source_free: 0,
             not_attempted: 0,
             packages: Vec::new(),
         };
@@ -85,6 +87,7 @@ impl ProviderReport {
                             checksum: target.checksum.clone(),
                         }),
                     ),
+                    AttemptOutcome::SourceFree => ("source_free", None, None, None),
                     AttemptOutcome::Unresolved { reason } => {
                         ("unresolved", None, Some(reason.clone()), None)
                     }
@@ -107,6 +110,12 @@ impl ProviderReport {
             let outcome = if attempts.iter().any(|attempt| attempt.outcome == "resolved") {
                 report.resolved += 1;
                 "resolved"
+            } else if attempts
+                .iter()
+                .any(|attempt| attempt.outcome == "source_free")
+            {
+                report.source_free += 1;
+                "source_free"
             } else if attempts.is_empty() {
                 report.not_attempted += 1;
                 "not_attempted"
@@ -168,7 +177,7 @@ impl ProviderReport {
             }
         };
         let mut text = format!(
-            "{}Snapshot: {}\nSelection: {}\nInstalled packages: {}\nSelected population: {}\nResolved: {}\nUnresolved: {}\nNot attempted: {}",
+            "{}Snapshot: {}\nSelection: {}\nInstalled packages: {}\nSelected population: {}\nResolved: {}\nUnresolved: {}\nSource-free: {}\nNot attempted: {}",
             if markdown {
                 "# Paclang providers\n\n"
             } else {
@@ -180,6 +189,7 @@ impl ProviderReport {
             self.selected_population,
             self.resolved,
             self.unresolved,
+            self.source_free,
             self.not_attempted,
         );
         for package in &self.packages {
@@ -232,6 +242,8 @@ impl ProviderReport {
                     if let Some(digest) = &acquisition.content_sha256 {
                         text.push_str(&format!("\n- Content SHA-256: {}", quote(digest)));
                     }
+                } else if attempt.outcome == "source_free" {
+                    text.push_str("\n- Acquisition: not required (recipe declares no sources)");
                 } else {
                     text.push_str("\n- Acquisition: not attempted");
                 }

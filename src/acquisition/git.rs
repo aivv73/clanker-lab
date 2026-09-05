@@ -16,6 +16,7 @@ pub(super) fn fetch(
     directory: &Path,
     tree: &Path,
     record: &mut AcquisitionRecord,
+    proxy: Option<&str>,
 ) -> Result<(), Error> {
     git2::opts::strict_hash_verification(true);
     let revision = target
@@ -46,7 +47,9 @@ pub(super) fn fetch(
             .external_template(false),
     )?;
     let mut config = repo.config()?;
-    config.set_str("http.proxy", "")?;
+    // Explicit proxy only: the worker environment carries no proxy
+    // variables, and user/system git configs are neutralized at startup.
+    config.set_str("http.proxy", proxy.unwrap_or(""))?;
     config.set_bool("http.sslVerify", true)?;
     let limited = Cell::new(false);
     let downloaded = Cell::new(0u64);
