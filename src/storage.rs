@@ -220,7 +220,14 @@ pub(crate) struct Database {
     snapshot_lock_path: PathBuf,
 }
 
+pub(crate) struct ProviderPackage {
+    pub(crate) name: String,
+    pub(crate) version: String,
+    pub(crate) attempts: Vec<ProviderAttempt>,
+}
+
 pub(crate) struct PublishedSnapshot {
+    pub(crate) provider_packages: Vec<ProviderPackage>,
     pub(crate) packages: Vec<SnapshotPackage>,
     /// `None` for snapshots published before migration 3 recorded fingerprints.
     pub(crate) fingerprint: Option<InventoryFingerprint>,
@@ -260,6 +267,19 @@ impl Database {
     }
 
     pub(crate) fn published_snapshot(&self) -> Result<Option<PublishedSnapshot>, StorageError> {
+        self.read_snapshot(false)
+    }
+
+    pub(crate) fn published_provider_snapshot(
+        &self,
+    ) -> Result<Option<PublishedSnapshot>, StorageError> {
+        self.read_snapshot(true)
+    }
+
+    fn read_snapshot(
+        &self,
+        include_providers: bool,
+    ) -> Result<Option<PublishedSnapshot>, StorageError> {
         let read_lock = SnapshotLock::shared(&self.snapshot_lock_path)?;
         let transaction = self
             .connection
@@ -280,20 +300,34 @@ impl Database {
         };
 
         let mut packages = Vec::new();
+        let mut provider_packages = Vec::new();
         {
             let mut statement = transaction
                 .prepare(
-                    "SELECT origin, install_reason FROM installed_packages
+                    "SELECT origin, install_reason, name, version FROM installed_packages
                      WHERE snapshot_id = ?1 ORDER BY name",
                 )
                 .map_err(StorageError::Sqlite)?;
             let rows = statement
                 .query_map([snapshot_id], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                    ))
                 })
                 .map_err(StorageError::Sqlite)?;
             for row in rows {
-                let (origin, install_reason) = row.map_err(StorageError::Sqlite)?;
+                let (origin, install_reason, name, version) = row.map_err(StorageError::Sqlite)?;
+                if include_providers {
+                    let attempts = self.provider_attempts(&name, &version)?;
+                    provider_packages.push(ProviderPackage {
+                        name,
+                        version,
+                        attempts,
+                    });
+                }
                 let parsed_origin = PackageOrigin::parse(&origin).map_err(|message| {
                     StorageError::InvalidPackageMetadata {
                         field: "origin",
@@ -327,6 +361,7 @@ impl Database {
         };
         transaction.commit().map_err(StorageError::Sqlite)?;
         Ok(Some(PublishedSnapshot {
+            provider_packages,
             packages,
             fingerprint,
             read_guard: read_lock,
@@ -336,20 +371,15 @@ impl Database {
     /// Every recorded attempt for one installed package version, ordered by
     /// provider name. Attempts are global, so no snapshot lock is needed:
     /// retention prunes snapshots, never attempts.
-    // Inspection reports are a later slice; recipe refresh only writes attempts.
-    #[allow(dead_code)]
     pub(crate) fn provider_attempts(
         &self,
         package_name: &str,
         package_version: &str,
     ) -> Result<Vec<ProviderAttempt>, StorageError> {
-        let transaction = self
-            .connection
-            .unchecked_transaction()
-            .map_err(StorageError::Sqlite)?;
         let mut attempts = Vec::new();
         {
-            let mut statement = transaction
+            let mut statement = self
+                .connection
                 .prepare(
                     "SELECT provider_attempts.provider, provider_attempts.outcome,
                             analysis_targets.location, analysis_targets.revision,
@@ -386,7 +416,6 @@ impl Database {
                 );
             }
         }
-        transaction.commit().map_err(StorageError::Sqlite)?;
         Ok(attempts)
     }
 

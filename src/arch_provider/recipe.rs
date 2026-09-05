@@ -158,7 +158,8 @@ fn source_target(source: &str, version: &str) -> Result<Option<AnalysisTarget>, 
         revision
     } else {
         let filename = alias.unwrap_or_else(|| url.path().rsplit('/').next().unwrap_or(""));
-        if [".sig", ".asc"]
+        // Auxiliary downloads do not identify a primary source tree.
+        if [".sig", ".asc", ".patch", ".diff"]
             .iter()
             .any(|suffix| filename.ends_with(suffix))
         {

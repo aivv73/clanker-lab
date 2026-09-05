@@ -118,7 +118,8 @@ fn run(
     min_coverage: Option<f64>,
 ) -> Result<RunOutput, AppError> {
     match command {
-        Command::Count => render_count(format, selection, min_coverage),
+        Command::Count => render_snapshot_report(format, selection, min_coverage, false),
+        Command::Providers => render_snapshot_report(format, selection, min_coverage, true),
         Command::Refresh {
             metadata_only: _,
             recipes_only,
@@ -176,13 +177,37 @@ fn run(
     }
 }
 
-fn render_count(
+fn render_snapshot_report(
     format: Format,
     selection: report::PopulationSelection,
     min_coverage: Option<f64>,
+    providers: bool,
 ) -> Result<RunOutput, AppError> {
     let database_path = storage::database_path().map_err(AppError::storage)?;
     let database = storage::Database::open(&database_path).map_err(AppError::storage)?;
+    if providers {
+        let snapshot = database
+            .published_provider_snapshot()
+            .map_err(AppError::storage)?
+            .ok_or(AppError::NoSnapshot)?;
+        let live = inventory::read_live_fingerprint().map_err(map_inventory_error)?;
+        let staleness = match &snapshot.fingerprint {
+            Some(value) if *value == live => SnapshotStaleness::Current,
+            Some(_) => SnapshotStaleness::Stale,
+            None => SnapshotStaleness::Unknown,
+        };
+        let meets_coverage =
+            CountReport::from_snapshot(&snapshot.packages, staleness, selection.clone())
+                .meets_coverage(min_coverage);
+        let report =
+            report::providers::ProviderReport::from_snapshot(&snapshot, staleness, selection);
+        let rendered = report.render(format).map_err(AppError::render)?;
+        return Ok(RunOutput {
+            rendered,
+            meets_coverage,
+            snapshot_read_guard: Some(snapshot),
+        });
+    }
     render_count_from_database(format, &database, selection, min_coverage)
 }
 

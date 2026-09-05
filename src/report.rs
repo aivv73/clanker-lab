@@ -1,3 +1,4 @@
+pub(crate) mod providers;
 #[cfg(test)]
 mod tests;
 
@@ -11,16 +12,16 @@ use crate::package::{InstallReason, PackageOrigin, SnapshotPackage};
 
 #[derive(Clone, Copy, Debug, Serialize)]
 enum ReportSchemaVersion {
-    #[serde(rename = "1.2.0")]
-    V1_2_0,
+    #[serde(rename = "1.3.0")]
+    V1_3_0,
 }
 
 impl ReportSchemaVersion {
-    const CURRENT: Self = Self::V1_2_0;
+    const CURRENT: Self = Self::V1_3_0;
 
     const fn as_str(self) -> &'static str {
         match self {
-            Self::V1_2_0 => "1.2.0",
+            Self::V1_3_0 => "1.3.0",
         }
     }
 }
@@ -200,6 +201,7 @@ impl SnapshotStaleness {
 #[serde(rename_all = "snake_case")]
 enum ReportKind {
     Count,
+    Providers,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]

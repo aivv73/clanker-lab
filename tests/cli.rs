@@ -221,13 +221,13 @@ fn invalid_cli_use_is_structured_and_exits_two() {
         match expected_format {
             "json" => {
                 let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
-                assert_eq!(value["schema_version"], "1.2.0");
+                assert_eq!(value["schema_version"], "1.3.0");
                 assert_eq!(value["error"]["code"], "invalid_cli");
             }
             "markdown" => assert!(stdout.contains("- Code: `invalid_cli`")),
             "toon" => {
                 let value: serde_json::Value = toon_format::decode_default(&stdout).unwrap();
-                assert_eq!(value["schema_version"], "1.2.0");
+                assert_eq!(value["schema_version"], "1.3.0");
                 assert_eq!(value["error"]["code"], "invalid_cli");
             }
             _ => unreachable!(),

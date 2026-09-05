@@ -92,6 +92,52 @@ fn uncertain_sources_never_become_current_upstream_fallbacks() {
 }
 
 #[test]
+fn remote_patches_do_not_veto_a_primary_tree_or_supply_one() {
+    for auxiliary in [
+        "https://example.org/fix.patch",
+        "https://example.org/fix.diff?download=1",
+        "fix.patch::https://example.org/download/123",
+        "fix.diff::https://example.org/download/456",
+    ] {
+        assert_eq!(
+            resolve(auxiliary),
+            AttemptOutcome::Unresolved {
+                reason: "primary source is missing or ambiguous in recipe metadata".to_owned(),
+            },
+            "{auxiliary}"
+        );
+        for primary in [
+            "https://example.org/alpha-1.0.tar.gz",
+            "git+https://example.org/alpha.git#tag=v1.0",
+        ] {
+            assert_eq!(
+                resolve(&format!("{primary}\n\tsource = {auxiliary}")),
+                resolve(primary),
+                "{primary} with {auxiliary}"
+            );
+        }
+    }
+    for auxiliary in [
+        "http://example.org/fix.patch",
+        "https://user:secret@example.org/fix.diff",
+        "https://example.org/$pkgver.patch",
+        "https://example.org/unknown.bin",
+        "git+https://example.org/fix.patch",
+        "https://example.org/other-1.0.tar.gz",
+    ] {
+        assert!(
+            matches!(
+                resolve(&format!(
+                    "https://example.org/alpha-1.0.tar.gz\n\tsource = {auxiliary}"
+                )),
+                AttemptOutcome::Unresolved { .. }
+            ),
+            "{auxiliary}"
+        );
+    }
+}
+
+#[test]
 fn matching_split_members_share_targets_and_keep_recipe_commit() {
     let recipe = recipe(
         "pkgbase = suite\n\tpkgver = 2.0\n\tpkgrel = 1\n\tepoch = 3\n\tsource = https://example.org/suite-2.0.tar.gz\n\tsource = https://example.org/suite-2.0.tar.gz.sig\n\tsource = fix.patch\npkgname = suite-cli\npkgname = suite-docs\n",

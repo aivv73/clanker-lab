@@ -48,6 +48,9 @@ pub enum Command {
     /// Report the selected installed-package count and analysis coverage.
     Count,
 
+    /// Inspect stored source-provider outcomes for the selected package versions.
+    Providers,
+
     /// Refresh package metadata and source-language analysis.
     Refresh {
         /// Publish installed-package metadata without analyzing source trees.
