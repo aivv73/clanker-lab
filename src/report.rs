@@ -246,7 +246,7 @@ impl PopulationSelection {
         }
     }
 
-    fn includes(&self, package: &SnapshotPackage) -> bool {
+    pub(crate) fn includes(&self, package: &SnapshotPackage) -> bool {
         self.install_reason.includes(package.install_reason)
             && (self.origins.is_empty() || self.origins.contains(&package.origin))
     }

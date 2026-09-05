@@ -3,7 +3,7 @@
 //! This module is intentionally dependency-free (only `std` and `core`) so
 //! the `cargo fuzz` target in `fuzz/` can include it with `#[path]` and feed
 //! arbitrary bytes into [`parse_srcinfo_bytes`] without pulling in the rest
-//! of the binary. A future source provider will call it with recipe text; it
+//! of the binary. The Arch source provider calls it with recipe text; it
 //! performs no network or filesystem access itself.
 //!
 //! The parser reads metadata only and never evaluates PKGBUILDs or other
@@ -46,6 +46,9 @@ pub struct ParsedSrcinfo {
     pub epoch: Option<String>,
     /// Base-level `source` entries in document order.
     pub sources: Vec<String>,
+    /// Architecture-specific source arrays require a later architecture-aware
+    /// resolver; their presence must not silently disappear from evidence.
+    pub has_arch_specific_sources: bool,
     /// Member packages in document order; always nonempty.
     pub packages: Vec<ParsedSrcinfoPackage>,
 }
@@ -160,6 +163,7 @@ struct DocumentBuilder {
     pkgrel: Option<String>,
     epoch: Option<String>,
     sources: Vec<String>,
+    has_arch_specific_sources: bool,
     packages: Vec<ParsedSrcinfoPackage>,
 }
 
@@ -197,6 +201,7 @@ impl DocumentBuilder {
             pkgrel,
             epoch: self.epoch,
             sources: self.sources,
+            has_arch_specific_sources: self.has_arch_specific_sources,
             packages: self.packages,
         })
     }
@@ -295,6 +300,10 @@ fn parse_indented_line(
     // `source` is valid in both sections; singletons below are restricted to
     // the package-base section, where `makepkg --printsrcinfo` emits them.
     let current = document.current_package();
+    if key.starts_with("source_") {
+        document.has_arch_specific_sources = true;
+        return Ok(());
+    }
     if key == "source" {
         let source = parse_source_value(value, line_number)?;
         match current {

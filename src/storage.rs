@@ -14,7 +14,8 @@ use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior};
 use crate::interrupt;
 use crate::inventory::{InstalledPackage, InventoryFingerprint};
 use crate::package::provider::{
-    AnalysisTarget, AttemptOutcome, EvidenceGrade, ProviderAttempt, SourceProvider,
+    AnalysisTarget, AttemptOutcome, EvidenceGrade, ProviderAttempt, RecipeProvenance,
+    SourceProvider,
 };
 use crate::package::{InstallReason, PackageOrigin, SnapshotPackage};
 
@@ -85,26 +86,24 @@ const MIGRATION_4: &str = "
     ) STRICT;
 ";
 
+// Recipe provenance is optional for attempts recorded before fetching existed.
+const MIGRATION_5: &str = "
+    ALTER TABLE provider_attempts ADD COLUMN recipe_location TEXT;
+    ALTER TABLE provider_attempts ADD COLUMN recipe_commit TEXT
+        CHECK ((recipe_location IS NULL) = (recipe_commit IS NULL));
+";
+
 /// Maximum accepted source-location bytes. Recipe locations are short URLs;
 /// this stays generous while keeping error reports bounded.
-// Not yet read: the fetch slice validates fetched recipe metadata against
-// this bound (issue #18). Remove the allowance once it does.
-#[allow(dead_code)]
 const MAX_LOCATION_BYTES: usize = 4096;
 
 /// Maximum accepted source-revision bytes.
-// Not yet read: see MAX_LOCATION_BYTES (issue #18).
-#[allow(dead_code)]
 const MAX_REVISION_BYTES: usize = 1024;
 
 /// Maximum accepted target-subdirectory bytes.
-// Not yet read: see MAX_LOCATION_BYTES (issue #18).
-#[allow(dead_code)]
 const MAX_SUBDIRECTORY_BYTES: usize = 1024;
 
 /// Maximum accepted provider-failure-reason bytes.
-// Not yet read: see MAX_LOCATION_BYTES (issue #18).
-#[allow(dead_code)]
 const MAX_REASON_BYTES: usize = 4096;
 
 const RETAINED_SNAPSHOT_COUNT: u32 = 10;
@@ -117,7 +116,8 @@ impl MigrationVersion {
     const VERSION_1: Self = Self(1);
     const VERSION_2: Self = Self(2);
     const VERSION_3: Self = Self(3);
-    const CURRENT: Self = Self(4);
+    const VERSION_4: Self = Self(4);
+    const CURRENT: Self = Self(5);
 
     const fn from_database(value: u32) -> Self {
         Self(value)
@@ -142,9 +142,6 @@ pub(crate) enum StorageError {
         value: String,
         message: &'static str,
     },
-    // Not yet constructed outside tests: the fetch slice records attempts
-    // through the storage API (issue #18). Remove the allowance once it does.
-    #[allow(dead_code)]
     InvalidProviderAttempt {
         field: &'static str,
         value: String,
@@ -339,8 +336,7 @@ impl Database {
     /// Every recorded attempt for one installed package version, ordered by
     /// provider name. Attempts are global, so no snapshot lock is needed:
     /// retention prunes snapshots, never attempts.
-    // Not yet called: the fetch slice and future reports read attempts
-    // through this API (issue #18). Remove the allowance once they do.
+    // Inspection reports are a later slice; recipe refresh only writes attempts.
     #[allow(dead_code)]
     pub(crate) fn provider_attempts(
         &self,
@@ -358,7 +354,8 @@ impl Database {
                     "SELECT provider_attempts.provider, provider_attempts.outcome,
                             analysis_targets.location, analysis_targets.revision,
                             analysis_targets.subdirectory,
-                            provider_attempts.evidence_grade, provider_attempts.failure_reason
+                            provider_attempts.evidence_grade, provider_attempts.failure_reason,
+                            provider_attempts.recipe_location, provider_attempts.recipe_commit
                      FROM provider_attempts
                      LEFT JOIN analysis_targets
                        ON analysis_targets.id = provider_attempts.target_id
@@ -377,6 +374,8 @@ impl Database {
                         subdirectory: row.get(4)?,
                         grade: row.get(5)?,
                         reason: row.get(6)?,
+                        recipe_location: row.get(7)?,
+                        recipe_commit: row.get(8)?,
                     })
                 })
                 .map_err(StorageError::Sqlite)?;
@@ -474,9 +473,6 @@ impl RefreshTransaction<'_> {
     /// previous outcome, so later refreshes reuse successful analyses by
     /// overwriting them unchanged. The row commits or rolls back with the
     /// surrounding refresh transaction.
-    // Not yet called: the fetch slice records attempts through this API
-    // (issue #18). Remove the allowance once it does.
-    #[allow(dead_code)]
     pub(crate) fn record_provider_attempt(
         &self,
         attempt: &ProviderAttempt,
@@ -520,16 +516,18 @@ impl RefreshTransaction<'_> {
             .execute(
                 "INSERT INTO provider_attempts (
                     package_name, package_version, provider, outcome,
-                    target_id, evidence_grade, failure_reason, recorded_at
+                    target_id, evidence_grade, failure_reason, recorded_at, recipe_location, recipe_commit
                  ) VALUES (
-                    ?1, ?2, ?3, ?4, ?5, ?6, ?7, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                    ?1, ?2, ?3, ?4, ?5, ?6, ?7, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?8, ?9
                  )
                  ON CONFLICT (package_name, package_version, provider) DO UPDATE SET
                     outcome = excluded.outcome,
                     target_id = excluded.target_id,
                     evidence_grade = excluded.evidence_grade,
                     failure_reason = excluded.failure_reason,
-                    recorded_at = excluded.recorded_at",
+                    recorded_at = excluded.recorded_at,
+                    recipe_location = excluded.recipe_location,
+                    recipe_commit = excluded.recipe_commit",
                 (
                     attempt.package_name.as_str(),
                     attempt.package_version.as_str(),
@@ -541,6 +539,8 @@ impl RefreshTransaction<'_> {
                     target_id,
                     grade,
                     reason,
+                    attempt.recipe.as_ref().map(RecipeProvenance::location),
+                    attempt.recipe.as_ref().map(RecipeProvenance::commit),
                 ),
             )
             .map_err(StorageError::Sqlite)?;
@@ -596,6 +596,11 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
                 .execute_batch(MIGRATION_4)
                 .map_err(StorageError::Sqlite)?;
         }
+        if version <= MigrationVersion::VERSION_4 {
+            transaction
+                .execute_batch(MIGRATION_5)
+                .map_err(StorageError::Sqlite)?;
+        }
         transaction
             .pragma_update(
                 None,
@@ -620,12 +625,13 @@ fn validate_schema(connection: &Connection) -> Result<(), StorageError> {
                     installed_packages.name, installed_packages.version,
                     installed_packages.package_base, installed_packages.origin,
                     installed_packages.install_reason, installed_packages.installed_bytes,
-                    analysis_targets.location, analysis_targets.revision,
+                    analysis_targets.id, analysis_targets.location, analysis_targets.revision,
                     analysis_targets.subdirectory,
                     provider_attempts.package_name, provider_attempts.package_version,
                     provider_attempts.provider, provider_attempts.outcome,
                     provider_attempts.target_id, provider_attempts.evidence_grade,
-                    provider_attempts.failure_reason, provider_attempts.recorded_at
+                    provider_attempts.failure_reason, provider_attempts.recorded_at,
+                    provider_attempts.recipe_location, provider_attempts.recipe_commit
              FROM inventory_snapshots
              LEFT JOIN installed_packages ON installed_packages.snapshot_id = inventory_snapshots.id
              LEFT JOIN analysis_targets ON 1 = 0
@@ -638,8 +644,6 @@ fn validate_schema(connection: &Connection) -> Result<(), StorageError> {
 
 /// Absent revision and subdirectory persist as empty strings; the read path
 /// maps them back to `None`.
-// Not yet called outside tests: see `record_provider_attempt` (issue #18).
-#[allow(dead_code)]
 fn optional_text(value: Option<&str>) -> &str {
     value.unwrap_or("")
 }
@@ -648,8 +652,6 @@ fn optional_text(value: Option<&str>) -> &str {
 /// use the same alphabet as the inventory capture, while locations,
 /// revisions, subdirectories, and failure reasons must be bounded and free
 /// of control characters so reports can render them safely.
-// Not yet called outside tests: see `record_provider_attempt` (issue #18).
-#[allow(dead_code)]
 fn validate_provider_attempt(attempt: &ProviderAttempt) -> Result<(), StorageError> {
     crate::expac_parser::validate_package_name(&attempt.package_name).map_err(|message| {
         StorageError::InvalidProviderAttempt {
@@ -682,8 +684,6 @@ fn validate_provider_attempt(attempt: &ProviderAttempt) -> Result<(), StorageErr
     Ok(())
 }
 
-// Not yet called outside tests: see `record_provider_attempt` (issue #18).
-#[allow(dead_code)]
 fn validate_bounded_text(
     value: &str,
     field: &'static str,
@@ -711,7 +711,7 @@ fn validate_bounded_text(
 }
 
 // Raw SQLite fields are decoded together before entering the typed storage API.
-// Not yet called outside tests: see `provider_attempts` (issue #18).
+// Raw decoding remains for the future inspection report.
 #[allow(dead_code)]
 struct StoredProviderAttempt {
     provider: String,
@@ -721,11 +721,13 @@ struct StoredProviderAttempt {
     subdirectory: Option<String>,
     grade: Option<String>,
     reason: Option<String>,
+    recipe_location: Option<String>,
+    recipe_commit: Option<String>,
 }
 
 impl StoredProviderAttempt {
     /// Validate stored values with the same rules as the write boundary.
-    // Not yet called outside tests: see `provider_attempts` (issue #18).
+    // Used by the inspection read API, not recipe refresh.
     #[allow(dead_code)]
     fn into_attempt(
         self,
@@ -740,6 +742,8 @@ impl StoredProviderAttempt {
             subdirectory,
             grade,
             reason,
+            recipe_location,
+            recipe_commit,
         } = self;
         let invalid = |field: &'static str, value: String, message: &'static str| {
             StorageError::InvalidProviderAttempt {
@@ -794,11 +798,26 @@ impl StoredProviderAttempt {
                 ));
             }
         };
+        let recipe = match (recipe_location, recipe_commit) {
+            (None, None) => None,
+            (Some(location), Some(commit)) => Some(
+                RecipeProvenance::new(&location, &commit)
+                    .map_err(|message| invalid("recipe provenance", location, message))?,
+            ),
+            _ => {
+                return Err(invalid(
+                    "recipe provenance",
+                    String::new(),
+                    "incomplete recipe provenance",
+                ));
+            }
+        };
         let attempt = ProviderAttempt {
             package_name: package_name.to_owned(),
             package_version: package_version.to_owned(),
             provider,
             outcome,
+            recipe,
         };
         validate_provider_attempt(&attempt)?;
         Ok(attempt)

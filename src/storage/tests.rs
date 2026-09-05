@@ -44,7 +44,7 @@ fn malformed_current_database_is_refused_without_mutation() {
     let path = directory.path().join("paclang.db");
     let connection = Connection::open(&path).unwrap();
     connection
-        .execute_batch("CREATE TABLE marker (id INTEGER); PRAGMA user_version = 4;")
+        .execute_batch("CREATE TABLE marker (id INTEGER); PRAGMA user_version = 5;")
         .unwrap();
     drop(connection);
 
@@ -65,7 +65,7 @@ fn malformed_current_database_is_refused_without_mutation() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 4);
+    assert_eq!(version, 5);
     assert_eq!(marker_tables, 1);
 }
 
@@ -156,7 +156,7 @@ fn newer_database_is_refused_without_mutation() {
     let path = directory.path().join("paclang.db");
     let connection = Connection::open(&path).unwrap();
     connection
-        .execute_batch("CREATE TABLE marker (id INTEGER); PRAGMA user_version = 5;")
+        .execute_batch("CREATE TABLE marker (id INTEGER); PRAGMA user_version = 6;")
         .unwrap();
     drop(connection);
 
@@ -167,7 +167,7 @@ fn newer_database_is_refused_without_mutation() {
     assert!(matches!(
         error,
         StorageError::UnsupportedSchemaVersion(version)
-            if version == MigrationVersion::from_database(5)
+            if version == MigrationVersion::from_database(6)
     ));
 
     let connection = Connection::open(&path).unwrap();
@@ -181,7 +181,7 @@ fn newer_database_is_refused_without_mutation() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 5);
+    assert_eq!(version, 6);
     assert_eq!(inventory_tables, 0);
 }
 
@@ -211,7 +211,7 @@ fn concurrent_first_open_runs_one_complete_migration() {
     let version: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 4);
+    assert_eq!(version, 5);
 }
 
 #[test]
@@ -238,7 +238,7 @@ fn version_one_database_migrates_to_current() {
     let version: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 4);
+    assert_eq!(version, 5);
     let snapshots: u32 = connection
         .query_row("SELECT count(*) FROM inventory_snapshots", [], |row| {
             row.get(0)
@@ -286,7 +286,7 @@ fn version_two_snapshot_migrates_with_unknown_staleness() {
     let version: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 4);
+    assert_eq!(version, 5);
 }
 
 fn table_row_count(connection: &Connection, table: &str) -> u32 {
@@ -317,6 +317,7 @@ fn resolved_attempt(provider: &str, grade: EvidenceGrade) -> ProviderAttempt {
         package_name: "alpha".to_owned(),
         package_version: "1.0-1".to_owned(),
         provider: SourceProvider::parse(provider).unwrap(),
+        recipe: None,
         outcome: AttemptOutcome::Resolved {
             target: AnalysisTarget {
                 location: "https://example.invalid/alpha.git".to_owned(),
@@ -333,6 +334,7 @@ fn unresolved_attempt(provider: &str) -> ProviderAttempt {
         package_name: "alpha".to_owned(),
         package_version: "1.0-1".to_owned(),
         provider: SourceProvider::parse(provider).unwrap(),
+        recipe: None,
         outcome: AttemptOutcome::Unresolved {
             reason: "no recipe found".to_owned(),
         },
@@ -401,7 +403,7 @@ fn version_three_snapshot_migrates_with_evidence_tables() {
     let version: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 4);
+    assert_eq!(version, 5);
     assert!(table_exists(&connection, "analysis_targets"));
     assert!(table_exists(&connection, "provider_attempts"));
     let stored = connection.query_row(
@@ -737,4 +739,108 @@ fn provider_and_grade_roundtrip_through_storage() {
         assert_eq!(grade.as_str(), text);
     }
     assert!(EvidenceGrade::parse("confident").is_err());
+}
+
+fn create_version_four(path: &std::path::Path) -> Connection {
+    let connection = Connection::open(path).unwrap();
+    for migration in [
+        super::MIGRATION_1,
+        super::MIGRATION_2,
+        super::MIGRATION_3,
+        super::MIGRATION_4,
+    ] {
+        connection.execute_batch(migration).unwrap();
+    }
+    connection.execute_batch("INSERT INTO inventory_snapshots VALUES (1, 'old', NULL);
+        INSERT INTO analysis_targets VALUES (1, 'https://example.org/a.git', 'tag:v1', '');
+        INSERT INTO provider_attempts VALUES (1, 'alpha', '1.0-1', 'arch', 'resolved', 1, 'reconstructed', NULL, 'old');
+        PRAGMA user_version = 4;").unwrap();
+    connection
+}
+
+#[test]
+fn version_four_migration_preserves_attempts_and_adds_optional_provenance() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("paclang.db");
+    drop(create_version_four(&path));
+    let mut database = Database::open(&path).unwrap();
+    let old = database.provider_attempts("alpha", "1.0-1").unwrap();
+    assert_eq!(old.len(), 1);
+    assert_eq!(old[0].recipe, None);
+    assert_eq!(
+        old[0].outcome,
+        AttemptOutcome::Resolved {
+            target: AnalysisTarget {
+                location: "https://example.org/a.git".to_owned(),
+                revision: Some("tag:v1".to_owned()),
+                subdirectory: None
+            },
+            grade: EvidenceGrade::Reconstructed,
+        }
+    );
+    let connection = Connection::open(&path).unwrap();
+    assert_eq!(
+        connection
+            .query_row("SELECT recorded_at FROM provider_attempts", [], |row| {
+                row.get::<_, String>(0)
+            })
+            .unwrap(),
+        "old"
+    );
+    assert_eq!(
+        connection
+            .query_row("SELECT published_at FROM inventory_snapshots", [], |row| {
+                row.get::<_, String>(0)
+            })
+            .unwrap(),
+        "old"
+    );
+    assert_eq!(
+        connection
+            .pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
+            .unwrap(),
+        5
+    );
+    let mut new = old[0].clone();
+    new.recipe = Some(
+        crate::package::provider::RecipeProvenance::new(
+            "https://example.org/recipe",
+            &"a".repeat(40),
+        )
+        .unwrap(),
+    );
+    let refresh = database.begin_refresh().unwrap();
+    refresh.record_provider_attempt(&new).unwrap();
+    refresh.publish(&[], &test_fingerprint()).unwrap();
+    drop(database);
+    let database = Database::open(&path).unwrap();
+    assert_eq!(database.provider_attempts("alpha", "1.0-1").unwrap(), [new]);
+}
+
+#[test]
+fn malformed_version_four_migration_rolls_back_new_columns() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("paclang.db");
+    let connection = create_version_four(&path);
+    connection
+        .execute_batch("ALTER TABLE provider_attempts DROP COLUMN recorded_at;")
+        .unwrap();
+    drop(connection);
+    assert!(matches!(
+        Database::open(&path),
+        Err(StorageError::InvalidSchema(_))
+    ));
+    let connection = Connection::open(&path).unwrap();
+    assert_eq!(
+        connection
+            .pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
+            .unwrap(),
+        4
+    );
+    assert!(
+        connection
+            .prepare("SELECT recipe_location FROM provider_attempts")
+            .is_err()
+    );
+    assert_eq!(table_row_count(&connection, "provider_attempts"), 1);
 }

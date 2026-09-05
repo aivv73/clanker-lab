@@ -88,4 +88,36 @@ pub(crate) struct ProviderAttempt {
     pub(crate) package_version: String,
     pub(crate) provider: SourceProvider,
     pub(crate) outcome: AttemptOutcome,
+    pub(crate) recipe: Option<RecipeProvenance>,
+}
+
+/// Exact recipe commit returned by the metadata service. The attempt's
+/// recorded_at timestamp records freshness; legacy attempts have no provenance.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct RecipeProvenance {
+    location: String,
+    commit: String,
+}
+
+impl RecipeProvenance {
+    pub(crate) fn new(location: &str, commit: &str) -> Result<Self, &'static str> {
+        if location.is_empty() || location.len() > 4096 || location.chars().any(char::is_control) {
+            return Err("invalid recipe location");
+        }
+        if !matches!(commit.len(), 40 | 64) || !commit.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err("recipe commit must be a full Git object ID");
+        }
+        Ok(Self {
+            location: location.to_owned(),
+            commit: commit.to_owned(),
+        })
+    }
+
+    pub(crate) fn location(&self) -> &str {
+        &self.location
+    }
+    pub(crate) fn commit(&self) -> &str {
+        &self.commit
+    }
 }
