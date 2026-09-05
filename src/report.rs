@@ -1,4 +1,5 @@
 pub(crate) mod providers;
+pub(crate) mod source_bytes;
 #[cfg(test)]
 mod tests;
 
@@ -11,15 +12,15 @@ use serde::Serialize;
 use crate::package::{InstallReason, PackageOrigin, SnapshotPackage};
 
 #[derive(Clone, Copy, Debug, Serialize)]
-enum ReportSchemaVersion {
+pub(crate) enum ReportSchemaVersion {
     #[serde(rename = "1.5.0")]
     V1_5_0,
 }
 
 impl ReportSchemaVersion {
-    const CURRENT: Self = Self::V1_5_0;
+    pub(crate) const CURRENT: Self = Self::V1_5_0;
 
-    const fn as_str(self) -> &'static str {
+    pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::V1_5_0 => "1.5.0",
         }
@@ -27,13 +28,13 @@ impl ReportSchemaVersion {
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
-enum ToonSpecificationVersion {
+pub(crate) enum ToonSpecificationVersion {
     #[serde(rename = "3.0")]
     V3_0,
 }
 
 impl ToonSpecificationVersion {
-    const CURRENT: Self = Self::V3_0;
+    pub(crate) const CURRENT: Self = Self::V3_0;
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -83,6 +84,14 @@ impl Format {
             Self::Json => serde_json::to_string_pretty(report).map_err(RenderError::Json),
             Self::Markdown => Ok(report.render_markdown()),
         }
+    }
+
+    pub fn render_source_bytes(
+        self,
+        report: &source_bytes::SourceBytesReport,
+        display_limit: Option<usize>,
+    ) -> Result<String, RenderError> {
+        report.render(self, display_limit)
     }
 }
 
@@ -188,7 +197,7 @@ pub(crate) enum SnapshotStaleness {
 }
 
 impl SnapshotStaleness {
-    const fn as_str(self) -> &'static str {
+    pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::Current => "current",
             Self::Stale => "stale",
@@ -199,9 +208,10 @@ impl SnapshotStaleness {
 
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum ReportKind {
+pub(crate) enum ReportKind {
     Count,
     Providers,
+    SourceBytes,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -261,7 +271,7 @@ impl PopulationSelection {
             && (self.packages.is_empty() || self.packages.contains(&package.name))
     }
 
-    fn render(&self) -> String {
+    pub(crate) fn render(&self) -> String {
         let origins = if self.origins.is_empty() {
             "any".to_owned()
         } else {
@@ -397,6 +407,22 @@ impl CountReport {
         }
     }
 
+    pub(crate) fn selection_clone(&self) -> PopulationSelection {
+        self.selection.clone()
+    }
+
+    pub(crate) fn installed_total(&self) -> u64 {
+        self.installed_total
+    }
+
+    pub(crate) fn selected_population(&self) -> u64 {
+        self.selected_population
+    }
+
+    pub(crate) fn into_coverage(self) -> Coverage {
+        self.coverage
+    }
+
     fn render_terminal(&self) -> String {
         let mut rendered = format!(
             "Snapshot: {}\nSelection: {}\nInstalled packages: {}\nSelected population: {}\nCoverage denominator: {}",
@@ -509,15 +535,15 @@ impl CountReport {
 }
 
 #[derive(Debug, Serialize)]
-struct Coverage {
-    denominator: u64,
-    source_free_packages: u64,
-    analyzed: u64,
+pub(crate) struct Coverage {
+    pub(crate) denominator: u64,
+    pub(crate) source_free_packages: u64,
+    pub(crate) analyzed: u64,
     /// Current-upstream approximations, counted apart from exact analysis.
-    approximate: u64,
+    pub(crate) approximate: u64,
     /// Stale profiles included in `analyzed`, disclosed separately.
-    stale: u64,
-    missing_source_language_analysis: u64,
+    pub(crate) stale: u64,
+    pub(crate) missing_source_language_analysis: u64,
     /// Per-state breakdown sorted by count descending and state name
     /// ascending. The counts always sum to `denominator`.
     rows: Vec<CoverageRow>,
@@ -526,14 +552,14 @@ struct Coverage {
 /// Canonical coverage-state names shared by every output format.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum CoverageState {
+pub(crate) enum CoverageState {
     Analyzed,
     Approximate,
     MissingSourceLanguageAnalysis,
 }
 
 impl CoverageState {
-    const fn as_str(self) -> &'static str {
+    pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::Analyzed => "analyzed",
             Self::Approximate => "approximate",
@@ -541,7 +567,7 @@ impl CoverageState {
         }
     }
 
-    const fn human_label(self) -> &'static str {
+    pub(crate) const fn human_label(self) -> &'static str {
         match self {
             Self::Analyzed => "Analyzed",
             Self::Approximate => "Approximate (current upstream)",
@@ -551,13 +577,13 @@ impl CoverageState {
 }
 
 #[derive(Debug, Serialize)]
-struct CoverageRow {
+pub(crate) struct CoverageRow {
     state: CoverageState,
     /// Integer numerator; the denominator is [`Coverage::denominator`].
     count: u64,
 }
 
-    impl Coverage {
+impl Coverage {
     fn missing_only(denominator: u64) -> Self {
         let mut rows = vec![
             CoverageRow {
@@ -632,7 +658,7 @@ struct CoverageRow {
         );
     }
 
-    fn analyzed_percent(&self) -> f64 {
+    pub(crate) fn analyzed_percent(&self) -> f64 {
         if self.denominator == 0 {
             100.0
         } else {
@@ -643,7 +669,7 @@ struct CoverageRow {
     /// Human percentages in tenths of a percent for each row, deterministically
     /// rounded with the largest-remainder method so they total exactly 100.0%
     /// (or 0.0% for an empty selection). Row order is preserved.
-    fn percentage_tenths(&self) -> Vec<u64> {
+    pub(crate) fn percentage_tenths(&self) -> Vec<u64> {
         percentage_tenths(&self.rows.iter().map(|row| row.count).collect::<Vec<_>>())
     }
 }
@@ -652,7 +678,7 @@ struct CoverageRow {
 /// sums to exactly 1000 tenths when the total is nonzero and to 0 otherwise.
 /// Ties break toward the earlier row, so callers must pre-sort rows for
 /// deterministic output.
-fn percentage_tenths(counts: &[u64]) -> Vec<u64> {
+pub(crate) fn percentage_tenths(counts: &[u64]) -> Vec<u64> {
     let total = counts.iter().sum::<u64>();
     if total == 0 {
         return vec![0; counts.len()];
@@ -687,7 +713,7 @@ fn percentage_tenths(counts: &[u64]) -> Vec<u64> {
     tenths
 }
 
-fn format_tenths(tenths: u64) -> String {
+pub(crate) fn format_tenths(tenths: u64) -> String {
     format!("{}.{}%", tenths / 10, tenths % 10)
 }
 

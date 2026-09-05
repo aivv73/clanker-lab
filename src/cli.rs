@@ -54,6 +54,29 @@ pub enum Command {
     /// Report the selected installed-package count and analysis coverage.
     Count,
 
+    /// Report summed source-language bytes over unique analysis targets.
+    SourceBytes {
+        /// Which revision fidelity the totals sum. Exact sums only
+        /// `exact-packaged-source` profiles; approximate sums only
+        /// `current-upstream` profiles; best-available sums exact where
+        /// available and falls back to approximations. Fidelities are never
+        /// mixed as equal evidence; the other fidelity stays disclosed apart.
+        /// `--min-coverage` still gates on the exact analyzed share.
+        #[arg(long, value_enum, default_value_t = crate::report::source_bytes::FidelitySelection::Exact)]
+        fidelity: crate::report::source_bytes::FidelitySelection,
+
+        /// Show every language in human output instead of the top 10 plus
+        /// `Other`. JSON and TOON always carry every language.
+        #[arg(long, conflicts_with = "top")]
+        all: bool,
+
+        /// Show the top N languages plus an aggregated `Other` row in human
+        /// output, so the row count stays bounded regardless of the byte
+        /// distribution. JSON and TOON always carry every language.
+        #[arg(long, value_name = "N", conflicts_with = "all", value_parser = parse_top)]
+        top: Option<usize>,
+    },
+
     /// Inspect stored source-provider outcomes for the selected package versions.
     Providers,
 
@@ -144,6 +167,13 @@ fn parse_package_name(value: &str) -> Result<String, String> {
     crate::expac_parser::validate_package_name(value)
         .map(|()| value.to_owned())
         .map_err(|message| format!("{value:?} is not a valid package name: {message}"))
+}
+
+fn parse_top(value: &str) -> Result<usize, String> {
+    match value.parse::<usize>() {
+        Ok(top) if top >= 1 => Ok(top),
+        _ => Err(format!("{value:?} is not an integer 1 or greater")),
+    }
 }
 
 fn parse_github_api_url(
