@@ -61,6 +61,7 @@ impl FromStr for PackageOrigin {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct SnapshotPackage {
+    pub(crate) name: String,
     pub(crate) origin: PackageOrigin,
     pub(crate) install_reason: InstallReason,
 }

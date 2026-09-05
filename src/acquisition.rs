@@ -58,13 +58,16 @@ pub(crate) struct AcquisitionSummary {
     pub resource_limited: u64,
     pub unresolved_packages: u64,
     pub source_free_packages: u64,
+    /// Distinct targets skipped because a usable profile was already stored;
+    /// nothing was downloaded for them in this refresh.
+    pub reused: u64,
 }
 impl AcquisitionSummary {
     pub(crate) fn complete(&self) -> bool {
         self.failed == 0 && self.resource_limited == 0 && self.unresolved_packages == 0
     }
     pub(crate) fn render(&self) -> String {
-        format!(
+        let mut rendered = format!(
             "Source targets: {}\nAcquired: {}\nFailed acquisition: {}\nResource limited: {}\nPackages without resolved sources: {}\nPackages requiring no sources: {}",
             self.targets,
             self.acquired,
@@ -72,7 +75,11 @@ impl AcquisitionSummary {
             self.resource_limited,
             self.unresolved_packages,
             self.source_free_packages
-        )
+        );
+        if self.reused > 0 {
+            rendered.push_str(&format!("\nReused stored profiles: {}", self.reused));
+        }
+        rendered
     }
 }
 
@@ -135,15 +142,16 @@ impl Drop for Running {
     }
 }
 
-pub(crate) fn record_sources<'a, W: Write>(
+/// Distinct resolved targets across the selected packages, plus the
+/// package counts the refresh summary needs. Shared by the acquisition and
+/// fast-analysis paths so both report the same population.
+pub(crate) fn collect_targets<'a>(
     refresh: &RefreshTransaction<'_>,
     packages: impl IntoIterator<Item = &'a crate::inventory::InstalledPackage>,
-    limits: &Limits,
-    progress: &mut crate::progress::Progress<W>,
-    proxy: Option<&crate::proxy::ProxyUrl>,
-) -> Result<AcquisitionSummary, StorageError> {
-    let mut summary = AcquisitionSummary::default();
+) -> Result<(Vec<AnalysisTarget>, u64, u64), StorageError> {
     let mut targets = Vec::new();
+    let mut unresolved_packages = 0;
+    let mut source_free_packages = 0;
     for package in packages {
         let mut resolved = false;
         let mut source_free = false;
@@ -159,19 +167,51 @@ pub(crate) fn record_sources<'a, W: Write>(
             }
         }
         if !resolved && source_free {
-            summary.source_free_packages += 1;
+            source_free_packages += 1;
         }
         if !resolved && !source_free {
-            summary.unresolved_packages += 1;
+            unresolved_packages += 1;
         }
     }
+    Ok((targets, unresolved_packages, source_free_packages))
+}
+
+pub(crate) fn record_sources<'a, W: Write>(
+    refresh: &RefreshTransaction<'_>,
+    packages: impl IntoIterator<Item = &'a crate::inventory::InstalledPackage>,
+    limits: &Limits,
+    linguist: &crate::linguist::LinguistConfig,
+    skip: &[AnalysisTarget],
+    progress: &mut crate::progress::Progress<W>,
+    proxy: Option<&crate::proxy::ProxyUrl>,
+) -> Result<AcquisitionSummary, StorageError> {
+    let mut summary = AcquisitionSummary::default();
+    let (targets, unresolved_packages, source_free_packages) = collect_targets(refresh, packages)?;
+    let attempted: Vec<AnalysisTarget> = targets
+        .iter()
+        .filter(|target| !skip.contains(target))
+        .cloned()
+        .collect();
     summary.targets = targets.len() as u64;
-    progress.set_total(targets.len() as u64);
-    acquire_targets(&targets, limits, proxy, |target, result, materialized| {
-        // This is the pipeline handoff: a later language analyzer consumes the
-        // repository here, before the disposable handle leaves this callback.
+    summary.unresolved_packages = unresolved_packages;
+    summary.source_free_packages = source_free_packages;
+    // Skipped targets keep their stored profiles untouched.
+    summary.reused = summary.targets.saturating_sub(attempted.len() as u64);
+    progress.set_total(attempted.len() as u64);
+    acquire_targets(&attempted, limits, proxy, |target, result, materialized| {
+        // Pipeline handoff: the language analyzer consumes the disposable
+        // repository here, before the handle leaves this callback.
         if let Some(source) = materialized {
             debug_assert!(source.repository().join(".git").is_dir());
+            if let Some(executable) = linguist.linguist_executable.as_deref() {
+                let outcome = crate::linguist::analyze_target(
+                    &source.repository(),
+                    target.subdirectory.as_deref(),
+                    executable,
+                    std::time::Duration::from_secs(linguist.linguist_timeout_seconds),
+                );
+                refresh.record_language_profile(target, &language_record(outcome, executable))?;
+            }
         }
         match result.state.as_str() {
             "acquired" => summary.acquired += 1,
@@ -188,6 +228,56 @@ pub(crate) fn record_sources<'a, W: Write>(
         Ok(())
     })?;
     Ok(summary)
+}
+
+fn language_record(
+    outcome: crate::linguist::Outcome,
+    executable: &Path,
+) -> crate::linguist::LanguageRecord {
+    let adapter = executable.to_string_lossy().into_owned();
+    match outcome {
+        crate::linguist::Outcome::Analyzed(profile) => crate::linguist::LanguageRecord {
+            state: "analyzed".to_owned(),
+            reason: None,
+            total_bytes: profile.total_bytes,
+            primary_language: profile.primary_language.clone(),
+            languages_json: serde_json::to_string(&profile.languages)
+                .unwrap_or_else(|_| "[]".to_owned()),
+            adapter,
+            source: crate::linguist::ProfileSource::Linguist,
+            fidelity: crate::linguist::RevisionFidelity::ExactPackagedSource,
+        },
+        crate::linguist::Outcome::NoLanguage => crate::linguist::LanguageRecord {
+            state: "no_language".to_owned(),
+            reason: None,
+            total_bytes: 0,
+            primary_language: None,
+            languages_json: "[]".to_owned(),
+            adapter,
+            source: crate::linguist::ProfileSource::Linguist,
+            fidelity: crate::linguist::RevisionFidelity::ExactPackagedSource,
+        },
+        crate::linguist::Outcome::Failed(reason) => crate::linguist::LanguageRecord {
+            state: "failed".to_owned(),
+            reason: Some(reason),
+            total_bytes: 0,
+            primary_language: None,
+            languages_json: "[]".to_owned(),
+            adapter,
+            source: crate::linguist::ProfileSource::Linguist,
+            fidelity: crate::linguist::RevisionFidelity::ExactPackagedSource,
+        },
+        crate::linguist::Outcome::Limited(reason) => crate::linguist::LanguageRecord {
+            state: "resource_limited".to_owned(),
+            reason: Some(reason),
+            total_bytes: 0,
+            primary_language: None,
+            languages_json: "[]".to_owned(),
+            adapter,
+            source: crate::linguist::ProfileSource::Linguist,
+            fidelity: crate::linguist::RevisionFidelity::ExactPackagedSource,
+        },
+    }
 }
 
 fn cache_directory() -> Result<PathBuf, StorageError> {
@@ -436,7 +526,7 @@ fn materialize(
     Ok(())
 }
 
-pub(super) fn validate_checksum(value: &str) -> Result<(), Error> {
+pub(crate) fn validate_checksum(value: &str) -> Result<(), Error> {
     let (kind, hash) = value
         .split_once(':')
         .ok_or(Error::Failed("invalid source checksum"))?;
@@ -451,7 +541,7 @@ pub(super) fn validate_checksum(value: &str) -> Result<(), Error> {
     Ok(())
 }
 
-pub(super) fn safe_path(value: &str) -> Result<PathBuf, Error> {
+pub(crate) fn safe_path(value: &str) -> Result<PathBuf, Error> {
     if value.len() > 4096 || value.contains(['\\', ':']) || value.chars().any(char::is_control) {
         return Err(Error::Failed("unsafe source path"));
     }

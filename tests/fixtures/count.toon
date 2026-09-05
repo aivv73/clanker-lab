@@ -5,13 +5,17 @@ snapshot_staleness: current
 selection:
   install_reason: all
   origins[0]:
+  packages[0]:
 installed_total: 4
 selected_population: 4
 coverage:
   denominator: 4
   source_free_packages: 0
   analyzed: 0
+  approximate: 0
+  stale: 0
   missing_source_language_analysis: 4
-  rows[2]{state,count}:
+  rows[3]{state,count}:
     missing_source_language_analysis,4
     analyzed,0
+    approximate,0

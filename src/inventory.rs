@@ -211,6 +211,7 @@ impl CapturedInventory {
         self.packages
             .iter()
             .map(|package| SnapshotPackage {
+                name: package.name.clone(),
                 origin: package.origin.clone(),
                 install_reason: package.install_reason,
             })

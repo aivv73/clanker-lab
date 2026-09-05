@@ -168,6 +168,34 @@ const MIGRATION_7: &str = "
     DROP TABLE provider_attempts_v6;
 ";
 
+/// Migration 8 stores one source-language profile per analysis target and
+/// recipe checksum. Profiles are global like acquisitions, so snapshot
+/// retention never prunes them; reports join them against the selected
+/// packages' resolved targets.
+const MIGRATION_8: &str = "
+    CREATE TABLE language_profiles (
+        target_id INTEGER NOT NULL REFERENCES analysis_targets(id),
+        checksum TEXT NOT NULL,
+        state TEXT NOT NULL CHECK (state IN ('analyzed', 'no_language', 'failed', 'resource_limited')),
+        reason TEXT,
+        total_bytes INTEGER NOT NULL,
+        primary_language TEXT,
+        languages_json TEXT NOT NULL,
+        adapter TEXT NOT NULL,
+        recorded_at TEXT NOT NULL,
+        PRIMARY KEY (target_id, checksum)
+    ) STRICT;
+";
+
+/// Migration 9 labels every stored profile with its source and revision
+/// fidelity. Earlier rows came only from the local Linguist adapter running
+/// on packaged revisions, so their defaults describe exactly that; existing
+/// rows keep their meaning without a backfill.
+const MIGRATION_9: &str = "
+    ALTER TABLE language_profiles ADD COLUMN source TEXT NOT NULL DEFAULT 'linguist';
+    ALTER TABLE language_profiles ADD COLUMN fidelity TEXT NOT NULL DEFAULT 'exact-packaged-source';
+";
+
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) struct MigrationVersion(u32);
 
@@ -179,7 +207,9 @@ impl MigrationVersion {
     const VERSION_4: Self = Self(4);
     const VERSION_5: Self = Self(5);
     const VERSION_6: Self = Self(6);
-    const CURRENT: Self = Self(7);
+    const VERSION_7: Self = Self(7);
+    const VERSION_8: Self = Self(8);
+    const CURRENT: Self = Self(9);
 
     const fn from_database(value: u32) -> Self {
         Self(value)
@@ -287,6 +317,8 @@ pub(crate) struct ProviderPackage {
     pub(crate) version: String,
     pub(crate) attempts: Vec<ProviderAttempt>,
     pub(crate) acquisitions: Vec<Option<crate::acquisition::AcquisitionRecord>>,
+    pub(crate) analyses: Vec<Option<crate::linguist::LanguageRecord>>,
+    pub(crate) analysis_state: crate::linguist::AnalysisState,
 }
 
 pub(crate) struct PublishedSnapshot {
@@ -395,9 +427,21 @@ impl Database {
                             _ => Ok(None),
                         })
                         .collect::<Result<Vec<_>, StorageError>>()?;
+                    let analyses = attempts
+                        .iter()
+                        .map(|attempt| match &attempt.outcome {
+                            AttemptOutcome::Resolved { target, .. } => {
+                                read_language_profile(&transaction, target)
+                            }
+                            _ => Ok(None),
+                        })
+                        .collect::<Result<Vec<_>, StorageError>>()?;
+                    let analysis_state = package_analysis_state(&transaction, &name, &version)?;
                     provider_packages.push(ProviderPackage {
                         acquisitions,
-                        name,
+                        analyses,
+                        analysis_state,
+                        name: name.clone(),
                         version,
                         attempts,
                     });
@@ -418,6 +462,7 @@ impl Database {
                         }
                     })?;
                 packages.push(SnapshotPackage {
+                    name: name.clone(),
                     origin: parsed_origin,
                     install_reason: parsed_install_reason,
                 });
@@ -481,6 +526,109 @@ fn read_acquisition(
         .optional().map_err(StorageError::Sqlite)
 }
 
+fn read_language_profile(
+    connection: &Connection,
+    target: &AnalysisTarget,
+) -> Result<Option<crate::linguist::LanguageRecord>, StorageError> {
+    connection.query_row("SELECT state, reason, total_bytes, primary_language, languages_json, adapter, source, fidelity
+        FROM language_profiles JOIN analysis_targets ON analysis_targets.id = language_profiles.target_id
+        WHERE location = ?1 AND revision = ?2 AND subdirectory = ?3 AND language_profiles.checksum = ?4",
+        rusqlite::params![target.location, optional_text(target.revision.as_deref()), optional_text(target.subdirectory.as_deref()), optional_text(target.checksum.as_deref())],
+        |row| {
+            let source_text: String = row.get(6)?;
+            let fidelity_text: String = row.get(7)?;
+            let source = crate::linguist::ProfileSource::parse(&source_text).map_err(|message| {
+                rusqlite::Error::FromSqlConversionFailure(6, rusqlite::types::Type::Text, message.into())
+            })?;
+            let fidelity = crate::linguist::RevisionFidelity::parse(&fidelity_text).map_err(|message| {
+                rusqlite::Error::FromSqlConversionFailure(7, rusqlite::types::Type::Text, message.into())
+            })?;
+            Ok(crate::linguist::LanguageRecord {
+                state: row.get(0)?,
+                reason: row.get(1)?,
+                total_bytes: row.get(2)?,
+                primary_language: row.get(3)?,
+                languages_json: row.get(4)?,
+                adapter: row.get(5)?,
+                source,
+                fidelity,
+            })
+        })
+        .optional().map_err(StorageError::Sqlite)
+}
+/// Every recorded attempt for one package name across all versions, ordered
+/// by version then provider. Attempt history is global, so an analyzed
+/// profile attached to an older version stays visible for stale analysis.
+fn read_all_provider_attempts(
+    connection: &Connection,
+    package_name: &str,
+) -> Result<Vec<ProviderAttempt>, StorageError> {
+    let versions = connection
+        .prepare("SELECT DISTINCT package_version FROM provider_attempts WHERE package_name = ?1")
+        .map_err(StorageError::Sqlite)?
+        .query_map([package_name], |row| row.get::<_, String>(0))
+        .map_err(StorageError::Sqlite)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(StorageError::Sqlite)?;
+    let mut attempts = Vec::new();
+    for version in versions {
+        attempts.extend(read_provider_attempts(connection, package_name, &version)?);
+    }
+    Ok(attempts)
+}
+
+/// Resolve one installed package version to its analysis state. A definitive
+/// `no_language` profile on the current target suppresses older profiles so
+/// stale languages never override a known-empty current source; a failed or
+/// absent current analysis falls back to older analyzed profiles as stale.
+fn package_analysis_state(
+    connection: &Connection,
+    package_name: &str,
+    package_version: &str,
+) -> Result<crate::linguist::AnalysisState, StorageError> {
+    use crate::linguist::{AnalysisState, RevisionFidelity};
+    let mut definitive_empty = false;
+    let mut approximate = false;
+    for attempt in read_provider_attempts(connection, package_name, package_version)? {
+        if let AttemptOutcome::Resolved { target, .. } = &attempt.outcome {
+            match read_language_profile(connection, target)? {
+                Some(profile) if profile.state == "analyzed" => {
+                    if profile.fidelity == RevisionFidelity::ExactPackagedSource {
+                        return Ok(AnalysisState::Current);
+                    }
+                    approximate = true;
+                }
+                Some(profile)
+                    if profile.state == "no_language"
+                        && profile.fidelity == RevisionFidelity::ExactPackagedSource =>
+                {
+                    definitive_empty = true;
+                }
+                _ => {}
+            }
+        }
+    }
+    // Current upstream data beats older exact data, but a definitive empty
+    // current source only suppresses the stale fallback, not the independent
+    // upstream claim.
+    if approximate {
+        return Ok(AnalysisState::Approximate);
+    }
+    if definitive_empty {
+        return Ok(AnalysisState::Missing);
+    }
+    for attempt in read_all_provider_attempts(connection, package_name)? {
+        if let AttemptOutcome::Resolved { target, .. } = &attempt.outcome
+            && matches!(read_language_profile(connection, target)?,
+                Some(profile) if profile.state == "analyzed"
+                    && profile.fidelity == RevisionFidelity::ExactPackagedSource)
+        {
+            return Ok(AnalysisState::Stale);
+        }
+    }
+    Ok(AnalysisState::Missing)
+}
+
 fn read_provider_attempts(
     connection: &Connection,
     package_name: &str,
@@ -539,6 +687,21 @@ impl RefreshTransaction<'_> {
         read_provider_attempts(&self.transaction, name, version)
     }
 
+    pub(crate) fn language_profile(
+        &self,
+        target: &AnalysisTarget,
+    ) -> Result<Option<crate::linguist::LanguageRecord>, StorageError> {
+        read_language_profile(&self.transaction, target)
+    }
+
+    pub(crate) fn package_analysis_state(
+        &self,
+        name: &str,
+        version: &str,
+    ) -> Result<crate::linguist::AnalysisState, StorageError> {
+        package_analysis_state(&self.transaction, name, version)
+    }
+
     pub(crate) fn record_acquisition(
         &self,
         target: &AnalysisTarget,
@@ -554,6 +717,26 @@ impl RefreshTransaction<'_> {
             rusqlite::params![target.location, optional_text(target.revision.as_deref()), optional_text(target.subdirectory.as_deref()),
                 optional_text(target.checksum.as_deref()), result.state, result.reason, result.downloaded_bytes, result.extracted_bytes,
                 result.files, result.verified_revision, result.content_sha256]
+        ).map_err(StorageError::Sqlite)?;
+        Ok(())
+    }
+
+    pub(crate) fn record_language_profile(
+        &self,
+        target: &AnalysisTarget,
+        result: &crate::linguist::LanguageRecord,
+    ) -> Result<(), StorageError> {
+        validate_language_record(result)?;
+        self.transaction.execute(
+            "INSERT INTO language_profiles (target_id, checksum, state, reason, total_bytes, primary_language, languages_json, adapter, source, fidelity, recorded_at)
+             SELECT id, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, strftime('%Y-%m-%dT%H:%M:%fZ', 'now') FROM analysis_targets
+             WHERE location = ?1 AND revision = ?2 AND subdirectory = ?3
+             ON CONFLICT(target_id, checksum) DO UPDATE SET state=excluded.state, reason=excluded.reason,
+             total_bytes=excluded.total_bytes, primary_language=excluded.primary_language,
+             languages_json=excluded.languages_json, adapter=excluded.adapter, source=excluded.source, fidelity=excluded.fidelity, recorded_at=excluded.recorded_at",
+            rusqlite::params![target.location, optional_text(target.revision.as_deref()), optional_text(target.subdirectory.as_deref()),
+                optional_text(target.checksum.as_deref()), result.state, result.reason, result.total_bytes,
+                result.primary_language, result.languages_json, result.adapter, result.source.as_str(), result.fidelity.as_str()]
         ).map_err(StorageError::Sqlite)?;
         Ok(())
     }
@@ -795,6 +978,16 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
                 .execute_batch(MIGRATION_7)
                 .map_err(StorageError::InvalidSchema)?;
         }
+        if version <= MigrationVersion::VERSION_7 {
+            transaction
+                .execute_batch(MIGRATION_8)
+                .map_err(StorageError::InvalidSchema)?;
+        }
+        if version <= MigrationVersion::VERSION_8 {
+            transaction
+                .execute_batch(MIGRATION_9)
+                .map_err(StorageError::InvalidSchema)?;
+        }
         transaction
             .pragma_update(
                 None,
@@ -813,6 +1006,7 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
 
 fn validate_schema(connection: &Connection) -> Result<(), StorageError> {
     connection.prepare("SELECT target_id, checksum, state, reason, downloaded_bytes, extracted_bytes, files, verified_revision, content_sha256, recorded_at FROM source_acquisitions LIMIT 0").map_err(StorageError::InvalidSchema)?;
+    connection.prepare("SELECT target_id, checksum, state, reason, total_bytes, primary_language, languages_json, adapter, source, fidelity, recorded_at FROM language_profiles LIMIT 0").map_err(StorageError::InvalidSchema)?;
     connection
         .prepare(
             "SELECT inventory_snapshots.id, inventory_snapshots.published_at,
@@ -893,6 +1087,57 @@ fn validate_provider_attempt(attempt: &ProviderAttempt) -> Result<(), StorageErr
         AttemptOutcome::Unresolved { reason } => {
             validate_bounded_text(reason, "failure reason", MAX_REASON_BYTES, false)?;
         }
+    }
+    Ok(())
+}
+
+fn validate_language_record(result: &crate::linguist::LanguageRecord) -> Result<(), StorageError> {
+    let invalid = |field: &'static str, value: String, message: &'static str| {
+        StorageError::InvalidProviderAttempt {
+            field,
+            value,
+            message,
+        }
+    };
+    match result.state.as_str() {
+        "analyzed" | "no_language" | "failed" | "resource_limited" => {}
+        _ => {
+            return Err(invalid(
+                "language state",
+                result.state.clone(),
+                "language state is none of analyzed, no_language, failed, resource_limited",
+            ));
+        }
+    }
+    if result.languages_json.len() > 1_048_576
+        || result.languages_json.chars().any(char::is_control)
+    {
+        return Err(invalid(
+            "language profile",
+            result.languages_json.clone(),
+            "language profile is not bounded printable JSON",
+        ));
+    }
+    if result.adapter.is_empty()
+        || result.adapter.len() > 4096
+        || result.adapter.chars().any(char::is_control)
+    {
+        return Err(invalid(
+            "language adapter",
+            result.adapter.clone(),
+            "language adapter is not a bounded value",
+        ));
+    }
+    if let Some(reason) = &result.reason
+        && (reason.is_empty()
+            || reason.len() > MAX_REASON_BYTES
+            || reason.chars().any(char::is_control))
+    {
+        return Err(invalid(
+            "language reason",
+            reason.clone(),
+            "language reason is not a bounded value",
+        ));
     }
     Ok(())
 }
