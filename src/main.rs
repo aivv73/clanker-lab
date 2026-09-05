@@ -4,6 +4,7 @@ mod expac_parser;
 mod interrupt;
 mod inventory;
 mod package;
+mod progress;
 mod report;
 mod srcinfo;
 mod storage;
@@ -138,8 +139,17 @@ fn run(
                     .filter_map(|(installed, snapshot)| {
                         selection.includes(snapshot).then_some(installed)
                     });
-                arch_provider::record_attempts(&refresh, selected, &arch_api_url)
-                    .map_err(map_storage_error)?;
+                let mut progress =
+                    progress::Progress::stderr("Fetching recipes", "Resolved", "Unresolved");
+                let result = arch_provider::record_attempts(
+                    &refresh,
+                    selected,
+                    &arch_api_url,
+                    &mut progress,
+                )
+                .map_err(map_storage_error);
+                progress.finish();
+                result?;
                 if inventory::read_live_fingerprint().map_err(map_inventory_error)?
                     != *inventory.fingerprint()
                 {

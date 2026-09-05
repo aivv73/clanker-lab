@@ -468,6 +468,32 @@ impl RefreshTransaction<'_> {
         self.transaction.commit().map_err(StorageError::Sqlite)
     }
 
+    /// Whether a resolved attempt is already recorded for one installed
+    /// package version and provider. Recipe refresh skips fetching for such
+    /// members and reuses the stored evidence; unresolved attempts are
+    /// retried so transient failures and newly published recipes resolve.
+    pub(crate) fn has_resolved_attempt(
+        &self,
+        package_name: &str,
+        package_version: &str,
+        provider: &SourceProvider,
+    ) -> Result<bool, StorageError> {
+        if interrupt::is_requested() {
+            return Err(StorageError::Interrupted);
+        }
+        let outcome: Option<String> = self
+            .transaction
+            .query_row(
+                "SELECT outcome FROM provider_attempts
+                 WHERE package_name = ?1 AND package_version = ?2 AND provider = ?3",
+                (package_name, package_version, provider.as_str()),
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(StorageError::Sqlite)?;
+        Ok(outcome.as_deref() == Some("resolved"))
+    }
+
     /// Record one provider attempt in the refresh transaction. Re-recording
     /// the same package name, package version, and provider replaces the
     /// previous outcome, so later refreshes reuse successful analyses by

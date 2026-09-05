@@ -13,6 +13,12 @@ use crate::interrupt;
 const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 
+/// Maximum recipe requests in flight at once. Fetches are small metadata
+/// documents, so this stays well below analysis-stage concurrency while
+/// keeping a full-system refresh from degrading to one round trip per
+/// package base.
+pub(super) const MAX_CONCURRENT_FETCHES: usize = 8;
+
 #[derive(Debug, Clone)]
 pub(crate) struct RecipeEndpoint(Url);
 
@@ -91,16 +97,131 @@ impl Handler for ResponseBody {
     }
 }
 
-/// One request at a time; multi permits polling cancellation while the server
-/// is idle. No redirects, credentials, proxy environment, or source-URL requests.
+/// Single-request entry point, kept for focused unit tests; the refresh
+/// path uses [`fetch_all`]. No redirects, credentials, proxy environment,
+/// or source-URL requests.
+#[cfg(test)]
 pub(super) fn fetch(url: &Url) -> Result<Vec<u8>, FetchError> {
     fetch_with_timeout(url, REQUEST_TIMEOUT)
 }
 
-fn fetch_with_timeout(url: &Url, timeout: Duration) -> Result<Vec<u8>, FetchError> {
+/// Fetch several recipe documents with at most [`MAX_CONCURRENT_FETCHES`]
+/// requests in flight. Results keep the input order; each item carries its
+/// own bytes or failure so one bad response never discards the rest. Only
+/// interruption aborts the whole batch with `Err`.
+pub(super) fn fetch_all(urls: &[Url]) -> Result<Vec<Result<Vec<u8>, FetchError>>, FetchError> {
+    fetch_all_with_timeout(urls, REQUEST_TIMEOUT)
+}
+
+fn fetch_all_with_timeout(
+    urls: &[Url],
+    timeout: Duration,
+) -> Result<Vec<Result<Vec<u8>, FetchError>>, FetchError> {
     if interrupt::is_requested() {
         return Err(FetchError::Interrupted);
     }
+    let mut results = Vec::with_capacity(urls.len());
+    for chunk in urls.chunks(MAX_CONCURRENT_FETCHES) {
+        if interrupt::is_requested() {
+            return Err(FetchError::Interrupted);
+        }
+        results.extend(fetch_chunk(chunk, timeout)?);
+    }
+    Ok(results)
+}
+
+/// Run one bounded chunk of requests on a single multi handle. Chunk-level
+/// transport failures become per-item errors; only interruption propagates.
+fn fetch_chunk(
+    chunk: &[Url],
+    timeout: Duration,
+) -> Result<Vec<Result<Vec<u8>, FetchError>>, FetchError> {
+    let multi = Multi::new();
+    let mut results: Vec<Option<Result<Vec<u8>, FetchError>>> =
+        (0..chunk.len()).map(|_| None).collect();
+    let mut handles = Vec::new();
+    for (index, url) in chunk.iter().enumerate() {
+        match configure(url, timeout).and_then(|easy| {
+            multi
+                .add2(easy)
+                .map_err(|_| FetchError::Failed("cannot start recipe HTTP request"))
+        }) {
+            Ok(handle) => handles.push((index, handle)),
+            Err(error) => results[index] = Some(Err(error)),
+        }
+    }
+    loop {
+        if interrupt::is_requested() {
+            return Err(FetchError::Interrupted);
+        }
+        let running = multi
+            .perform()
+            .map_err(|_| FetchError::Failed("recipe HTTP transfer failed"))?;
+        if running == 0 {
+            break;
+        }
+        multi
+            .wait(&mut [], Duration::from_millis(50))
+            .map_err(|_| FetchError::Failed("recipe HTTP wait failed"))?;
+    }
+    if interrupt::is_requested() {
+        return Err(FetchError::Interrupted);
+    }
+    let mut transfers: Vec<Option<Result<(), FetchError>>> =
+        (0..chunk.len()).map(|_| None).collect();
+    multi.messages(|message| {
+        for (index, handle) in &handles {
+            if let Some(completed) = message.result_for2(handle) {
+                transfers[*index] = Some(completed.map_err(|error| {
+                    if error.is_operation_timedout() {
+                        FetchError::Failed("recipe request timed out")
+                    } else {
+                        FetchError::Failed("recipe HTTP transfer failed")
+                    }
+                }));
+            }
+        }
+    });
+    for (index, handle) in handles {
+        let easy = multi
+            .remove2(handle)
+            .map_err(|_| FetchError::Failed("cannot finish recipe HTTP request"))?;
+        if results[index].is_some() {
+            continue;
+        }
+        results[index] = Some(finish(&easy, transfers[index].take()));
+    }
+    Ok(results
+        .into_iter()
+        .map(|result| {
+            result.unwrap_or(Err(FetchError::Failed(
+                "recipe HTTP transfer did not complete",
+            )))
+        })
+        .collect())
+}
+
+/// Check one completed transfer: size cap, transport result, then status.
+fn finish(
+    easy: &Easy2<ResponseBody>,
+    transfer: Option<Result<(), FetchError>>,
+) -> Result<Vec<u8>, FetchError> {
+    if easy.get_ref().oversized {
+        return Err(FetchError::Failed("recipe API response exceeds 2 MiB"));
+    }
+    transfer.unwrap_or(Err(FetchError::Failed(
+        "recipe HTTP transfer did not complete",
+    )))?;
+    let status = easy
+        .response_code()
+        .map_err(|_| FetchError::Failed("cannot configure recipe HTTP client"))?;
+    if status != 200 {
+        return Err(FetchError::Http(status));
+    }
+    Ok(easy.get_ref().bytes.clone())
+}
+
+fn configure(url: &Url, timeout: Duration) -> Result<Easy2<ResponseBody>, FetchError> {
     if !curl::Version::get().feature_async_dns() {
         return Err(FetchError::Failed(
             "recipe fetching requires libcurl asynchronous DNS",
@@ -116,6 +237,15 @@ fn fetch_with_timeout(url: &Url, timeout: Duration) -> Result<Vec<u8>, FetchErro
     easy.timeout(timeout).map_err(configuration_error)?;
     easy.useragent(concat!("paclang/", env!("CARGO_PKG_VERSION")))
         .map_err(configuration_error)?;
+    Ok(easy)
+}
+
+#[cfg(test)]
+fn fetch_with_timeout(url: &Url, timeout: Duration) -> Result<Vec<u8>, FetchError> {
+    if interrupt::is_requested() {
+        return Err(FetchError::Interrupted);
+    }
+    let easy = configure(url, timeout)?;
     let multi = Multi::new();
     let handle = multi
         .add2(easy)
@@ -152,13 +282,5 @@ fn fetch_with_timeout(url: &Url, timeout: Duration) -> Result<Vec<u8>, FetchErro
     let easy = multi
         .remove2(handle)
         .map_err(|_| FetchError::Failed("cannot finish recipe HTTP request"))?;
-    if easy.get_ref().oversized {
-        return Err(FetchError::Failed("recipe API response exceeds 2 MiB"));
-    }
-    result?;
-    let status = easy.response_code().map_err(configuration_error)?;
-    if status != 200 {
-        return Err(FetchError::Http(status));
-    }
-    Ok(easy.get_ref().bytes.clone())
+    finish(&easy, Some(result))
 }

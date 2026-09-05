@@ -61,6 +61,166 @@ fn listener() -> (TcpListener, String) {
     (listener, endpoint)
 }
 
+fn full_refresh(data: &std::path::Path, bin: &std::path::Path, endpoint: &str) {
+    let output = command(data)
+        .args(["refresh", "--recipes-only", "--arch-api-url", endpoint])
+        .env("PATH", bin)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+fn serve_initial_recipes(listener: TcpListener) {
+    for _ in 0..3 {
+        let mut stream = accept(&listener);
+        let request = request(&mut stream);
+        if request.contains("%2Falpha/") {
+            serve_recipe(
+                &mut stream,
+                "pkgbase = alpha\n\tpkgver = 1.0\n\tpkgrel = 1\n\tsource = git+https://example.org/alpha.git#tag=v1.0\npkgname = alpha\n",
+            );
+        } else if request.contains("%2Fsuite/") {
+            serve_recipe(
+                &mut stream,
+                "pkgbase = suite\n\tpkgver = 2.0\n\tpkgrel = 1\n\tsource = https://example.org/suite-2.0.tar.gz\npkgname = suite-cli\npkgname = suite-docs\n",
+            );
+        } else {
+            assert!(request.contains("%2Fforeign-tool/"));
+            stream
+                .write_all(
+                    b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
+                .unwrap();
+        }
+    }
+}
+
+fn resolved_recipe_commits(data: &std::path::Path) -> Vec<(String, String)> {
+    let database = Connection::open(data.join("paclang/paclang.db")).unwrap();
+    let mut statement = database
+        .prepare("SELECT package_name, recipe_commit FROM provider_attempts WHERE outcome = 'resolved' ORDER BY package_name")
+        .unwrap();
+    statement
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+        })
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
+        .into_iter()
+        .map(|(name, commit)| (name, commit.unwrap()))
+        .collect()
+}
+
+#[test]
+fn resolved_attempts_are_reused_without_refetching() {
+    let data = tempfile::tempdir().unwrap();
+    let bin = fixture_bin();
+    let (listener, endpoint) = listener();
+    let server = std::thread::spawn(move || serve_initial_recipes(listener));
+    full_refresh(data.path(), bin.path(), &endpoint);
+    server.join().unwrap();
+    assert_eq!(snapshot_count(data.path()), 1);
+    // Dependency-only selects suite-cli and suite-docs, both already
+    // resolved. A dead endpoint proves no fetch is attempted: any request
+    // would fail and flip the rows to unresolved.
+    let dead = TcpListener::bind("127.0.0.1:0").unwrap();
+    let dead_endpoint = format!("http://{}/api/v4", dead.local_addr().unwrap());
+    drop(dead);
+    let output = command(data.path())
+        .args([
+            "refresh",
+            "--recipes-only",
+            "--dependency",
+            "--arch-api-url",
+            &dead_endpoint,
+        ])
+        .env("PATH", bin.path())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert_eq!(snapshot_count(data.path()), 2);
+    assert_eq!(
+        resolved_recipe_commits(data.path()),
+        [
+            ("alpha".to_owned(), COMMIT.to_owned()),
+            ("suite-cli".to_owned(), COMMIT.to_owned()),
+            ("suite-docs".to_owned(), COMMIT.to_owned()),
+        ]
+    );
+}
+
+#[test]
+fn unresolved_attempts_are_retried_while_resolved_are_reused() {
+    let data = tempfile::tempdir().unwrap();
+    let bin = fixture_bin();
+    let (initial_listener, endpoint) = listener();
+    let server = std::thread::spawn(move || serve_initial_recipes(initial_listener));
+    full_refresh(data.path(), bin.path(), &endpoint);
+    server.join().unwrap();
+    // Only foreign-tool is unresolved, so the next full refresh must fetch
+    // exactly its group and leave the resolved rows untouched.
+    let (retry_listener, endpoint) = listener();
+    let server = std::thread::spawn(move || {
+        let mut stream = accept(&retry_listener);
+        let request = request(&mut stream);
+        assert!(request.contains("%2Fforeign-tool/"), "{request}");
+        stream
+            .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            .unwrap();
+    });
+    full_refresh(data.path(), bin.path(), &endpoint);
+    server.join().unwrap();
+    assert_eq!(
+        resolved_recipe_commits(data.path()),
+        [
+            ("alpha".to_owned(), COMMIT.to_owned()),
+            ("suite-cli".to_owned(), COMMIT.to_owned()),
+            ("suite-docs".to_owned(), COMMIT.to_owned()),
+        ]
+    );
+    let database = Connection::open(data.path().join("paclang/paclang.db")).unwrap();
+    assert_eq!(
+        database
+            .query_row(
+                "SELECT failure_reason FROM provider_attempts WHERE package_name = 'foreign-tool'",
+                [],
+                |row| row.get::<_, Option<String>>(0)
+            )
+            .unwrap()
+            .as_deref(),
+        Some("recipe API returned HTTP 404")
+    );
+}
+
+#[test]
+fn piped_stderr_stays_silent_during_recipe_refresh() {
+    let data = tempfile::tempdir().unwrap();
+    let bin = fixture_bin();
+    let (listener, endpoint) = listener();
+    let server = std::thread::spawn(move || serve_initial_recipes(listener));
+    let output = command(data.path())
+        .args(["refresh", "--recipes-only", "--arch-api-url", &endpoint])
+        .env("PATH", bin.path())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(output.stderr.is_empty(), "progress leaked to piped stderr");
+    server.join().unwrap();
+}
+
 #[test]
 fn recipe_refresh_fetches_by_base_records_partial_results_and_preserves_origins() {
     let data = tempfile::tempdir().unwrap();
