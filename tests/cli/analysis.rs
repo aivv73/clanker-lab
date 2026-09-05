@@ -227,3 +227,153 @@ fn failed_current_analysis_falls_back_to_stale() {
     assert_eq!(report["coverage"]["analyzed"], 1);
     assert_eq!(report["coverage"]["stale"], 1);
 }
+
+#[test]
+fn packages_language_modes_fidelity_and_filters() {
+    let data = tempfile::tempdir().unwrap();
+    let bin = fixture_bin();
+    assert!(
+        refresh(&["--format", "json"], data.path(), bin.path())
+            .status
+            .success()
+    );
+    seed_profile(
+        data.path(),
+        "alpha",
+        "1.0-1",
+        "https://example.invalid/alpha.git",
+        "analyzed",
+    );
+    let db = Connection::open(data.path().join("paclang/paclang.db")).unwrap();
+    db.execute(
+        "UPDATE language_profiles SET languages_json = ?1, primary_language = 'C++'",
+        [r#"[{"language":"C++","bytes":60},{"language":"Rust","bytes":40}]"#],
+    )
+    .unwrap();
+    let query = |args: &[&str]| {
+        let mut command = vec!["packages"];
+        command.extend_from_slice(args);
+        command.extend_from_slice(&["--format", "json"]);
+        let output = run_with_inventory(&command, data.path(), bin.path());
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    assert_eq!(query(&["rust"])["matched_packages"], 0);
+    assert_eq!(query(&["c++"])["packages"][0]["name"], "alpha");
+    assert_eq!(query(&["RUST", "--contains"])["matched_packages"], 1);
+    assert_eq!(
+        query(&["rust", "--min-share", "0.4"])["matched_packages"],
+        1
+    );
+    assert_eq!(
+        query(&["rust", "--min-share", "0.5"])["matched_packages"],
+        0
+    );
+    assert_eq!(
+        query(&["rust", "--contains", "--dependency"])["matched_packages"],
+        0
+    );
+    db.execute(
+        "UPDATE language_profiles SET fidelity = 'current-upstream', source = 'github-api'",
+        [],
+    )
+    .unwrap();
+    assert_eq!(query(&["rust", "--contains"])["matched_packages"], 0);
+    let report = query(&["rust", "--contains", "--fidelity", "best-available"]);
+    assert_eq!(report["packages"][0]["fidelity"], "current-upstream");
+    for args in [
+        vec!["rust", "--min-share", "NaN"],
+        vec!["rust", "--min-share", "1.1"],
+        vec!["rust", "--contains", "--min-share", "0.5"],
+        vec!["rust", "--fidelity", "approximate"],
+    ] {
+        let mut command = vec!["packages"];
+        command.extend(args);
+        assert_eq!(
+            run_with_inventory(&command, data.path(), bin.path())
+                .status
+                .code(),
+            Some(2)
+        );
+    }
+    for format in ["terminal", "markdown", "toon"] {
+        assert!(
+            run_with_inventory(
+                &[
+                    "packages",
+                    "c++",
+                    "--fidelity",
+                    "best-available",
+                    "--format",
+                    format
+                ],
+                data.path(),
+                bin.path()
+            )
+            .status
+            .success()
+        );
+    }
+}
+
+#[test]
+fn packages_sort_by_selected_language_share_and_bytes() {
+    let data = tempfile::tempdir().unwrap();
+    let bin = fixture_bin();
+    assert!(
+        refresh(&["--format", "json"], data.path(), bin.path())
+            .status
+            .success()
+    );
+    for (name, version, rust, other) in [
+        ("alpha", "1.0-1", 600, 400),
+        ("foreign-tool", "3.0-1", 90, 10),
+        ("suite-cli", "2.0-1", 600, 400),
+    ] {
+        let location = format!("https://example.invalid/{name}.git");
+        seed_profile(data.path(), name, version, &location, "analyzed");
+        let db = Connection::open(data.path().join("paclang/paclang.db")).unwrap();
+        db.execute(
+            "UPDATE language_profiles SET languages_json = ?1, total_bytes = ?2 WHERE target_id IN (SELECT id FROM analysis_targets WHERE location = ?3)",
+            rusqlite::params![
+                format!(r#"[{{"language":"Rust","bytes":{rust}}},{{"language":"C","bytes":{other}}}]"#),
+                rust + other, location
+            ],
+        ).unwrap();
+    }
+    for (sort, expected) in [
+        ("name", vec!["alpha", "foreign-tool", "suite-cli"]),
+        ("share", vec!["foreign-tool", "alpha", "suite-cli"]),
+        ("bytes", vec!["alpha", "suite-cli", "foreign-tool"]),
+    ] {
+        let output = run_with_inventory(
+            &["packages", "rust", "--sort", sort, "--format", "json"],
+            data.path(),
+            bin.path(),
+        );
+        assert!(output.status.success());
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(report["sort"], sort);
+        let names: Vec<_> = report["packages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, expected);
+    }
+    assert_eq!(
+        run_with_inventory(
+            &["packages", "rust", "--sort", "invalid"],
+            data.path(),
+            bin.path()
+        )
+        .status
+        .code(),
+        Some(2)
+    );
+}

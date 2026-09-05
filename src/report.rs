@@ -1,3 +1,4 @@
+pub(crate) mod packages;
 pub(crate) mod providers;
 pub(crate) mod source_bytes;
 #[cfg(test)]

@@ -51,3 +51,16 @@ Structured output carries integer numerators and denominators, so agents and scr
 Pass `--min-coverage <percent>` (0 to 100) to make a report fail when analyzed coverage is below the threshold. The report facts are unchanged; only the exit status becomes 1. An empty selection is vacuously complete and always satisfies the threshold.
 
 Recipe API HTTP 429 responses are retried at most three times per request. Retries honor `Retry-After` seconds or HTTP dates; missing or invalid values use 1, 2, and 4 second backoff. Only throttled requests are retried, preserving successful results. A requested delay above 60 seconds leaves the request unresolved instead of retrying early. Retry waits check cancellation every 50 ms.
+
+List installed packages by any stored language name (case-insensitive; quote names containing spaces):
+
+```sh
+paclang packages rust                  # primary language is Rust
+paclang packages rust --contains       # Rust bytes > 0
+paclang packages rust --min-share 0.5  # Rust source-byte share >= 50%
+paclang packages 'C++' --fidelity best-available
+```
+
+The default `--fidelity exact` uses exact packaged-source profiles, including explicitly marked stale cached fallbacks. `best-available` prefers exact profiles and otherwise uses current-upstream approximations, labeled on each result. Distinct source targets are counted once per package; their language bytes determine the primary language and shares (ties use language-name order). `--contains` and `--min-share` are mutually exclusive. Shares range from 0 to 1; zero includes absent languages in nonempty profiles, while empty or missing profiles never match. Unknown language names normally yield an empty result. Population filters, all report formats, and the exact-analysis `--min-coverage` gate also apply.
+
+Use `paclang packages rust --sort share` to list the highest Rust shares first, or `--sort bytes` for the largest Rust byte counts first. Both break ties by package name and work with every matching mode and output format. The default is `--sort name`.

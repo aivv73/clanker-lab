@@ -600,7 +600,7 @@ fn split_fingerprint(value: &str) -> Option<(String, String, String, String)> {
     ))
 }
 
-fn parse_languages(text: &str) -> Result<Vec<LanguageBytes>, String> {
+pub(super) fn parse_languages(text: &str) -> Result<Vec<LanguageBytes>, String> {
     let value: serde_json::Value =
         serde_json::from_str(text).map_err(|_| "language profile is not JSON".to_owned())?;
     let entries = value

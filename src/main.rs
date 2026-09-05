@@ -138,6 +138,9 @@ fn run(
         Command::SourceBytes { fidelity, all, top } => {
             render_source_bytes_report(format, selection, min_coverage, fidelity, all, top)
         }
+        Command::Packages { language, contains, min_share, fidelity, sort } => {
+            render_packages_report(format, selection, min_coverage, language, contains, min_share, fidelity, sort)
+        }
         Command::Providers => render_snapshot_report(format, selection, min_coverage, true),
         Command::Refresh {
             metadata_only: _,
@@ -407,6 +410,38 @@ fn render_source_bytes_report(
     Ok(RunOutput {
         rendered,
         meets_coverage,
+        snapshot_read_guard: Some(snapshot),
+    })
+}
+
+
+#[allow(clippy::too_many_arguments)]
+fn render_packages_report(
+    format: Format,
+    selection: report::PopulationSelection,
+    min_coverage: Option<f64>,
+    language: String,
+    contains: bool,
+    min_share: Option<f64>,
+    fidelity: report::packages::Fidelity,
+    sort: report::packages::Sort,
+) -> Result<RunOutput, AppError> {
+    let path = storage::database_path().map_err(AppError::storage)?;
+    let database = storage::Database::open(&path).map_err(AppError::storage)?;
+    let snapshot = database.published_provider_snapshot().map_err(AppError::storage)?
+        .ok_or(AppError::NoSnapshot)?;
+    let live = inventory::read_live_fingerprint().map_err(map_inventory_error)?;
+    let staleness = match &snapshot.fingerprint {
+        Some(fingerprint) if *fingerprint == live => SnapshotStaleness::Current,
+        Some(_) => SnapshotStaleness::Stale,
+        None => SnapshotStaleness::Unknown,
+    };
+    let count = CountReport::from_provider_snapshot(&snapshot, staleness, selection.clone());
+    let report = report::packages::build(&snapshot, &database, staleness, selection,
+        language, contains, min_share, fidelity, sort)?;
+    Ok(RunOutput {
+        rendered: report.render(format).map_err(AppError::render)?,
+        meets_coverage: count.meets_coverage(min_coverage),
         snapshot_read_guard: Some(snapshot),
     })
 }
