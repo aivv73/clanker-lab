@@ -1,0 +1,5 @@
+# Harden the fast language provider for system scale
+
+Unauthenticated Languages API calls are limited to 60 requests per hour, so a full-system fast refresh trips the limit almost immediately. The first throttled response now trips a circuit breaker: every request that has not fired yet is skipped without a stored record, so the next refresh retries it instead of fossilizing a failure, and the pass statistics disclose the skipped count. `PACLANG_GITHUB_TOKEN` (environment only, never a CLI flag, blank or whitespace-bearing values failing safe to no authentication) sends a bearer token and raises the limit to authenticated levels; the token never reaches logs, reasons, or the database.
+
+Redirects stay opt-in and bounded: the API pass follows at most three same-scheme, same-host hops (renamed repositories) and records anything else — off-host targets, invalid targets, deeper chains — as a per-target failure. Recipe fetching still never follows redirects. Every pass reports attempted, approximated, failed, skipped-exact, and skipped-rate-limited counts alongside the refresh report, so automation can tell a clean pass from a throttled one without parsing reasons.

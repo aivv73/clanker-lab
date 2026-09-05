@@ -6,8 +6,9 @@ use super::{
 };
 use crate::package::{InstallReason, PackageOrigin, SnapshotPackage};
 
-fn package(origin: &str, install_reason: InstallReason) -> SnapshotPackage {
+fn package(name: &str, origin: &str, install_reason: InstallReason) -> SnapshotPackage {
     SnapshotPackage {
+        name: name.to_owned(),
         origin: PackageOrigin::parse(origin).unwrap(),
         install_reason,
     }
@@ -55,7 +56,7 @@ fn toon_serializer_escapes_grammar_characters() {
 #[test]
 fn json_count_has_honest_missing_analysis_coverage() {
     let packages = (0..7)
-        .map(|_| package("unknown", InstallReason::Explicit))
+        .map(|_| package("test-package", "unknown", InstallReason::Explicit))
         .collect::<Vec<_>>();
     let report = CountReport::from_snapshot(
         &packages,
@@ -79,6 +80,7 @@ fn json_count_has_honest_missing_analysis_coverage() {
         serde_json::json!([
             {"state": "missing_source_language_analysis", "count": 7},
             {"state": "analyzed", "count": 0},
+            {"state": "approximate", "count": 0},
         ])
     );
     assert!(value.get("languages").is_none());
@@ -99,6 +101,7 @@ fn structured_count_rows_sort_by_count_then_name() {
         value["coverage"]["rows"],
         serde_json::json!([
             {"state": "analyzed", "count": 0},
+            {"state": "approximate", "count": 0},
             {"state": "missing_source_language_analysis", "count": 0},
         ])
     );
@@ -107,7 +110,7 @@ fn structured_count_rows_sort_by_count_then_name() {
 #[test]
 fn terminal_percentages_total_one_hundred() {
     let packages = (0..3)
-        .map(|_| package("unknown", InstallReason::Explicit))
+        .map(|_| package("test-package", "unknown", InstallReason::Explicit))
         .collect::<Vec<_>>();
     let report = CountReport::from_snapshot(
         &packages,
@@ -122,7 +125,7 @@ fn terminal_percentages_total_one_hundred() {
 
 #[test]
 fn empty_selection_reports_zero_percentages() {
-    let packages = vec![package("unknown", InstallReason::Explicit)];
+    let packages = vec![package("test-package", "unknown", InstallReason::Explicit)];
     let report = CountReport::from_snapshot(
         &packages,
         SnapshotStaleness::Current,
@@ -142,7 +145,7 @@ fn empty_selection_reports_zero_percentages() {
 
 #[test]
 fn toon_report_declares_the_pinned_specification_version() {
-    let packages = vec![package("unknown", InstallReason::Explicit)];
+    let packages = vec![package("test-package", "unknown", InstallReason::Explicit)];
     let report = CountReport::from_snapshot(
         &packages,
         SnapshotStaleness::Current,
@@ -158,6 +161,7 @@ fn toon_report_declares_the_pinned_specification_version() {
         serde_json::json!([
             {"state": "missing_source_language_analysis", "count": 1},
             {"state": "analyzed", "count": 0},
+            {"state": "approximate", "count": 0},
         ])
     );
 }
@@ -165,7 +169,7 @@ fn toon_report_declares_the_pinned_specification_version() {
 #[test]
 fn coverage_threshold_compares_the_exact_analyzed_share() {
     let packages = (0..4)
-        .map(|_| package("unknown", InstallReason::Explicit))
+        .map(|_| package("test-package", "unknown", InstallReason::Explicit))
         .collect::<Vec<_>>();
     let report = CountReport::from_snapshot(
         &packages,
@@ -206,7 +210,7 @@ proptest! {
                 } else {
                     InstallReason::Dependency
                 };
-                package(&format!("origin-{origin}"), reason)
+                package("test-package", &format!("origin-{origin}"), reason)
             })
             .collect::<Vec<_>>();
         let origins = selected_origins
@@ -243,7 +247,7 @@ proptest! {
                 } else {
                     InstallReason::Dependency
                 };
-                package(&format!("origin-{origin}"), reason)
+                package("test-package", &format!("origin-{origin}"), reason)
             })
             .collect::<Vec<_>>();
         let original_origins = selected_origins
@@ -261,7 +265,7 @@ proptest! {
                 } else {
                     InstallReason::Dependency
                 };
-                package(&format!("origin-{origin}"), reason)
+                package("test-package", &format!("origin-{origin}"), reason)
             })
             .collect::<Vec<_>>();
         let mut permuted_origins = selected_origins;
@@ -315,6 +319,7 @@ proptest! {
             .into_iter()
             .map(|explicit| {
                 package(
+                    "test-package",
                     "unknown",
                     if explicit {
                         InstallReason::Explicit
@@ -351,6 +356,46 @@ proptest! {
 }
 
 #[test]
+fn package_names_narrow_the_selected_population() {
+    let packages = vec![
+        package("alpha", "unknown", InstallReason::Explicit),
+        package("beta", "unknown", InstallReason::Explicit),
+    ];
+    let selection = PopulationSelection::new(InstallReasonSelection::All, [])
+        .with_packages(["alpha".to_owned()]);
+    let report = CountReport::from_snapshot(&packages, SnapshotStaleness::Current, selection);
+    let rendered = Format::Json.render_count(&report).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&rendered).unwrap();
+
+    assert_eq!(report.selected_population, 1);
+    assert_eq!(value["coverage"]["denominator"], 1);
+    assert_eq!(value["selection"]["packages"], serde_json::json!(["alpha"]));
+}
+
+#[test]
+fn approximations_never_feed_the_coverage_threshold() {
+    let packages = vec![package("test-package", "unknown", InstallReason::Explicit)];
+    let report = CountReport::from_snapshot(
+        &packages,
+        SnapshotStaleness::Current,
+        PopulationSelection::new(InstallReasonSelection::All, []),
+    )
+    .with_approximate(1);
+    let rendered = Format::Json.render_count(&report).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&rendered).unwrap();
+
+    assert_eq!(value["coverage"]["approximate"], 1);
+    assert_eq!(value["coverage"]["analyzed"], 0);
+    // Approximations are disclosed, but the threshold guards exact analysis.
+    assert!(!report.meets_coverage(Some(1.0)));
+    assert!(report.meets_coverage(Some(0.0)));
+    let terminal = Format::Terminal.render_count(&report).unwrap();
+    assert!(
+        terminal.contains("Approximate analysis (current upstream, not counted in Analyzed): 1")
+    );
+}
+
+#[test]
 fn human_selection_rendering_distinguishes_special_origin_names() {
     let selection = PopulationSelection::new(
         InstallReasonSelection::All,
@@ -362,6 +407,6 @@ fn human_selection_rendering_distinguishes_special_origin_names() {
 
     assert_eq!(
         selection.render(),
-        "install reason = all; origins = [\"all\", \"core, extra\"]"
+        "install reason = all; origins = [\"all\", \"core, extra\"]; packages = any"
     );
 }

@@ -22,6 +22,7 @@ struct PackageRow {
     name: String,
     version: String,
     outcome: &'static str,
+    stale: bool,
     attempts: Vec<AttemptRow>,
 }
 
@@ -34,6 +35,7 @@ struct AttemptRow {
     target: Option<TargetRow>,
     recipe: Option<RecipeRow>,
     acquisition: Option<crate::acquisition::AcquisitionRecord>,
+    analysis: Option<crate::linguist::LanguageRecord>,
 }
 
 #[derive(Debug, Serialize)]
@@ -74,7 +76,12 @@ impl ProviderReport {
                 continue;
             }
             let mut attempts = Vec::new();
-            for (attempt, acquisition) in evidence.attempts.iter().zip(&evidence.acquisitions) {
+            for ((attempt, acquisition), analysis) in evidence
+                .attempts
+                .iter()
+                .zip(&evidence.acquisitions)
+                .zip(&evidence.analyses)
+            {
                 let (outcome, grade, failure_reason, target) = match &attempt.outcome {
                     AttemptOutcome::Resolved { target, grade } => (
                         "resolved",
@@ -94,6 +101,7 @@ impl ProviderReport {
                 };
                 attempts.push(AttemptRow {
                     acquisition: acquisition.clone(),
+                    analysis: analysis.clone(),
                     provider: attempt.provider.as_str().to_owned(),
                     outcome,
                     grade,
@@ -127,6 +135,7 @@ impl ProviderReport {
                 name: evidence.name.clone(),
                 version: evidence.version.clone(),
                 outcome,
+                stale: evidence.analysis_state == crate::linguist::AnalysisState::Stale,
                 attempts,
             });
         }
@@ -200,6 +209,9 @@ impl ProviderReport {
                 quote(&package.version),
                 package.outcome
             ));
+            if package.stale {
+                text.push_str("\nStale analysis: showing an older version's language profile");
+            }
             for attempt in &package.attempts {
                 text.push_str(&format!(
                     "\n\n- Provider: {}\n- Outcome: {}",
@@ -246,6 +258,23 @@ impl ProviderReport {
                     text.push_str("\n- Acquisition: not required (recipe declares no sources)");
                 } else {
                     text.push_str("\n- Acquisition: not attempted");
+                }
+                match &attempt.analysis {
+                    Some(analysis) => {
+                        text.push_str(&format!(
+                            "\n- Analysis: {} ({}; {})",
+                            analysis.state,
+                            analysis.source.as_str(),
+                            analysis.fidelity.as_str()
+                        ));
+                        if let Some(primary) = &analysis.primary_language {
+                            text.push_str(&format!("\n- Primary language: {}", quote(primary)));
+                        }
+                        if let Some(reason) = &analysis.reason {
+                            text.push_str(&format!("\n- Analysis reason: {}", quote(reason)));
+                        }
+                    }
+                    None => text.push_str("\n- Analysis: not attempted"),
                 }
                 match &attempt.recipe {
                     Some(recipe) => text.push_str(&format!(

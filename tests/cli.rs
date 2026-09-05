@@ -1,3 +1,7 @@
+#[path = "cli/analysis.rs"]
+mod analysis;
+#[path = "cli/fast.rs"]
+mod fast;
 #[path = "cli/recipes.rs"]
 mod recipes;
 #[path = "cli/sources.rs"]
@@ -142,7 +146,7 @@ fn plain_command_returns_toon_no_snapshot_and_migrates_database() {
     let version: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 7);
+    assert_eq!(version, 9);
 }
 
 #[test]
@@ -551,6 +555,107 @@ fn repeated_origins_select_their_union() {
         serde_json::json!(["core", "extra"])
     );
     assert_eq!(report["selected_population"], 3);
+}
+
+#[test]
+fn repeated_packages_select_their_union() {
+    let data_home = tempfile::tempdir().unwrap();
+    let fixture_bin = fixture_bin();
+    assert!(
+        refresh(&["--format", "json"], data_home.path(), fixture_bin.path())
+            .status
+            .success()
+    );
+
+    let output = run_with_inventory(
+        &[
+            "count",
+            "--package",
+            "suite-docs",
+            "--package",
+            "alpha",
+            "--format",
+            "json",
+        ],
+        data_home.path(),
+        fixture_bin.path(),
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+
+    assert!(output.status.success());
+    assert_eq!(
+        report["selection"]["packages"],
+        serde_json::json!(["alpha", "suite-docs"])
+    );
+    assert_eq!(report["selected_population"], 2);
+    assert_eq!(report["coverage"]["denominator"], 2);
+}
+
+#[test]
+fn package_filter_combines_with_install_reason() {
+    let data_home = tempfile::tempdir().unwrap();
+    let fixture_bin = fixture_bin();
+    assert!(
+        refresh(&["--format", "json"], data_home.path(), fixture_bin.path())
+            .status
+            .success()
+    );
+
+    // suite-cli is a dependency; combining it with --explicit selects nothing.
+    let output = run_with_inventory(
+        &[
+            "count",
+            "--explicit",
+            "--package",
+            "suite-cli",
+            "--format",
+            "json",
+        ],
+        data_home.path(),
+        fixture_bin.path(),
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+
+    assert!(output.status.success());
+    assert_eq!(report["selected_population"], 0);
+    assert_eq!(report["coverage"]["denominator"], 0);
+}
+
+#[test]
+fn unmatched_package_is_an_explicit_successful_zero_report() {
+    let data_home = tempfile::tempdir().unwrap();
+    let fixture_bin = fixture_bin();
+    assert!(
+        refresh(&["--format", "json"], data_home.path(), fixture_bin.path())
+            .status
+            .success()
+    );
+
+    let output = run_with_inventory(
+        &["count", "--package", "does-not-exist", "--format", "json"],
+        data_home.path(),
+        fixture_bin.path(),
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+
+    assert!(output.status.success());
+    assert_eq!(report["installed_total"], 4);
+    assert_eq!(report["selected_population"], 0);
+}
+
+#[test]
+fn invalid_package_names_exit_two() {
+    for name in ["bad name", "bad/name", ""] {
+        let data_home = tempfile::tempdir().unwrap();
+        let output = run(
+            &["count", "--format", "json", "--package", name],
+            data_home.path(),
+        );
+        let error: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+
+        assert_eq!(output.status.code(), Some(2), "name: {name:?}");
+        assert_eq!(error["error"]["code"], "invalid_cli");
+    }
 }
 
 #[test]
@@ -1230,7 +1335,7 @@ fn version_one_snapshot_marker_migrates_to_no_snapshot() {
             row.get(0)
         })
         .unwrap();
-    assert_eq!(version, 7);
+    assert_eq!(version, 9);
     assert_eq!(snapshots, 0);
 }
 
@@ -1285,7 +1390,7 @@ fn version_two_snapshot_migrates_and_reports_unknown_staleness() {
     let version: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 7);
+    assert_eq!(version, 9);
 }
 
 fn bin_with_only(tool: &str, source_bin: &Path) -> tempfile::TempDir {

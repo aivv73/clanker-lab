@@ -4,7 +4,8 @@
   "snapshot_staleness": "current",
   "selection": {
     "install_reason": "all",
-    "origins": []
+    "origins": [],
+    "packages": []
   },
   "installed_total": 4,
   "selected_population": 4,
@@ -12,6 +13,8 @@
     "denominator": 4,
     "source_free_packages": 0,
     "analyzed": 0,
+    "approximate": 0,
+    "stale": 0,
     "missing_source_language_analysis": 4,
     "rows": [
       {
@@ -20,6 +23,10 @@
       },
       {
         "state": "analyzed",
+        "count": 0
+      },
+      {
+        "state": "approximate",
         "count": 0
       }
     ]

@@ -72,6 +72,10 @@ pub(crate) enum FetchError {
     Curl(u32),
     Http(u32),
     RateLimited(Option<Duration>),
+    /// A redirect response with its `Location` target. Only produced when
+    /// the caller opts into redirect handling; the default path keeps
+    /// reporting the bare status so recipe fetching never follows redirects.
+    Redirect(String),
 }
 
 impl std::fmt::Display for FetchError {
@@ -84,6 +88,7 @@ impl std::fmt::Display for FetchError {
                 f.write_str("recipe API returned HTTP 429 (retry limit reached)")
             }
             Self::Http(status) => write!(f, "recipe API returned HTTP {status}"),
+            Self::Redirect(_) => f.write_str("request was redirected"),
         }
     }
 }
@@ -93,6 +98,7 @@ struct ResponseBody {
     bytes: Vec<u8>,
     oversized: bool,
     retry_after: Option<Duration>,
+    location: Option<String>,
     byte_limit: Option<usize>,
 }
 
@@ -110,13 +116,20 @@ impl Handler for ResponseBody {
     fn header(&mut self, bytes: &[u8]) -> bool {
         if bytes.starts_with(b"HTTP/") {
             self.retry_after = None;
+            self.location = None;
         } else if let Ok(header) = std::str::from_utf8(bytes)
             && let Some((name, value)) = header.split_once(':')
-            && name.eq_ignore_ascii_case("retry-after")
         {
-            self.retry_after = self
-                .retry_after
-                .max(parse_retry_after(value, SystemTime::now()));
+            if name.eq_ignore_ascii_case("retry-after") {
+                self.retry_after = self
+                    .retry_after
+                    .max(parse_retry_after(value, SystemTime::now()));
+            } else if name.eq_ignore_ascii_case("location") {
+                let value = value.trim();
+                if !value.is_empty() && value.len() <= 4096 {
+                    self.location = Some(value.to_owned());
+                }
+            }
         }
         true
     }
@@ -154,6 +167,36 @@ pub(crate) fn fetch_all(
     fetch_all_with_timeout(urls, REQUEST_TIMEOUT, proxy)
 }
 
+/// Fetch several JSON documents from a source-code hosting API with the same
+/// concurrency, timeout, and proxy rules as recipe fetching, plus an
+/// optional bearer token and opt-in redirect handling. Used by the fast
+/// language provider; recipe fetching never authenticates or redirects.
+pub(crate) fn fetch_all_api(
+    urls: &[Url],
+    proxy: Option<&ProxyUrl>,
+    auth: Option<&str>,
+) -> Result<Vec<Result<Vec<u8>, FetchError>>, FetchError> {
+    fetch_with_config(
+        urls,
+        &RequestConfig {
+            timeout: REQUEST_TIMEOUT,
+            proxy,
+            auth,
+            byte_limit: None,
+            follow_redirects: true,
+        },
+    )
+}
+
+#[derive(Clone, Copy)]
+struct RequestConfig<'a> {
+    timeout: Duration,
+    proxy: Option<&'a ProxyUrl>,
+    auth: Option<&'a str>,
+    byte_limit: Option<usize>,
+    follow_redirects: bool,
+}
+
 fn fetch_all_with_timeout(
     urls: &[Url],
     timeout: Duration,
@@ -165,13 +208,29 @@ fn fetch_all_with_timeout(
 pub(crate) fn fetch_all_limited(
     urls: &[Url], timeout: Duration, proxy: Option<&ProxyUrl>, byte_limit: Option<usize>,
 ) -> Result<Vec<Result<Vec<u8>, FetchError>>, FetchError> {
+    fetch_with_config(
+        urls,
+        &RequestConfig {
+            timeout,
+            proxy,
+            auth: None,
+            byte_limit,
+            follow_redirects: false,
+        },
+    )
+}
+
+fn fetch_with_config(
+    urls: &[Url],
+    config: &RequestConfig<'_>,
+) -> Result<Vec<Result<Vec<u8>, FetchError>>, FetchError> {
     if interrupt::is_requested() { return Err(FetchError::Interrupted); }
     let mut results = Vec::with_capacity(urls.len());
     for chunk in urls.chunks(MAX_CONCURRENT_FETCHES) {
         if interrupt::is_requested() {
             return Err(FetchError::Interrupted);
         }
-        results.extend(fetch_chunk_with_retries(chunk, timeout, proxy, byte_limit)?);
+        results.extend(fetch_chunk_with_retries(chunk, config)?);
     }
     Ok(results)
 }
@@ -180,11 +239,9 @@ pub(crate) fn fetch_all_limited(
 // A server asking for more than our wait budget is left unresolved, never retried early.
 fn fetch_chunk_with_retries(
     chunk: &[Url],
-    timeout: Duration,
-    proxy: Option<&ProxyUrl>,
-    byte_limit: Option<usize>,
+    config: &RequestConfig<'_>,
 ) -> Result<Vec<Result<Vec<u8>, FetchError>>, FetchError> {
-    let mut results = fetch_chunk(chunk, timeout, proxy, byte_limit)?;
+    let mut results = fetch_chunk(chunk, config)?;
     for retry in 0..3 {
         let pending: Vec<_> = results
             .iter()
@@ -207,7 +264,7 @@ fn fetch_chunk_with_retries(
             .iter()
             .map(|(index, _)| chunk[*index].clone())
             .collect();
-        for ((index, _), result) in pending.into_iter().zip(fetch_chunk(&urls, timeout, proxy, byte_limit)?) {
+        for ((index, _), result) in pending.into_iter().zip(fetch_chunk(&urls, config)?) {
             results[index] = result;
         }
     }
@@ -232,17 +289,15 @@ fn wait_for_retry(delay: Duration) -> Result<(), FetchError> {
 /// transport failures become per-item errors; only interruption propagates.
 fn fetch_chunk(
     chunk: &[Url],
-    timeout: Duration,
-    proxy: Option<&ProxyUrl>,
-    byte_limit: Option<usize>,
+    config: &RequestConfig<'_>,
 ) -> Result<Vec<Result<Vec<u8>, FetchError>>, FetchError> {
     let multi = Multi::new();
     let mut results: Vec<Option<Result<Vec<u8>, FetchError>>> =
         (0..chunk.len()).map(|_| None).collect();
     let mut handles = Vec::new();
     for (index, url) in chunk.iter().enumerate() {
-        match configure(url, timeout, proxy).and_then(|mut easy| {
-            easy.get_mut().byte_limit = byte_limit;
+        match configure(url, config).and_then(|mut easy| {
+            easy.get_mut().byte_limit = config.byte_limit;
             multi
                 .add2(easy)
                 .map_err(|_| FetchError::Failed("cannot start recipe HTTP request"))
@@ -284,7 +339,7 @@ fn fetch_chunk(
         if results[index].is_some() {
             continue;
         }
-        results[index] = Some(finish(&easy, transfers[index].take()));
+        results[index] = Some(finish(&easy, transfers[index].take(), config.follow_redirects));
     }
     Ok(results
         .into_iter()
@@ -298,10 +353,13 @@ fn fetch_chunk(
 
 /// Check one completed transfer: size cap, transport result, then status.
 /// A timeout before TCP connects reports a connection timeout; a timeout
-/// after connecting reports a request timeout.
+/// after connecting reports a request timeout. Redirect responses surface
+/// their target only when the caller opted in; otherwise they stay plain
+/// HTTP statuses so recipe fetching never follows redirects.
 fn finish(
     easy: &Easy2<ResponseBody>,
     transfer: Option<Result<(), curl::Error>>,
+    follow_redirects: bool,
 ) -> Result<Vec<u8>, FetchError> {
     if easy.get_ref().oversized {
         return Err(FetchError::Failed(if easy.get_ref().byte_limit.is_some() { "recipe snapshot exceeds download limit" } else { "recipe API response exceeds 2 MiB" }));
@@ -317,6 +375,11 @@ fn finish(
     let status = easy
         .response_code()
         .map_err(|_| FetchError::Failed("cannot configure recipe HTTP client"))?;
+    if follow_redirects && matches!(status, 301 | 302 | 307 | 308)
+        && let Some(location) = easy.get_ref().location.clone()
+    {
+        return Err(FetchError::Redirect(location));
+    }
     if status == 429 {
         return Err(FetchError::RateLimited(easy.get_ref().retry_after));
     }
@@ -337,8 +400,7 @@ fn timeout_error(easy: &Easy2<ResponseBody>) -> FetchError {
 
 fn configure(
     url: &Url,
-    timeout: Duration,
-    proxy: Option<&ProxyUrl>,
+    config: &RequestConfig<'_>,
 ) -> Result<Easy2<ResponseBody>, FetchError> {
     if !curl::Version::get().feature_async_dns() {
         return Err(FetchError::Failed(
@@ -348,14 +410,21 @@ fn configure(
     let mut easy = Easy2::new(ResponseBody::default());
     let configuration_error = |_| FetchError::Failed("cannot configure recipe HTTP client");
     easy.url(url.as_str()).map_err(configuration_error)?;
-    easy.proxy(proxy.map(ProxyUrl::as_str).unwrap_or(""))
+    easy.proxy(config.proxy.map(ProxyUrl::as_str).unwrap_or(""))
         .map_err(configuration_error)?;
     easy.follow_location(false).map_err(configuration_error)?;
     easy.connect_timeout(Duration::from_secs(5))
         .map_err(configuration_error)?;
-    easy.timeout(timeout).map_err(configuration_error)?;
+    easy.timeout(config.timeout).map_err(configuration_error)?;
     easy.useragent(concat!("paclang/", env!("CARGO_PKG_VERSION")))
         .map_err(configuration_error)?;
+    if let Some(token) = config.auth {
+        let mut headers = curl::easy::List::new();
+        headers
+            .append(&format!("Authorization: Bearer {token}"))
+            .map_err(configuration_error)?;
+        easy.http_headers(headers).map_err(configuration_error)?;
+    }
     Ok(easy)
 }
 
@@ -364,7 +433,16 @@ fn fetch_with_timeout(url: &Url, timeout: Duration) -> Result<Vec<u8>, FetchErro
     if interrupt::is_requested() {
         return Err(FetchError::Interrupted);
     }
-    let easy = configure(url, timeout, None)?;
+    let easy = configure(
+        url,
+        &RequestConfig {
+            timeout,
+            proxy: None,
+            auth: None,
+            byte_limit: None,
+            follow_redirects: false,
+        },
+    )?;
     let multi = Multi::new();
     let handle = multi
         .add2(easy)
@@ -395,5 +473,5 @@ fn fetch_with_timeout(url: &Url, timeout: Duration) -> Result<Vec<u8>, FetchErro
     let easy = multi
         .remove2(handle)
         .map_err(|_| FetchError::Failed("cannot finish recipe HTTP request"))?;
-    finish(&easy, result)
+    finish(&easy, result, false)
 }

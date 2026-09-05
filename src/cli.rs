@@ -22,6 +22,11 @@ pub struct Cli {
     #[arg(long, global = true, value_name = "NAME")]
     origin: Vec<PackageOrigin>,
 
+    /// Select only this installed package by name. Repeat to select several
+    /// packages; every other filter still applies.
+    #[arg(long, global = true, value_name = "NAME", value_parser = parse_package_name)]
+    package: Vec<String>,
+
     /// Exit 1 when analyzed coverage is below this percent. The report facts
     /// are unchanged; only the exit status signals the unmet threshold.
     #[arg(long, global = true, value_name = "PERCENT", value_parser = parse_min_coverage)]
@@ -40,6 +45,7 @@ impl Cli {
             (true, true) => unreachable!("clap rejects conflicting install-reason filters"),
         };
         PopulationSelection::new(install_reason, self.origin.iter().cloned())
+            .with_packages(self.package.iter().cloned())
     }
 }
 
@@ -73,8 +79,20 @@ pub enum Command {
         #[arg(long, requires = "sources_only")]
         require_complete: bool,
 
+        /// Language-analysis policy for sources-only refresh.
+        #[arg(long, requires = "sources_only", value_enum, env = "PACLANG_ANALYSIS_MODE", default_value_t = crate::github_languages::AnalysisMode::Exact)]
+        analysis_mode: crate::github_languages::AnalysisMode,
+
+        /// GitHub-compatible API root for fast language approximation.
+        /// Boxed to keep the CLI enum small; see `parse_github_api_url`.
+        #[arg(long, requires = "sources_only", default_value = "https://api.github.com", value_parser = parse_github_api_url)]
+        github_api_url: Box<crate::github_languages::GithubApiEndpoint>,
+
         #[command(flatten)]
         limits: crate::acquisition::Limits,
+
+        #[command(flatten)]
+        linguist: crate::linguist::LinguistConfig,
 
         /// Arch-compatible GitLab API endpoint used for recipe metadata.
         #[arg(
@@ -120,6 +138,21 @@ fn parse_min_coverage(value: &str) -> Result<f64, String> {
         return Err(format!("{value:?} is not a number between 0 and 100"));
     }
     Ok(percent)
+}
+
+fn parse_package_name(value: &str) -> Result<String, String> {
+    crate::expac_parser::validate_package_name(value)
+        .map(|()| value.to_owned())
+        .map_err(|message| format!("{value:?} is not a valid package name: {message}"))
+}
+
+fn parse_github_api_url(
+    value: &str,
+) -> Result<Box<crate::github_languages::GithubApiEndpoint>, String> {
+    value
+        .parse()
+        .map(Box::new)
+        .map_err(|reason: &'static str| reason.to_owned())
 }
 
 fn parse_cachyos_api_url(value: &str) -> Result<Box<crate::arch_provider::RecipeEndpoint>, String> {

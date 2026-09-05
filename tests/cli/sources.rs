@@ -1,4 +1,4 @@
-use super::{command, fixture_bin, refresh};
+use super::{command, fixture_bin, refresh, write_executable};
 use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
@@ -154,6 +154,84 @@ fn sources_refresh_verifies_deduplicates_reports_and_cleans_up() {
             checksum.strip_prefix("sha256:").unwrap()
         );
     }
+}
+
+#[test]
+fn sources_refresh_runs_linguist_and_reports_coverage() {
+    let data = tempfile::tempdir().unwrap();
+    let bin = fixture_bin();
+    let bytes = tar();
+    let checksum = format!("sha256:{:x}", Sha256::digest(&bytes));
+    let server = Server::new(bytes, Duration::ZERO);
+    seed(data.path(), bin.path(), &server.url, &checksum, false);
+    let linguist = bin.path().join("github-linguist");
+    write_executable(
+        &linguist,
+        "#!/bin/sh\nprintf '{\"Rust\": {\"size\": 100}, \"C\": {\"size\": 25}}'\n",
+    );
+    let output = command(data.path())
+        .args(["refresh", "--sources-only", "--format", "json"])
+        .arg(format!(
+            "--linguist-executable={}",
+            linguist.to_string_lossy()
+        ))
+        .env("PATH", bin.path())
+        .env("XDG_CACHE_HOME", data.path().join("cache"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{} {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let refresh_report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    // All four fixture packages share one analysis target.
+    assert_eq!(refresh_report["coverage"]["analyzed"], 4);
+    assert_eq!(
+        refresh_report["coverage"]["missing_source_language_analysis"],
+        0
+    );
+    let db = Connection::open(data.path().join("paclang/paclang.db")).unwrap();
+    let profile: String = db
+        .query_row("SELECT state FROM language_profiles", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(profile, "analyzed");
+    assert_eq!(
+        db.query_row(
+            "SELECT primary_language FROM language_profiles",
+            [],
+            |row| row.get::<_, Option<String>>(0)
+        )
+        .unwrap()
+        .as_deref(),
+        Some("Rust")
+    );
+    let output = command(data.path())
+        .args(["count", "--format", "json"])
+        .env("PATH", bin.path())
+        .output()
+        .unwrap();
+    let count: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(count["coverage"]["analyzed"], 4);
+    let output = command(data.path())
+        .args(["providers", "--format", "json"])
+        .env("PATH", bin.path())
+        .output()
+        .unwrap();
+    let providers: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    for package in providers["packages"].as_array().unwrap() {
+        let analysis = &package["attempts"][0]["analysis"];
+        assert_eq!(analysis["state"], "analyzed");
+        assert_eq!(analysis["primary_language"], "Rust");
+    }
+    // Coverage gates now see the analyzed share.
+    let output = command(data.path())
+        .args(["count", "--format", "json", "--min-coverage", "100"])
+        .env("PATH", bin.path())
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0));
 }
 
 #[test]

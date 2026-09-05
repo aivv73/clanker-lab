@@ -45,7 +45,7 @@ fn malformed_current_database_is_refused_without_mutation() {
     let path = directory.path().join("paclang.db");
     let connection = Connection::open(&path).unwrap();
     connection
-        .execute_batch("CREATE TABLE marker (id INTEGER); PRAGMA user_version = 7;")
+        .execute_batch("CREATE TABLE marker (id INTEGER); PRAGMA user_version = 9;")
         .unwrap();
     drop(connection);
 
@@ -66,7 +66,7 @@ fn malformed_current_database_is_refused_without_mutation() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 7);
+    assert_eq!(version, 9);
     assert_eq!(marker_tables, 1);
 }
 
@@ -157,7 +157,7 @@ fn newer_database_is_refused_without_mutation() {
     let path = directory.path().join("paclang.db");
     let connection = Connection::open(&path).unwrap();
     connection
-        .execute_batch("CREATE TABLE marker (id INTEGER); PRAGMA user_version = 8;")
+        .execute_batch("CREATE TABLE marker (id INTEGER); PRAGMA user_version = 10;")
         .unwrap();
     drop(connection);
 
@@ -168,7 +168,7 @@ fn newer_database_is_refused_without_mutation() {
     assert!(matches!(
         error,
         StorageError::UnsupportedSchemaVersion(version)
-            if version == MigrationVersion::from_database(8)
+            if version == MigrationVersion::from_database(10)
     ));
 
     let connection = Connection::open(&path).unwrap();
@@ -182,7 +182,7 @@ fn newer_database_is_refused_without_mutation() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 8);
+    assert_eq!(version, 10);
     assert_eq!(inventory_tables, 0);
 }
 
@@ -212,7 +212,7 @@ fn concurrent_first_open_runs_one_complete_migration() {
     let version: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 7);
+    assert_eq!(version, 9);
 }
 
 #[test]
@@ -239,7 +239,7 @@ fn version_one_database_migrates_to_current() {
     let version: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 7);
+    assert_eq!(version, 9);
     let snapshots: u32 = connection
         .query_row("SELECT count(*) FROM inventory_snapshots", [], |row| {
             row.get(0)
@@ -287,7 +287,7 @@ fn version_two_snapshot_migrates_with_unknown_staleness() {
     let version: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 7);
+    assert_eq!(version, 9);
 }
 
 fn table_row_count(connection: &Connection, table: &str) -> u32 {
@@ -405,7 +405,7 @@ fn version_three_snapshot_migrates_with_evidence_tables() {
     let version: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 7);
+    assert_eq!(version, 9);
     assert!(table_exists(&connection, "analysis_targets"));
     assert!(table_exists(&connection, "provider_attempts"));
     let stored = connection.query_row(
@@ -844,7 +844,7 @@ fn version_four_migration_preserves_attempts_and_adds_optional_provenance() {
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
             .unwrap(),
-        7
+        9
     );
     let mut new = old[0].clone();
     new.recipe = Some(
@@ -974,7 +974,7 @@ fn version_six_migrates_preserving_targets_attempts_and_acquisitions() {
             .connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
             .unwrap(),
-        7
+        9
     );
     assert_eq!(
         table_row_count(&database.connection, "source_acquisitions"),
@@ -1022,6 +1022,59 @@ fn version_six_migrates_preserving_targets_attempts_and_acquisitions() {
             .unwrap()
             .downloaded_bytes,
         100
+    );
+}
+
+#[test]
+fn language_profiles_roundtrip_per_target_and_roll_back_with_refresh() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut database = Database::open(&directory.path().join("paclang.db")).unwrap();
+    let refresh = database.begin_refresh().unwrap();
+    refresh
+        .record_provider_attempt(&resolved_attempt("arch", EvidenceGrade::Exact))
+        .unwrap();
+    let AttemptOutcome::Resolved { target, .. } =
+        &resolved_attempt("arch", EvidenceGrade::Exact).outcome
+    else {
+        unreachable!()
+    };
+    let analyzed = crate::linguist::LanguageRecord {
+        state: "analyzed".to_owned(),
+        reason: None,
+        total_bytes: 125,
+        primary_language: Some("Rust".to_owned()),
+        languages_json: r#"[{"language":"Rust","bytes":100}]"#.to_owned(),
+        adapter: "github-linguist".to_owned(),
+        source: crate::linguist::ProfileSource::Linguist,
+        fidelity: crate::linguist::RevisionFidelity::ExactPackagedSource,
+    };
+    refresh.record_language_profile(target, &analyzed).unwrap();
+    assert_eq!(
+        super::read_language_profile(&refresh.transaction, target).unwrap(),
+        Some(analyzed.clone())
+    );
+    // Re-recording replaces the outcome; dropping the transaction rolls back.
+    let failed = crate::linguist::LanguageRecord {
+        state: "failed".to_owned(),
+        reason: Some("Linguist adapter reported a failure".to_owned()),
+        ..analyzed.clone()
+    };
+    refresh.record_language_profile(target, &failed).unwrap();
+    drop(refresh);
+    assert!(
+        super::read_language_profile(&database.connection, target)
+            .unwrap()
+            .is_none()
+    );
+    let refresh = database.begin_refresh().unwrap();
+    refresh
+        .record_provider_attempt(&resolved_attempt("arch", EvidenceGrade::Exact))
+        .unwrap();
+    refresh.record_language_profile(target, &analyzed).unwrap();
+    refresh.publish(&[], &test_fingerprint()).unwrap();
+    assert_eq!(
+        super::read_language_profile(&database.connection, target).unwrap(),
+        Some(analyzed)
     );
 }
 

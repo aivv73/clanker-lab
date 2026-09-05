@@ -235,6 +235,7 @@ impl InstallReasonSelection {
 pub(crate) struct PopulationSelection {
     install_reason: InstallReasonSelection,
     origins: BTreeSet<PackageOrigin>,
+    packages: BTreeSet<String>,
 }
 
 impl PopulationSelection {
@@ -245,12 +246,19 @@ impl PopulationSelection {
         Self {
             install_reason,
             origins: origins.into_iter().collect(),
+            packages: BTreeSet::new(),
         }
+    }
+
+    pub(crate) fn with_packages(mut self, packages: impl IntoIterator<Item = String>) -> Self {
+        self.packages = packages.into_iter().collect();
+        self
     }
 
     pub(crate) fn includes(&self, package: &SnapshotPackage) -> bool {
         self.install_reason.includes(package.install_reason)
             && (self.origins.is_empty() || self.origins.contains(&package.origin))
+            && (self.packages.is_empty() || self.packages.contains(&package.name))
     }
 
     fn render(&self) -> String {
@@ -264,8 +272,14 @@ impl PopulationSelection {
                 .collect::<Vec<_>>();
             format!("{origins:?}")
         };
+        let packages = if self.packages.is_empty() {
+            "any".to_owned()
+        } else {
+            let packages = self.packages.iter().collect::<Vec<_>>();
+            format!("{packages:?}")
+        };
         format!(
-            "install reason = {}; origins = {origins}",
+            "install reason = {}; origins = {origins}; packages = {packages}",
             self.install_reason.as_str()
         )
     }
@@ -282,6 +296,8 @@ pub struct CountReport {
     coverage: Coverage,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) source_acquisition: Option<crate::acquisition::AcquisitionSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) language_approximation: Option<crate::github_languages::ApiSummary>,
 }
 
 impl CountReport {
@@ -304,6 +320,7 @@ impl CountReport {
             selected_population,
             coverage: Coverage::missing_only(selected_population),
             source_acquisition: None,
+            language_approximation: None,
         }
     }
 
@@ -313,21 +330,58 @@ impl CountReport {
         self
     }
 
+    pub(crate) fn with_analysis(mut self, analyzed: u64) -> Self {
+        self.coverage.set_analyzed(analyzed);
+        self
+    }
+
+    /// Stale profiles stay included in the analyzed share by default; this
+    /// records how many of them it contains so reports disclose the stale
+    /// contribution separately.
+    pub(crate) fn with_stale(mut self, stale: u64) -> Self {
+        self.coverage.stale = stale.min(self.coverage.analyzed);
+        self
+    }
+
+    /// Current-upstream approximations are counted apart from exact analysis
+    /// and never feed the analyzed share or the coverage threshold.
+    pub(crate) fn with_approximate(mut self, approximate: u64) -> Self {
+        self.coverage.set_approximate(approximate);
+        self
+    }
+
     pub(crate) fn from_provider_snapshot(
         snapshot: &crate::storage::PublishedSnapshot,
         staleness: SnapshotStaleness,
         selection: PopulationSelection,
     ) -> Self {
-        let source_free = snapshot
-            .packages
-            .iter()
-            .zip(&snapshot.provider_packages)
-            .filter(|(package, evidence)| {
-                selection.includes(package)
-                    && crate::package::provider::source_free(&evidence.attempts)
-            })
-            .count() as u64;
-        Self::from_snapshot(&snapshot.packages, staleness, selection).with_source_free(source_free)
+        let mut source_free = 0;
+        let mut analyzed = 0;
+        let mut approximate = 0;
+        let mut stale = 0;
+        for (package, evidence) in snapshot.packages.iter().zip(&snapshot.provider_packages) {
+            if !selection.includes(package) {
+                continue;
+            }
+            if crate::package::provider::source_free(&evidence.attempts) {
+                source_free += 1;
+                continue;
+            }
+            match evidence.analysis_state {
+                crate::linguist::AnalysisState::Current => analyzed += 1,
+                crate::linguist::AnalysisState::Approximate => approximate += 1,
+                crate::linguist::AnalysisState::Stale => {
+                    analyzed += 1;
+                    stale += 1;
+                }
+                crate::linguist::AnalysisState::Missing => {}
+            }
+        }
+        Self::from_snapshot(&snapshot.packages, staleness, selection)
+            .with_source_free(source_free)
+            .with_analysis(analyzed)
+            .with_approximate(approximate)
+            .with_stale(stale)
     }
 
     /// Exact analyzed share in percent. An empty selection is vacuously
@@ -358,6 +412,18 @@ impl CountReport {
                 self.coverage.source_free_packages
             ));
         }
+        if self.coverage.stale > 0 {
+            rendered.push_str(&format!(
+                "\nStale analysis (included in Analyzed): {}",
+                self.coverage.stale
+            ));
+        }
+        if self.coverage.approximate > 0 {
+            rendered.push_str(&format!(
+                "\nApproximate analysis (current upstream, not counted in Analyzed): {}",
+                self.coverage.approximate
+            ));
+        }
         let tenths = self.coverage.percentage_tenths();
         for (row, share) in self.coverage.rows.iter().zip(tenths) {
             rendered.push_str(&format!(
@@ -369,6 +435,21 @@ impl CountReport {
         }
         if let Some(summary) = &self.source_acquisition {
             rendered.push_str(&format!("\n\n{}", summary.render()));
+        }
+        if let Some(summary) = &self.language_approximation {
+            rendered.push_str(&format!(
+                "\n\nLanguage approximations (GitHub API): attempted {}, approximated {}, failed {}, skipped exact {}, skipped rate limited {}{}",
+                summary.attempted,
+                summary.approximated,
+                summary.failed,
+                summary.skipped_exact,
+                summary.skipped_rate_limited,
+                if summary.skipped_rate_limited > 0 {
+                    " (circuit breaker tripped; rerun to retry)"
+                } else {
+                    ""
+                }
+            ));
         }
         rendered
     }
@@ -389,6 +470,18 @@ impl CountReport {
                 self.coverage.source_free_packages
             ));
         }
+        if self.coverage.stale > 0 {
+            rendered.push_str(&format!(
+                "\n- Stale analysis (included in Analyzed): {}",
+                self.coverage.stale
+            ));
+        }
+        if self.coverage.approximate > 0 {
+            rendered.push_str(&format!(
+                "\n- Approximate analysis (current upstream, not counted in Analyzed): {}",
+                self.coverage.approximate
+            ));
+        }
         let tenths = self.coverage.percentage_tenths();
         for (row, share) in self.coverage.rows.iter().zip(tenths) {
             rendered.push_str(&format!(
@@ -401,6 +494,16 @@ impl CountReport {
         if let Some(summary) = &self.source_acquisition {
             rendered.push_str(&format!("\n\n{}", summary.render()));
         }
+        if let Some(summary) = &self.language_approximation {
+            rendered.push_str(&format!(
+                "\n\nLanguage approximations (GitHub API): attempted {}, approximated {}, failed {}, skipped exact {}, skipped rate limited {}",
+                summary.attempted,
+                summary.approximated,
+                summary.failed,
+                summary.skipped_exact,
+                summary.skipped_rate_limited
+            ));
+        }
         rendered
     }
 }
@@ -410,6 +513,10 @@ struct Coverage {
     denominator: u64,
     source_free_packages: u64,
     analyzed: u64,
+    /// Current-upstream approximations, counted apart from exact analysis.
+    approximate: u64,
+    /// Stale profiles included in `analyzed`, disclosed separately.
+    stale: u64,
     missing_source_language_analysis: u64,
     /// Per-state breakdown sorted by count descending and state name
     /// ascending. The counts always sum to `denominator`.
@@ -421,6 +528,7 @@ struct Coverage {
 #[serde(rename_all = "snake_case")]
 enum CoverageState {
     Analyzed,
+    Approximate,
     MissingSourceLanguageAnalysis,
 }
 
@@ -428,6 +536,7 @@ impl CoverageState {
     const fn as_str(self) -> &'static str {
         match self {
             Self::Analyzed => "analyzed",
+            Self::Approximate => "approximate",
             Self::MissingSourceLanguageAnalysis => "missing_source_language_analysis",
         }
     }
@@ -435,6 +544,7 @@ impl CoverageState {
     const fn human_label(self) -> &'static str {
         match self {
             Self::Analyzed => "Analyzed",
+            Self::Approximate => "Approximate (current upstream)",
             Self::MissingSourceLanguageAnalysis => "Missing source-language analysis",
         }
     }
@@ -447,11 +557,15 @@ struct CoverageRow {
     count: u64,
 }
 
-impl Coverage {
+    impl Coverage {
     fn missing_only(denominator: u64) -> Self {
         let mut rows = vec![
             CoverageRow {
                 state: CoverageState::Analyzed,
+                count: 0,
+            },
+            CoverageRow {
+                state: CoverageState::Approximate,
                 count: 0,
             },
             CoverageRow {
@@ -472,9 +586,50 @@ impl Coverage {
             denominator,
             source_free_packages: 0,
             analyzed: 0,
+            approximate: 0,
+            stale: 0,
             missing_source_language_analysis: denominator,
             rows,
         }
+    }
+
+    fn set_analyzed(&mut self, analyzed: u64) {
+        self.analyzed = analyzed.min(self.denominator);
+        self.refresh_rows();
+    }
+
+    fn set_approximate(&mut self, approximate: u64) {
+        self.approximate = approximate.min(self.denominator.saturating_sub(self.analyzed));
+        self.refresh_rows();
+    }
+
+    /// Recompute the missing share and row counts from the analyzed and
+    /// approximate shares, keeping every ordering of the builder calls
+    /// honest: rows always sum to the denominator.
+    fn refresh_rows(&mut self) {
+        self.missing_source_language_analysis = self
+            .denominator
+            .saturating_sub(self.analyzed)
+            .saturating_sub(self.approximate);
+        for row in &mut self.rows {
+            row.count = match row.state {
+                CoverageState::Analyzed => self.analyzed,
+                CoverageState::Approximate => self.approximate,
+                CoverageState::MissingSourceLanguageAnalysis => {
+                    self.missing_source_language_analysis
+                }
+            };
+        }
+        self.rows.sort_by(|left, right| {
+            right
+                .count
+                .cmp(&left.count)
+                .then_with(|| left.state.as_str().cmp(right.state.as_str()))
+        });
+        debug_assert_eq!(
+            self.rows.iter().map(|row| row.count).sum::<u64>(),
+            self.denominator
+        );
     }
 
     fn analyzed_percent(&self) -> f64 {

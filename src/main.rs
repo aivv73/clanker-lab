@@ -1,10 +1,13 @@
 mod acquisition;
+mod analysis;
 mod arch_provider;
 mod cachyos_provider;
 mod cli;
 mod expac_parser;
+mod github_languages;
 mod interrupt;
 mod inventory;
+mod linguist;
 mod package;
 mod progress;
 mod proxy;
@@ -139,6 +142,9 @@ fn run(
             sources_only,
             require_complete,
             limits,
+            linguist,
+            analysis_mode,
+            github_api_url,
             arch_api_url,
             cachyos,
             cachyos_api_url,
@@ -152,6 +158,7 @@ fn run(
                 inventory::capture_installed_inventory().map_err(map_inventory_error)?;
             let snapshot_packages = inventory.snapshot_packages();
             let mut source_acquisition = None;
+            let mut report_approximation = None;
             let staleness = if recipes_only || sources_only {
                 let selected = inventory
                     .packages()
@@ -206,16 +213,36 @@ fn run(
                         });
                     let mut progress =
                         progress::Progress::stderr("Acquiring sources", "Acquired", "Incomplete");
-                    let result = acquisition::record_sources(
+                    // The token travels from the environment only: process
+                    // arguments stay out of the secret's path. Blank or
+                    // whitespace-bearing values fail safe to no authentication.
+                    let github_token = std::env::var("PACLANG_GITHUB_TOKEN")
+                        .ok()
+                        .map(|value| value.trim().to_owned())
+                        .filter(|value| {
+                            !value.is_empty()
+                                && !value.bytes().any(|byte| {
+                                    byte.is_ascii_whitespace() || byte.is_ascii_control()
+                                })
+                        });
+                    let result = analysis::run(
                         &refresh,
                         selected,
-                        &limits,
+                        analysis::Policy {
+                            limits: &limits,
+                            linguist: &linguist,
+                            mode: analysis_mode,
+                            github_api: &github_api_url,
+                            github_token,
+                            proxy: proxy_url.as_deref(),
+                        },
                         &mut progress,
-                        proxy_url.as_deref(),
                     )
                     .map_err(map_storage_error);
                     progress.finish();
-                    source_acquisition = Some(result?);
+                    let outcome = result?;
+                    source_acquisition = Some(outcome.acquisition);
+                    report_approximation = outcome.approximation;
                 }
                 if inventory::read_live_fingerprint().map_err(map_inventory_error)?
                     != *inventory.fingerprint()
@@ -233,20 +260,40 @@ fn run(
                 .as_ref()
                 .is_none_or(acquisition::AcquisitionSummary::complete);
             let mut source_free = 0;
+            let mut analyzed = 0;
+            let mut approximate = 0;
+            let mut stale = 0;
             for (installed, snapshot) in inventory.packages().iter().zip(&snapshot_packages) {
-                if selection.includes(snapshot)
-                    && package::provider::source_free(
-                        &refresh
-                            .provider_attempts(installed.name(), installed.version())
-                            .map_err(map_storage_error)?,
-                    )
-                {
+                if !selection.includes(snapshot) {
+                    continue;
+                }
+                let attempts = &refresh
+                    .provider_attempts(installed.name(), installed.version())
+                    .map_err(map_storage_error)?;
+                if package::provider::source_free(attempts) {
                     source_free += 1;
+                    continue;
+                }
+                match refresh
+                    .package_analysis_state(installed.name(), installed.version())
+                    .map_err(map_storage_error)?
+                {
+                    linguist::AnalysisState::Current => analyzed += 1,
+                    linguist::AnalysisState::Approximate => approximate += 1,
+                    linguist::AnalysisState::Stale => {
+                        analyzed += 1;
+                        stale += 1;
+                    }
+                    linguist::AnalysisState::Missing => {}
                 }
             }
             let mut report = CountReport::from_snapshot(&snapshot_packages, staleness, selection)
-                .with_source_free(source_free);
+                .with_source_free(source_free)
+                .with_analysis(analyzed)
+                .with_approximate(approximate)
+                .with_stale(stale);
             report.source_acquisition = source_acquisition;
+            report.language_approximation = report_approximation;
             let rendered = format.render_count(&report).map_err(AppError::render)?;
             refresh
                 .publish(inventory.packages(), inventory.fingerprint())

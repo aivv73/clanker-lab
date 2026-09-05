@@ -33,7 +33,7 @@ A count in which each installed package name contributes one unit, including eac
 _Avoid_: Project count, repository count
 
 **Selected population**:
-The installed packages included by explicit-package, dependency-package, and package-origin filters. Every percentage uses the selected population or identifies a different denominator.
+The installed packages included by explicit-package, dependency-package, package-origin, and package-name filters. Every percentage uses the selected population or identifies a different denominator.
 _Avoid_: Scope, package set
 
 **Analysis target**:
@@ -51,6 +51,14 @@ _Avoid_: Latest source, upstream HEAD
 **Source-language profile**:
 Linguist's detected language-byte distribution for one analysis target.
 _Avoid_: Package languages, installed languages
+
+**Revision fidelity**:
+How closely a stored source-language profile tracks the packaged source revision: `exact-packaged-source` profiles were analyzed from the packaged revision itself, while `current-upstream` profiles approximate it from upstream HEAD. Profiles with different fidelity are never mixed as equal evidence.
+_Avoid_: Confidence score, resolved
+
+**Approximate analysis**:
+A source-language profile read from a source-code hosting API without downloading, describing upstream HEAD rather than the packaged revision. Reports count it apart from exact analysis and exclude it from the coverage threshold.
+_Avoid_: Measured analysis, exact analysis
 
 **Source-byte report**:
 A report that sums each unique analysis target once within the selected population, even when several selected installed packages share that target.
