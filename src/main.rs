@@ -1,12 +1,10 @@
+mod arch_provider;
 mod cli;
 mod expac_parser;
 mod interrupt;
 mod inventory;
 mod package;
 mod report;
-// Not yet called: the Arch source provider uses this module to validate
-// fetched recipe metadata (issue #16). Remove the allowance once it does.
-#[allow(dead_code)]
 mod srcinfo;
 mod storage;
 
@@ -120,22 +118,41 @@ fn run(
 ) -> Result<RunOutput, AppError> {
     match command {
         Command::Count => render_count(format, selection, min_coverage),
-        Command::Refresh { metadata_only: _ } => {
+        Command::Refresh {
+            metadata_only: _,
+            recipes_only,
+            arch_api_url,
+        } => {
             let database_path = storage::database_path().map_err(AppError::storage)?;
             let mut database =
                 storage::Database::open(&database_path).map_err(AppError::storage)?;
             let refresh = database.begin_refresh().map_err(map_storage_error)?;
             let inventory =
                 inventory::capture_installed_inventory().map_err(map_inventory_error)?;
-            let report = CountReport::from_snapshot(
-                &inventory.snapshot_packages(),
-                if inventory.is_stale() {
+            let snapshot_packages = inventory.snapshot_packages();
+            let staleness = if recipes_only {
+                let selected = inventory
+                    .packages()
+                    .iter()
+                    .zip(&snapshot_packages)
+                    .filter_map(|(installed, snapshot)| {
+                        selection.includes(snapshot).then_some(installed)
+                    });
+                arch_provider::record_attempts(&refresh, selected, &arch_api_url)
+                    .map_err(map_storage_error)?;
+                if inventory::read_live_fingerprint().map_err(map_inventory_error)?
+                    != *inventory.fingerprint()
+                {
                     SnapshotStaleness::Stale
                 } else {
                     SnapshotStaleness::Current
-                },
-                selection,
-            );
+                }
+            } else if inventory.is_stale() {
+                SnapshotStaleness::Stale
+            } else {
+                SnapshotStaleness::Current
+            };
+            let report = CountReport::from_snapshot(&snapshot_packages, staleness, selection);
             let rendered = format.render_count(&report).map_err(AppError::render)?;
             refresh
                 .publish(inventory.packages(), inventory.fingerprint())

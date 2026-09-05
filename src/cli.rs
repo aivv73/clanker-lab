@@ -43,7 +43,7 @@ impl Cli {
     }
 }
 
-#[derive(Clone, Copy, Debug, Subcommand)]
+#[derive(Clone, Debug, Subcommand)]
 pub enum Command {
     /// Report the selected installed-package count and analysis coverage.
     Count,
@@ -51,8 +51,25 @@ pub enum Command {
     /// Refresh package metadata and source-language analysis.
     Refresh {
         /// Publish installed-package metadata without analyzing source trees.
-        #[arg(long, required = true)]
+        #[arg(
+            long,
+            required_unless_present = "recipes_only",
+            conflicts_with = "recipes_only"
+        )]
         metadata_only: bool,
+
+        /// Fetch source recipes and record evidence without downloading source trees.
+        #[arg(long)]
+        recipes_only: bool,
+
+        /// Arch-compatible GitLab API endpoint used for recipe metadata.
+        #[arg(
+            long,
+            requires = "recipes_only",
+            conflicts_with = "metadata_only",
+            default_value = "https://gitlab.archlinux.org/api/v4"
+        )]
+        arch_api_url: crate::arch_provider::RecipeEndpoint,
     },
 }
 
