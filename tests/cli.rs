@@ -137,7 +137,7 @@ fn plain_command_returns_toon_no_snapshot_and_migrates_database() {
     let version: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 3);
+    assert_eq!(version, 4);
 }
 
 #[test]
@@ -1225,7 +1225,7 @@ fn version_one_snapshot_marker_migrates_to_no_snapshot() {
             row.get(0)
         })
         .unwrap();
-    assert_eq!(version, 3);
+    assert_eq!(version, 4);
     assert_eq!(snapshots, 0);
 }
 
@@ -1280,7 +1280,7 @@ fn version_two_snapshot_migrates_and_reports_unknown_staleness() {
     let version: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 3);
+    assert_eq!(version, 4);
 }
 
 fn bin_with_only(tool: &str, source_bin: &Path) -> tempfile::TempDir {
