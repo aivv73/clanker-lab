@@ -51,3 +51,53 @@ Structured output carries integer numerators and denominators, so agents and scr
 Pass `--min-coverage <percent>` (0 to 100) to make a report fail when analyzed coverage is below the threshold. The report facts are unchanged; only the exit status becomes 1. An empty selection is vacuously complete and always satisfies the threshold.
 
 Recipe API HTTP 429 responses are retried at most three times per request. Retries honor `Retry-After` seconds or HTTP dates; missing or invalid values use 1, 2, and 4 second backoff. Only throttled requests are retried, preserving successful results. A requested delay above 60 seconds leaves the request unresolved instead of retrying early. Retry waits check cancellation every 50 ms.
+
+List installed packages by any stored language name (case-insensitive; quote names containing spaces):
+
+```sh
+paclang packages rust                  # primary language is Rust
+paclang packages rust --contains       # Rust bytes > 0
+paclang packages rust --min-share 0.5  # Rust source-byte share >= 50%
+paclang packages 'C++' --fidelity best-available
+```
+
+The default `--fidelity exact` uses exact packaged-source profiles, including explicitly marked stale cached fallbacks. `best-available` prefers exact profiles and otherwise uses current-upstream approximations, labeled on each result. Distinct source targets are counted once per package; their language bytes determine the primary language and shares (ties use language-name order). `--contains` and `--min-share` are mutually exclusive. Shares range from 0 to 1; zero includes absent languages in nonempty profiles, while empty or missing profiles never match. Unknown language names normally yield an empty result. Population filters, all report formats, and the exact-analysis `--min-coverage` gate also apply.
+
+Use `paclang packages rust --sort share` to list the highest Rust shares first, or `--sort bytes` for the largest Rust byte counts first. Both break ties by package name and work with every matching mode and output format. The default is `--sort name`.
+
+`paclang riir` presents **Rewrite It In Rust** progress, with a progress bar, Rust/C/C++/Other source bytes, package-analysis coverage, and the top three rewrite candidates ranked by descending C/C++ bytes (ties by name). Its oxidation ratio is **Rust / (Rust + C + C++)**; remaining bytes are **C + C++**. Other languages are outside this denominator. Global totals reuse `source-bytes` and count shared targets once; candidate shares describe each package separately.
+
+```sh
+paclang riir
+paclang riir --bar crabs
+paclang riir --fidelity best-available
+paclang riir --format json
+```
+
+The command defaults to human output even when redirected; use `--format json|toon` for structured data without memes. Human output always ends with `The crabs demand … more.`, preceded by a message for the current oxidation stage. `--bar blocks` is the default; `--bar crabs` assumes two-cell emoji rendering and `--bar ascii` uses an ASCII bar. Byte sizes use binary units.
+
+`--fidelity exact|best-available`, population filters, and `--min-coverage` follow the other reports. Stale evidence and fidelity remain disclosed. JSON includes `oxidation_ratio`, `riir_remaining_ratio`, integer byte counts, candidates, and the underlying source-analysis report. Both ratios are `null` when no Rust/C/C++ bytes were measured. Unknown source-byte volume is unmeasurable from missing profiles (`unknown_source_bytes: null`), rather than inferred from installed package sizes. Coverage is package coverage, not byte coverage. In `best-available` mode the headline combines exact analysis and approximate fallbacks, with each contribution shown separately; in `exact` mode it shows only exact coverage. JSON `coverage_ratio` follows the selected fidelity, with `exact_coverage_ratio` and `approximate_fallback_coverage_ratio` disclosing its parts. Stale exact evidence remains included, and `--min-coverage` still gates on exact coverage. Human output labels Other as excluded from the oxidation denominator and shows candidate bytes first, with share as a secondary indicator.
+
+`paclang clanker-index` applies the explicitly subjective **clanker-language-tierlist-v1** policy to the existing measured source-language bytes. It reuses `source-bytes` selection, shared-target deduplication, exact/approximate preference, and disclosed stale fallbacks, with no acquisition or network calls.
+
+```sh
+paclang clanker-index
+paclang clanker-index --fidelity best-available
+paclang clanker-index --top 5
+paclang clanker-index --all
+paclang clanker-index --format json
+```
+
+The frozen v1 policy is the accepted [editorial tierlist](clanker-index-tierlist.md). Its ordinal weights are S+=6, S=5, A=4, B=3, C=2, D=1, F=0. The internal byte-weighted mean uses only **gradeable programming bytes** and maps to the nearest tier, with exact half-way values rounded toward the higher tier. No numeric score is displayed. Empty, ancillary-only, and entirely unjudged populations have no grade (`grade: null`).
+
+A pinned offline snapshot of the supplied Linguist registry determines language type and group. The report separates **gradeable programming bytes**, **ungraded programming bytes (???)**, and **ancillary bytes** (markup, prose, data). HTML/CSS/MDX/Roff are ancillary; Perl and Prolog remain unjudged programming languages. Ancillary bytes never affect the grade or appear before the Clanker Council. Names absent from the registry are separately disclosed as `unknown_type_bytes`, excluded from grading without guessing their type. Synthetic Bend 2/Psi retain explicit project-local programming status and count only when measured.
+
+Exact policy overrides win over registry parent/group inheritance, including explicit `???` decisions. Identical parent tiers use inheritance for Python console, Snakemake, Lean 4, Literate Agda/Haskell, Julia REPL, TSX, and other registry variants. fish, Tcsh, Java Server Pages, and JavaScript+ERB retain their individual tiers. Child languages keep their own emoji and verdict even when the tier is inherited.
+
+Policy semantics (`src/report/data/clanker-language-tierlist-v1.json`) and terminal presentation (`src/report/data/clanker-presentation.json`) are separate. Changing a joke does not change grading. The registry type/group snapshot is pinned with its source SHA-256; a future change to v1 tier or applicability semantics needs a new policy version, rather than silent rebalancing. Presentation edits may evolve independently.
+
+Human output shows emoji, verdicts, a system-grade joke, the top ten programming languages, and at most three unjudged-language details. `--all` shows the entire programming breakdown; `--top N` limits its displayed rows. Hidden programming bytes form an explicitly display-only mixed-tier remainder. Language percentages use **all measured source bytes** as their denominator, including ancillary bytes. This command defaults to human output even when redirected.
+
+Clanker Index JSON/TOON use report schema **2.0.0**, independently of other reports. They contain no presentation fields or grade jokes. `languages` contains all programming rows; `ancillary_languages` and `unknown_type_languages` preserve the other measured rows. `ungraded_programming_bytes` replaces the old catch-all `ungraded_bytes`; `ancillary_bytes` and `unknown_type_bytes` disclose the exclusions separately. All four byte buckets sum to `total_source_bytes`. The complete original `source_analysis`, registry identity, inherited tiers, and coverage components remain available regardless of terminal trimming.
+
+Coverage is still package-analysis coverage. Best-available shows exact plus approximate fallback; `--min-coverage` still gates on exact coverage. Fidelity, snapshot staleness, and stale bytes included in the report remain explicit. Acquisition, target deduplication, stored measurements, and the other reports are unchanged.

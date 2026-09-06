@@ -91,7 +91,13 @@ fn main() -> ExitCode {
 
     let format = cli
         .format
-        .unwrap_or_else(|| Format::for_terminal(io::stdout().is_terminal()));
+        .unwrap_or_else(|| {
+            if matches!(&cli.command, Some(Command::Riir { .. } | Command::ClankerIndex { .. })) {
+                Format::Terminal
+            } else {
+                Format::for_terminal(io::stdout().is_terminal())
+            }
+        });
     let selection = cli.population_selection();
     if let Err(error) = interrupt::install() {
         return write_error(
@@ -136,7 +142,24 @@ fn run(
     match command {
         Command::Count => render_snapshot_report(format, selection, min_coverage, false),
         Command::SourceBytes { fidelity, all, top } => {
-            render_source_bytes_report(format, selection, min_coverage, fidelity, all, top)
+            render_source_bytes_report(format, selection, min_coverage, fidelity, all, top, SourcePresentation::Bytes)
+        }
+        Command::Packages { language, contains, min_share, fidelity, sort } => {
+            render_packages_report(format, selection, min_coverage, language, contains, min_share, fidelity, sort)
+        }
+        Command::Riir { fidelity, bar } => {
+            let fidelity = match fidelity {
+                report::packages::Fidelity::Exact => report::source_bytes::FidelitySelection::Exact,
+                report::packages::Fidelity::BestAvailable => report::source_bytes::FidelitySelection::BestAvailable,
+            };
+            render_source_bytes_report(format, selection, min_coverage, fidelity, true, None, SourcePresentation::Riir(bar))
+        }
+        Command::ClankerIndex { fidelity, all, top } => {
+            let fidelity = match fidelity {
+                report::packages::Fidelity::Exact => report::source_bytes::FidelitySelection::Exact,
+                report::packages::Fidelity::BestAvailable => report::source_bytes::FidelitySelection::BestAvailable,
+            };
+            render_source_bytes_report(format, selection, min_coverage, fidelity, all, top, SourcePresentation::Clanker)
         }
         Command::Providers => render_snapshot_report(format, selection, min_coverage, true),
         Command::Refresh {
@@ -345,6 +368,12 @@ fn render_snapshot_report(
     render_count_from_database(format, &database, selection, min_coverage)
 }
 
+enum SourcePresentation {
+    Bytes,
+    Riir(report::riir::Bar),
+    Clanker,
+}
+
 fn render_source_bytes_report(
     format: Format,
     selection: report::PopulationSelection,
@@ -352,6 +381,7 @@ fn render_source_bytes_report(
     fidelity: report::source_bytes::FidelitySelection,
     all: bool,
     top: Option<usize>,
+    presentation: SourcePresentation,
 ) -> Result<RunOutput, AppError> {
     let database_path = storage::database_path().map_err(AppError::storage)?;
     let database = storage::Database::open(&database_path).map_err(AppError::storage)?;
@@ -390,6 +420,11 @@ fn render_source_bytes_report(
             crate::report::source_bytes::stale_breakdown(&profiles),
         );
     }
+    let candidates = if matches!(presentation, SourcePresentation::Riir(_)) {
+        report::riir::candidates(&snapshot, &database, staleness, selection.clone(), fidelity)?
+    } else {
+        Vec::new()
+    };
     let report = crate::report::source_bytes::SourceBytesReport::from_snapshot_with_stale(
         &snapshot,
         staleness,
@@ -397,16 +432,48 @@ fn render_source_bytes_report(
         &stale_by_package,
         fidelity,
     );
-    let rendered = format
-        .render_source_bytes(
-            &report,
-            crate::report::source_bytes::display_limit(all, top),
-        )
-        .map_err(AppError::render)?;
+    let limit = crate::report::source_bytes::display_limit(all, top);
+    let rendered = match presentation {
+        SourcePresentation::Riir(bar) => report::riir::RiirReport::new(&report, candidates).render(format, bar),
+        SourcePresentation::Clanker => report::clanker_index::ClankerIndexReport::new(&report).render(format, limit),
+        SourcePresentation::Bytes => format.render_source_bytes(&report, limit),
+    }.map_err(AppError::render)?;
     let meets_coverage = report.meets_coverage(min_coverage);
     Ok(RunOutput {
         rendered,
         meets_coverage,
+        snapshot_read_guard: Some(snapshot),
+    })
+}
+
+
+#[allow(clippy::too_many_arguments)]
+fn render_packages_report(
+    format: Format,
+    selection: report::PopulationSelection,
+    min_coverage: Option<f64>,
+    language: String,
+    contains: bool,
+    min_share: Option<f64>,
+    fidelity: report::packages::Fidelity,
+    sort: report::packages::Sort,
+) -> Result<RunOutput, AppError> {
+    let path = storage::database_path().map_err(AppError::storage)?;
+    let database = storage::Database::open(&path).map_err(AppError::storage)?;
+    let snapshot = database.published_provider_snapshot().map_err(AppError::storage)?
+        .ok_or(AppError::NoSnapshot)?;
+    let live = inventory::read_live_fingerprint().map_err(map_inventory_error)?;
+    let staleness = match &snapshot.fingerprint {
+        Some(fingerprint) if *fingerprint == live => SnapshotStaleness::Current,
+        Some(_) => SnapshotStaleness::Stale,
+        None => SnapshotStaleness::Unknown,
+    };
+    let count = CountReport::from_provider_snapshot(&snapshot, staleness, selection.clone());
+    let report = report::packages::build(&snapshot, &database, staleness, selection,
+        language, contains, min_share, fidelity, sort)?;
+    Ok(RunOutput {
+        rendered: report.render(format).map_err(AppError::render)?,
+        meets_coverage: count.meets_coverage(min_coverage),
         snapshot_read_guard: Some(snapshot),
     })
 }

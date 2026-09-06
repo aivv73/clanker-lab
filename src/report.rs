@@ -1,3 +1,8 @@
+pub(crate) mod clanker_index;
+mod clanker_policy;
+mod clanker_presentation;
+pub(crate) mod riir;
+pub(crate) mod packages;
 pub(crate) mod providers;
 pub(crate) mod source_bytes;
 #[cfg(test)]

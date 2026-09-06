@@ -77,6 +77,45 @@ pub enum Command {
         top: Option<usize>,
     },
 
+    /// List installed packages matching any stored language name (case-insensitive).
+    Packages {
+        #[arg(value_parser = parse_language)]
+        language: String,
+        /// Match positive language bytes instead of the primary language.
+        #[arg(long, conflicts_with = "min_share")]
+        contains: bool,
+        /// Match a language share at least this fraction, from 0 to 1.
+        #[arg(long, value_parser = parse_share)]
+        min_share: Option<f64>,
+        #[arg(long, value_enum, default_value = "exact")]
+        fidelity: crate::report::packages::Fidelity,
+
+        /// Sort by name, or descending selected-language share or bytes.
+        #[arg(long, value_enum, default_value = "name")]
+        sort: crate::report::packages::Sort,
+    },
+
+    /// Show Rust oxidation of analyzed Rust/C/C++ source bytes.
+    Riir {
+        #[arg(long, value_enum, default_value = "exact")]
+        fidelity: crate::report::packages::Fidelity,
+        /// Progress-bar style; choose crabs when emoji occupy two terminal cells.
+        #[arg(long, value_enum, default_value = "blocks")]
+        bar: crate::report::riir::Bar,
+    },
+
+    /// Apply the subjective, versioned clanker language policy to measured source bytes.
+    ClankerIndex {
+        #[arg(long, value_enum, default_value = "exact")]
+        fidelity: crate::report::packages::Fidelity,
+        /// Show every programming language in human output. Machine output is complete.
+        #[arg(long, conflicts_with = "top")]
+        all: bool,
+        /// Show the top N programming languages plus a display-only remainder.
+        #[arg(long, value_name = "N", conflicts_with = "all", value_parser = parse_top)]
+        top: Option<usize>,
+    },
+
     /// Inspect stored source-provider outcomes for the selected package versions.
     Providers,
 
@@ -190,4 +229,22 @@ fn parse_cachyos_api_url(value: &str) -> Result<Box<crate::arch_provider::Recipe
         .parse()
         .map(Box::new)
         .map_err(|reason: &'static str| reason.to_owned())
+}
+
+fn parse_share(value: &str) -> Result<f64, String> {
+    let share = value
+        .parse::<f64>()
+        .map_err(|_| "expected a fraction from 0 to 1")?;
+    if !share.is_finite() || !(0.0..=1.0).contains(&share) {
+        return Err("expected a finite fraction from 0 to 1".into());
+    }
+    Ok(share)
+}
+
+fn parse_language(value: &str) -> Result<String, String> {
+    let value = value.trim();
+    if value.is_empty() || value.chars().any(char::is_control) {
+        return Err("expected a nonempty language name without control characters".into());
+    }
+    Ok(value.to_owned())
 }

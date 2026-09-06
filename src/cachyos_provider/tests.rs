@@ -221,7 +221,6 @@ fn rebuild_fallback_reports_the_actual_source_failure() {
 fn snapshot_bytes(commit: &str, files: &[(&str, &[u8])], dirs: &[&str]) -> Vec<u8> {
     use flate2::Compression;
     use flate2::write::GzEncoder;
-    use std::io::Write;
     let encoder = GzEncoder::new(Vec::new(), Compression::default());
     let mut builder = tar::Builder::new(encoder);
     for dir in dirs {
@@ -286,7 +285,6 @@ fn snapshot_rejects_entries_outside_the_commit_prefix() {
             break;
         }
     }
-    use std::io::Write;
     let mut encoder =
         flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
     encoder.write_all(&expanded).unwrap();
