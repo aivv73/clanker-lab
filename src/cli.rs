@@ -95,6 +95,27 @@ pub enum Command {
         sort: crate::report::packages::Sort,
     },
 
+    /// Show Rust oxidation of analyzed Rust/C/C++ source bytes.
+    Riir {
+        #[arg(long, value_enum, default_value = "exact")]
+        fidelity: crate::report::packages::Fidelity,
+        /// Progress-bar style; choose crabs when emoji occupy two terminal cells.
+        #[arg(long, value_enum, default_value = "blocks")]
+        bar: crate::report::riir::Bar,
+    },
+
+    /// Apply the subjective, versioned clanker language policy to measured source bytes.
+    ClankerIndex {
+        #[arg(long, value_enum, default_value = "exact")]
+        fidelity: crate::report::packages::Fidelity,
+        /// Show every programming language in human output. Machine output is complete.
+        #[arg(long, conflicts_with = "top")]
+        all: bool,
+        /// Show the top N programming languages plus a display-only remainder.
+        #[arg(long, value_name = "N", conflicts_with = "all", value_parser = parse_top)]
+        top: Option<usize>,
+    },
+
     /// Inspect stored source-provider outcomes for the selected package versions.
     Providers,
 

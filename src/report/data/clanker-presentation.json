@@ -1,0 +1,2250 @@
+{
+  "1C Enterprise": {
+    "emoji": "🧾",
+    "verdict": "the invoice has summoned a demon"
+  },
+  "4D": {
+    "emoji": "🗄️",
+    "verdict": "the database also wants to be the IDE"
+  },
+  "ABAP": {
+    "emoji": "🏢",
+    "verdict": "the transport request needs a transport"
+  },
+  "ABAP CDS": {
+    "emoji": "🏗️",
+    "verdict": "the view has enterprise-grade paperwork"
+  },
+  "AGS Script": {
+    "emoji": "🗝️",
+    "verdict": "use compiler on inventory item"
+  },
+  "AIDL": {
+    "emoji": "📞",
+    "verdict": "your objects are calling from another process"
+  },
+  "AL": {
+    "emoji": "📒",
+    "verdict": "business logic, now with extension permits"
+  },
+  "ALGOL": {
+    "emoji": "🏛️",
+    "verdict": "begin the ancestral ceremony end"
+  },
+  "AMPL": {
+    "emoji": "📐",
+    "verdict": "the solver rejects your optimistic budget"
+  },
+  "ANTLR": {
+    "emoji": "🦁",
+    "verdict": "your grammar now has a legal department"
+  },
+  "APL": {
+    "emoji": "⌨️",
+    "verdict": "the keyboard is a prerequisite"
+  },
+  "ASL": {
+    "emoji": "🔋",
+    "verdict": "firmware explains why sleep is impossible"
+  },
+  "ASP.NET": {
+    "emoji": "🕸️",
+    "verdict": "the page has a code-behind alibi"
+  },
+  "ATS": {
+    "emoji": "🛡️",
+    "verdict": "malloc must first submit a proof"
+  },
+  "ActionScript": {
+    "emoji": "🎞️",
+    "verdict": "the timeline still controls your life"
+  },
+  "Ada": {
+    "emoji": "✈️",
+    "verdict": "the compiler has a preflight checklist"
+  },
+  "Agda": {
+    "emoji": "🧩",
+    "verdict": "the hole wants a proof, not confidence"
+  },
+  "Aiken": {
+    "emoji": "🌰",
+    "verdict": "the contract gets a functional pat-down"
+  },
+  "Aleo": {
+    "emoji": "🕶️",
+    "verdict": "even the instructions want privacy"
+  },
+  "Alloy": {
+    "emoji": "🔬",
+    "verdict": "a tiny world disproves your grand plan"
+  },
+  "Alpine Abuild": {
+    "emoji": "🏔️",
+    "verdict": "shell scripts wearing package metadata"
+  },
+  "AngelScript": {
+    "emoji": "😇",
+    "verdict": "the game engine lent you a type checker"
+  },
+  "Answer Set Programming": {
+    "emoji": "🧮",
+    "verdict": "state the problem; await stable beliefs"
+  },
+  "Apex": {
+    "emoji": "☁️",
+    "verdict": "the governor has counted your queries"
+  },
+  "Apollo Guidance Computer": {
+    "emoji": "🌕",
+    "verdict": "the review checklist includes landing"
+  },
+  "AppleScript": {
+    "emoji": "🍎",
+    "verdict": "tell application to misunderstand English"
+  },
+  "Arc": {
+    "emoji": "🏹",
+    "verdict": "the parentheses have startup equity"
+  },
+  "AspectJ": {
+    "emoji": "🪡",
+    "verdict": "the bug was woven in after compilation"
+  },
+  "Assembly": {
+    "emoji": "🔩",
+    "verdict": "the register allocator is now you"
+  },
+  "Asymptote": {
+    "emoji": "📏",
+    "verdict": "the diagram requires executable geometry"
+  },
+  "Augeas": {
+    "emoji": "👓",
+    "verdict": "put lenses on the config file"
+  },
+  "AutoHotkey": {
+    "emoji": "🎹",
+    "verdict": "the keyboard has accepted remote orders"
+  },
+  "AutoIt": {
+    "emoji": "🖱️",
+    "verdict": "the dialog moved three pixels"
+  },
+  "Awk": {
+    "emoji": "🦅",
+    "verdict": "the whole migration fits between slashes"
+  },
+  "B": {
+    "emoji": "🅱️",
+    "verdict": "C has not been invented yet"
+  },
+  "B (Formal Method)": {
+    "emoji": "📜",
+    "verdict": "the refinement owes us an invariant"
+  },
+  "B4X": {
+    "emoji": "📱",
+    "verdict": "BASIC packed three deployment targets"
+  },
+  "BAML": {
+    "emoji": "🦙",
+    "verdict": "even the prompt has a type signature"
+  },
+  "BASIC": {
+    "emoji": "🔢",
+    "verdict": "GOTO the line you just renumbered"
+  },
+  "BQN": {
+    "emoji": "🎼",
+    "verdict": "the array brought its own alphabet"
+  },
+  "Ballerina": {
+    "emoji": "💃",
+    "verdict": "the network is part of the choreography"
+  },
+  "Batchfile": {
+    "emoji": "🦇",
+    "verdict": "delayed expansion, immediate regret"
+  },
+  "Beef": {
+    "emoji": "🥩",
+    "verdict": "the debugger would like its memory back"
+  },
+  "Befunge": {
+    "emoji": "🧭",
+    "verdict": "the instruction pointer took a left turn"
+  },
+  "Berry": {
+    "emoji": "🫐",
+    "verdict": "the microcontroller gets a tiny script"
+  },
+  "BibTeX Style": {
+    "emoji": "📚",
+    "verdict": "the bibliography ate the stack"
+  },
+  "Bicep": {
+    "emoji": "💪",
+    "verdict": "the cloud has a declarative gym routine"
+  },
+  "Bison": {
+    "emoji": "🐂",
+    "verdict": "shift, reduce, dispute custody"
+  },
+  "BitBake": {
+    "emoji": "🍞",
+    "verdict": "your dependency graph needs an oven"
+  },
+  "BlitzBasic": {
+    "emoji": "🏎️",
+    "verdict": "the game loop survived the nineties"
+  },
+  "BlitzMax": {
+    "emoji": "🏁",
+    "verdict": "BASIC discovered objects at full speed"
+  },
+  "Bluespec": {
+    "emoji": "🔷",
+    "verdict": "the hardware obeys atomic house rules"
+  },
+  "Bluespec BH": {
+    "emoji": "🔹",
+    "verdict": "the circuit arrived in Haskell notation"
+  },
+  "Boo": {
+    "emoji": "👻",
+    "verdict": "Python syntax haunts the CLR"
+  },
+  "Boogie": {
+    "emoji": "🕺",
+    "verdict": "the verifier wants the intermediate story"
+  },
+  "Brainfuck": {
+    "emoji": "🧠",
+    "verdict": "eight instructions, no witness protection"
+  },
+  "BrighterScript": {
+    "emoji": "📺",
+    "verdict": "the television finally got a type checker"
+  },
+  "Brightscript": {
+    "emoji": "📡",
+    "verdict": "your app must negotiate with a Roku"
+  },
+  "C": {
+    "emoji": "🗿",
+    "verdict": "foundation of civilization; mind the cracks"
+  },
+  "C#": {
+    "emoji": "🎯",
+    "verdict": "nullable warnings are the adult supervision"
+  },
+  "C++": {
+    "emoji": "🏭",
+    "verdict": "factory legacy containment zone"
+  },
+  "C2hs Haskell": {
+    "emoji": "🤝",
+    "verdict": "the pure function has a C accomplice"
+  },
+  "C3": {
+    "emoji": "🛠️",
+    "verdict": "C filed a request for modern conveniences"
+  },
+  "CAP CDS": {
+    "emoji": "🏬",
+    "verdict": "the data model brought a service contract"
+  },
+  "CLIPS": {
+    "emoji": "📎",
+    "verdict": "the rules have entered the agenda"
+  },
+  "CMake": {
+    "emoji": "🔨",
+    "verdict": "configure the configuration generator"
+  },
+  "COBOL": {
+    "emoji": "🏦",
+    "verdict": "the payroll has diplomatic immunity"
+  },
+  "CQL": {
+    "emoji": "🗝️",
+    "verdict": "the partition key has veto power"
+  },
+  "CUE": {
+    "emoji": "🎱",
+    "verdict": "configuration must satisfy the constraints"
+  },
+  "CWeb": {
+    "emoji": "📖",
+    "verdict": "the pointer has a literary backstory"
+  },
+  "Cadence": {
+    "emoji": "💳",
+    "verdict": "the resource refuses to be photocopied"
+  },
+  "Cairo": {
+    "emoji": "🏜️",
+    "verdict": "the execution trace needs a witness"
+  },
+  "Cairo Zero": {
+    "emoji": "🏺",
+    "verdict": "the proof predates the syntax renovation"
+  },
+  "CameLIGO": {
+    "emoji": "🐪",
+    "verdict": "the camel is signing a smart contract"
+  },
+  "Cangjie": {
+    "emoji": "🪶",
+    "verdict": ".cj has entered the compiler queue"
+  },
+  "Cap'n Proto": {
+    "emoji": "🚢",
+    "verdict": "protobuf after its author tried again"
+  },
+  "Carbon": {
+    "emoji": "💠",
+    "verdict": "C++ scheduled a succession meeting"
+  },
+  "CartoCSS": {
+    "emoji": "🗺️",
+    "verdict": "the map has strong opinions about roads"
+  },
+  "Ceylon": {
+    "emoji": "🫖",
+    "verdict": "the union types outlived the hype"
+  },
+  "Chapel": {
+    "emoji": "⛪",
+    "verdict": "the loop booked several locales"
+  },
+  "Charity": {
+    "emoji": "🕊️",
+    "verdict": "category theory requests executable mercy"
+  },
+  "ChucK": {
+    "emoji": "🎧",
+    "verdict": "time is a first-class band member"
+  },
+  "Circom": {
+    "emoji": "🔌",
+    "verdict": "the circuit cannot keep your secret badly"
+  },
+  "Cirru": {
+    "emoji": "🌿",
+    "verdict": "the parentheses went into hiding"
+  },
+  "Clarion": {
+    "emoji": "📇",
+    "verdict": "the database form remembers your employer"
+  },
+  "Clarity": {
+    "emoji": "🔍",
+    "verdict": "the contract refuses recursive ambitions"
+  },
+  "Classic ASP": {
+    "emoji": "🕷️",
+    "verdict": "server-side VBScript is still a crime scene"
+  },
+  "Clean": {
+    "emoji": "🧼",
+    "verdict": "uniqueness types confiscated the spare copy"
+  },
+  "Click": {
+    "emoji": "🔀",
+    "verdict": "the packets follow your little graph"
+  },
+  "Clojure": {
+    "emoji": "🍀",
+    "verdict": "the state changed; the value did not"
+  },
+  "Clue": {
+    "emoji": "🕵️",
+    "verdict": "Lua found curly braces at the scene"
+  },
+  "CodeQL": {
+    "emoji": "🚨",
+    "verdict": "query the code until it confesses"
+  },
+  "CoffeeScript": {
+    "emoji": "☕",
+    "verdict": "the braces left a forwarding address"
+  },
+  "ColdFusion": {
+    "emoji": "🧊",
+    "verdict": "the angle brackets called the database"
+  },
+  "ColdFusion CFC": {
+    "emoji": "🥶",
+    "verdict": "the component has a cfquery habit"
+  },
+  "Common Lisp": {
+    "emoji": "🪄",
+    "verdict": "the macro rewrote the terms of review"
+  },
+  "Common Workflow Language": {
+    "emoji": "🧬",
+    "verdict": "the pipeline has a portable paper trail"
+  },
+  "Component Pascal": {
+    "emoji": "🧱",
+    "verdict": "the module has a respectable family tree"
+  },
+  "Cool": {
+    "emoji": "🧑‍🎓",
+    "verdict": "the compiler is due before finals"
+  },
+  "Crystal": {
+    "emoji": "🔮",
+    "verdict": "Ruby-shaped code meets compiler custody"
+  },
+  "Csound": {
+    "emoji": "🎛️",
+    "verdict": "the orchestra is an executable document"
+  },
+  "Csound Document": {
+    "emoji": "🎚️",
+    "verdict": "the orchestra and score share a flat"
+  },
+  "Csound Score": {
+    "emoji": "🎵",
+    "verdict": "the notes arrived as event records"
+  },
+  "Cuda": {
+    "emoji": "🟩",
+    "verdict": "a thousand threads await one bad index"
+  },
+  "Curry": {
+    "emoji": "🍛",
+    "verdict": "the function left a logic variable open"
+  },
+  "Cycript": {
+    "emoji": "💉",
+    "verdict": "JavaScript slipped into the running process"
+  },
+  "Cypher": {
+    "emoji": "🕸️",
+    "verdict": "the relationship has an arrow on it"
+  },
+  "Cython": {
+    "emoji": "🐍",
+    "verdict": "Python got a pointer problem"
+  },
+  "D": {
+    "emoji": "🌓",
+    "verdict": "the garbage collector has an opt-out form"
+  },
+  "DIGITAL Command Language": {
+    "emoji": "🖥️",
+    "verdict": "the VMS prompt has seniority"
+  },
+  "DM": {
+    "emoji": "🚪",
+    "verdict": "the station runs on inherited variables"
+  },
+  "DTrace": {
+    "emoji": "🩻",
+    "verdict": "the running kernel is answering questions"
+  },
+  "Dafny": {
+    "emoji": "✅",
+    "verdict": "assertions have hired a theorem prover"
+  },
+  "Dart": {
+    "emoji": "🎯",
+    "verdict": "the widget tree has a sound type system"
+  },
+  "Daslang": {
+    "emoji": "🧵",
+    "verdict": "the game script brought a compiler"
+  },
+  "DataWeave": {
+    "emoji": "🧶",
+    "verdict": "the payload is undergoing transformation"
+  },
+  "DenizenScript": {
+    "emoji": "🧑‍🌾",
+    "verdict": "the NPC received a YAML-shaped itinerary"
+  },
+  "Dhall": {
+    "emoji": "🔒",
+    "verdict": "configuration cannot run away forever"
+  },
+  "Dockerfile": {
+    "emoji": "🐳",
+    "verdict": "the cache remembers the wrong layer"
+  },
+  "Dogescript": {
+    "emoji": "🐕",
+    "verdict": "such syntax, very compilation"
+  },
+  "Dune": {
+    "emoji": "🏜️",
+    "verdict": "the OCaml build has stopped improvising"
+  },
+  "Dylan": {
+    "emoji": "🎸",
+    "verdict": "multiple dispatch assembled a band"
+  },
+  "E": {
+    "emoji": "🔑",
+    "verdict": "the object grants exactly one capability"
+  },
+  "ECL": {
+    "emoji": "📊",
+    "verdict": "the data cluster wants a declaration"
+  },
+  "ECLiPSe": {
+    "emoji": "🌘",
+    "verdict": "the constraint solver joined Prolog"
+  },
+  "EQ": {
+    "emoji": "⚖️",
+    "verdict": "the string has three target-language alibis"
+  },
+  "Earthly": {
+    "emoji": "🌍",
+    "verdict": "the build packed its own container"
+  },
+  "EdgeQL": {
+    "emoji": "🔗",
+    "verdict": "the query brought structural expectations"
+  },
+  "Eiffel": {
+    "emoji": "🗼",
+    "verdict": "the caller signed a contract"
+  },
+  "Elixir": {
+    "emoji": "⚗️",
+    "verdict": "let it crash; the supervisor is awake"
+  },
+  "Elm": {
+    "emoji": "🌳",
+    "verdict": "the compiler rejected the impossible state"
+  },
+  "Elvish": {
+    "emoji": "🧝",
+    "verdict": "the shell pipeline learned about values"
+  },
+  "Elvish Transcript": {
+    "emoji": "📼",
+    "verdict": "the shell kept the conversation"
+  },
+  "Emacs Lisp": {
+    "emoji": "🐃",
+    "verdict": "the editor has eaten another application"
+  },
+  "EmberScript": {
+    "emoji": "🔥",
+    "verdict": "CoffeeScript moved into the Ember house"
+  },
+  "Erlang": {
+    "emoji": "📞",
+    "verdict": "nine nines, one enormous mailbox"
+  },
+  "Euphoria": {
+    "emoji": "😁",
+    "verdict": "the sequence has swallowed the data model"
+  },
+  "F#": {
+    "emoji": "🎻",
+    "verdict": "the discriminated union works for Microsoft"
+  },
+  "F*": {
+    "emoji": "⭐",
+    "verdict": "the effect needs a proof of good conduct"
+  },
+  "FIRRTL": {
+    "emoji": "🛤️",
+    "verdict": "the circuit is between representations"
+  },
+  "FLUX": {
+    "emoji": "🌀",
+    "verdict": "the server is a graph with a lock problem"
+  },
+  "FPP": {
+    "emoji": "🛰️",
+    "verdict": "the spacecraft components need a blueprint"
+  },
+  "Factor": {
+    "emoji": "🏗️",
+    "verdict": "the stack has a surprisingly good library"
+  },
+  "Fancy": {
+    "emoji": "🎩",
+    "verdict": "the messages insist on dressing up"
+  },
+  "Fantom": {
+    "emoji": "👤",
+    "verdict": "one source, several runtime hauntings"
+  },
+  "Faust": {
+    "emoji": "😈",
+    "verdict": "sold my soul for a clean signal graph"
+  },
+  "Fennel": {
+    "emoji": "🌱",
+    "verdict": "Lua accepted a shipment of parentheses"
+  },
+  "Filebench WML": {
+    "emoji": "💽",
+    "verdict": "the filesystem has a scheduled bad day"
+  },
+  "Filterscript": {
+    "emoji": "🧃",
+    "verdict": "the compute kernel surrendered some freedom"
+  },
+  "Flix": {
+    "emoji": "🦊",
+    "verdict": "the effect system noticed your side hustle"
+  },
+  "Fluent": {
+    "emoji": "🌐",
+    "verdict": "even the plural has branching logic"
+  },
+  "Forth": {
+    "emoji": "📚",
+    "verdict": "the stack comment is your only witness"
+  },
+  "Fortran": {
+    "emoji": "🧪",
+    "verdict": "the simulation has tenure"
+  },
+  "Fortran Free Form": {
+    "emoji": "🥼",
+    "verdict": "the simulation escaped column seven"
+  },
+  "FreeBASIC": {
+    "emoji": "🆓",
+    "verdict": "BASIC has acquired pointers"
+  },
+  "FreeMarker": {
+    "emoji": "🖨️",
+    "verdict": "the template has become a second program"
+  },
+  "Frege": {
+    "emoji": "🧠",
+    "verdict": "the pure function has a JVM address"
+  },
+  "Futhark": {
+    "emoji": "🪨",
+    "verdict": "the array program asked for a GPU"
+  },
+  "G-code": {
+    "emoji": "🛠️",
+    "verdict": "the off-by-one error is now physical"
+  },
+  "GAML": {
+    "emoji": "🐜",
+    "verdict": "the simulated agents formed a society"
+  },
+  "GAMS": {
+    "emoji": "📉",
+    "verdict": "the optimum disagrees with management"
+  },
+  "GAP": {
+    "emoji": "🔢",
+    "verdict": "the group has finally closed"
+  },
+  "GCC Machine Description": {
+    "emoji": "⚙️",
+    "verdict": "the compiler is describing its own teeth"
+  },
+  "GDB": {
+    "emoji": "🐛",
+    "verdict": "the breakpoint has a command script"
+  },
+  "GDScript": {
+    "emoji": "🤖",
+    "verdict": "the node path moved again"
+  },
+  "GDShader": {
+    "emoji": "🎨",
+    "verdict": "the sprite wants custom lighting"
+  },
+  "GLSL": {
+    "emoji": "💡",
+    "verdict": "the pixels obey; the driver negotiates"
+  },
+  "GSC": {
+    "emoji": "🎮",
+    "verdict": "the match rules escaped into a script"
+  },
+  "Game Maker Language": {
+    "emoji": "🕹️",
+    "verdict": "the instance exists until the event says no"
+  },
+  "Genero 4gl": {
+    "emoji": "🗃️",
+    "verdict": "the business form has a long lineage"
+  },
+  "Genie": {
+    "emoji": "🧞",
+    "verdict": "indentation summoned a GObject"
+  },
+  "Genshi": {
+    "emoji": "🪡",
+    "verdict": "the XML template grew Python expressions"
+  },
+  "Gentoo Ebuild": {
+    "emoji": "🛠️",
+    "verdict": "the shell script has USE-conditional moods"
+  },
+  "Gentoo Eclass": {
+    "emoji": "🧬",
+    "verdict": "the build script inherited more shell"
+  },
+  "Gherkin": {
+    "emoji": "🥒",
+    "verdict": "Given optimism, When run, Then undefined"
+  },
+  "Gleam": {
+    "emoji": "✨",
+    "verdict": "the compiler supervises the supervision"
+  },
+  "Glimmer JS": {
+    "emoji": "🪩",
+    "verdict": "the template moved into the JavaScript"
+  },
+  "Glimmer TS": {
+    "emoji": "💎",
+    "verdict": "the template has a typed roommate"
+  },
+  "Glyph": {
+    "emoji": "🕸️",
+    "verdict": "the mesh has Tcl-shaped instructions"
+  },
+  "Gno": {
+    "emoji": "🧿",
+    "verdict": "Go-shaped code entered the ledger"
+  },
+  "Gnuplot": {
+    "emoji": "📈",
+    "verdict": "the plot thickens after the semicolon"
+  },
+  "Go": {
+    "emoji": "🐹",
+    "verdict": "boring enough for the clanker"
+  },
+  "Golo": {
+    "emoji": "🪀",
+    "verdict": "the JVM accepted a dynamic guest"
+  },
+  "Gosu": {
+    "emoji": "🦆",
+    "verdict": "the JVM found another type system"
+  },
+  "Grace": {
+    "emoji": "🎓",
+    "verdict": "the objects are here to teach a lesson"
+  },
+  "Grammatical Framework": {
+    "emoji": "🗣️",
+    "verdict": "the grammar has a multilingual alibi"
+  },
+  "Groovy": {
+    "emoji": "🪩",
+    "verdict": "the JVM left the types at home"
+  },
+  "Groovy Server Pages": {
+    "emoji": "📄",
+    "verdict": "the page is dynamically overqualified"
+  },
+  "HCL": {
+    "emoji": "🏗️",
+    "verdict": "the plan contains a surprise replacement"
+  },
+  "HIP": {
+    "emoji": "🦛",
+    "verdict": "the GPU kernel is changing landlords"
+  },
+  "HLSL": {
+    "emoji": "🔦",
+    "verdict": "the lighting bug has a semantic annotation"
+  },
+  "Hack": {
+    "emoji": "🪓",
+    "verdict": "PHP has been assigned a type supervisor"
+  },
+  "Harbour": {
+    "emoji": "⚓",
+    "verdict": "the xBase fleet refuses to decommission"
+  },
+  "Hare": {
+    "emoji": "🐇",
+    "verdict": "the allocator is explicitly your problem"
+  },
+  "Haskell": {
+    "emoji": "🎓",
+    "verdict": "too much mathematics, ideologically correct"
+  },
+  "Haxe": {
+    "emoji": "🪓",
+    "verdict": "the compiler has too many destinations"
+  },
+  "HiveQL": {
+    "emoji": "🐝",
+    "verdict": "the query woke the entire data warehouse"
+  },
+  "HolyC": {
+    "emoji": "⛪",
+    "verdict": "the kernel has received a revelation"
+  },
+  "Hurl": {
+    "emoji": "🥌",
+    "verdict": "the HTTP response must match the paperwork"
+  },
+  "Hy": {
+    "emoji": "🦑",
+    "verdict": "Python imported a box of parentheses"
+  },
+  "HyPhy": {
+    "emoji": "🌳",
+    "verdict": "the phylogeny wants a likelihood estimate"
+  },
+  "IDL": {
+    "emoji": "🌌",
+    "verdict": "the array came from an observatory"
+  },
+  "IGOR Pro": {
+    "emoji": "🌊",
+    "verdict": "the wave has a lab notebook"
+  },
+  "IL Assembly": {
+    "emoji": "🧱",
+    "verdict": "the CLR sees your evaluation stack"
+  },
+  "ISPC": {
+    "emoji": "🧮",
+    "verdict": "one program, several lanes of trouble"
+  },
+  "Idris": {
+    "emoji": "🦚",
+    "verdict": "the vector length is not a suggestion"
+  },
+  "ImHex Pattern Language": {
+    "emoji": "🔍",
+    "verdict": "the binary has been given a skeleton"
+  },
+  "ImageJ Macro": {
+    "emoji": "🔬",
+    "verdict": "the pixels must pass the lab protocol"
+  },
+  "Imba": {
+    "emoji": "🛼",
+    "verdict": "the DOM took up memoization"
+  },
+  "Inform 7": {
+    "emoji": "📖",
+    "verdict": "the compiler suspects this room description"
+  },
+  "Ink": {
+    "emoji": "🖋️",
+    "verdict": "the story branched without asking you"
+  },
+  "Inno Setup": {
+    "emoji": "📦",
+    "verdict": "the installer has Pascal in the basement"
+  },
+  "Io": {
+    "emoji": "🪞",
+    "verdict": "the prototype sent itself another message"
+  },
+  "Ioke": {
+    "emoji": "🃏",
+    "verdict": "the message can rewrite the conversation"
+  },
+  "Isabelle": {
+    "emoji": "🧾",
+    "verdict": "the proof assistant demands receipts"
+  },
+  "Isabelle ROOT": {
+    "emoji": "📂",
+    "verdict": "even the proof session has a manifest"
+  },
+  "J": {
+    "emoji": "🚂",
+    "verdict": "the verbs have formed a train"
+  },
+  "JASS": {
+    "emoji": "🧙",
+    "verdict": "the Warcraft trigger has a leak"
+  },
+  "JCL": {
+    "emoji": "🗂️",
+    "verdict": "the job needs another DD statement"
+  },
+  "JFlex": {
+    "emoji": "🧽",
+    "verdict": "the lexer brought Java to the regex fight"
+  },
+  "JSONiq": {
+    "emoji": "🧊",
+    "verdict": "the JSON acquired a query habit"
+  },
+  "Jac": {
+    "emoji": "🕷️",
+    "verdict": "the walker has business in your graph"
+  },
+  "Jai": {
+    "emoji": "🎮",
+    "verdict": "the game compiler is on the guest list"
+  },
+  "Janet": {
+    "emoji": "🧵",
+    "verdict": "the Lisp fits in your utility drawer"
+  },
+  "Jasmin": {
+    "emoji": "🌼",
+    "verdict": "the bytecode came with assembly instructions"
+  },
+  "Java": {
+    "emoji": "☕",
+    "verdict": "surprisingly difficult to kill"
+  },
+  "Java Server Pages": {
+    "emoji": "📰",
+    "verdict": "the servlet is hiding in the wallpaper"
+  },
+  "Java Template Engine": {
+    "emoji": "🖨️",
+    "verdict": "the HTML must survive compilation"
+  },
+  "JavaScript": {
+    "emoji": "🍌",
+    "verdict": "the coercion had other plans"
+  },
+  "JavaScript+ERB": {
+    "emoji": "🪆",
+    "verdict": "Ruby generated the coercion problem"
+  },
+  "JetBrains MPS": {
+    "emoji": "🧱",
+    "verdict": "the syntax is no longer a text file"
+  },
+  "Jison": {
+    "emoji": "🦬",
+    "verdict": "the parser generator runs on npm time"
+  },
+  "Jison Lex": {
+    "emoji": "🔍",
+    "verdict": "the JavaScript lexer has regular concerns"
+  },
+  "Jolie": {
+    "emoji": "💌",
+    "verdict": "the services are having a conversation"
+  },
+  "Jsonnet": {
+    "emoji": "🪆",
+    "verdict": "JSON acquired inheritance and opinions"
+  },
+  "Julia": {
+    "emoji": "💜",
+    "verdict": "multiple dispatch has chosen your destiny"
+  },
+  "Julia REPL": {
+    "emoji": "📟",
+    "verdict": "the dispatch argument is on the record"
+  },
+  "Just": {
+    "emoji": "🤏",
+    "verdict": "a command runner that admits what it is"
+  },
+  "KCL": {
+    "emoji": "🏷️",
+    "verdict": "the config has a type-checking chaperone"
+  },
+  "KFramework": {
+    "emoji": "🧊",
+    "verdict": "the language semantics are executable now"
+  },
+  "KRL": {
+    "emoji": "🦾",
+    "verdict": "the robot arm wants coordinates"
+  },
+  "Kaitai Struct": {
+    "emoji": "🦴",
+    "verdict": "the bytes finally have a birth certificate"
+  },
+  "KakouneScript": {
+    "emoji": "🥋",
+    "verdict": "select first, panic second"
+  },
+  "KerboScript": {
+    "emoji": "🚀",
+    "verdict": "the rocket accepts scripts, not apologies"
+  },
+  "KoLmafia ASH": {
+    "emoji": "🍸",
+    "verdict": "the browser adventure has been outsourced"
+  },
+  "Koka": {
+    "emoji": "🥥",
+    "verdict": "the effects must introduce themselves"
+  },
+  "Kotlin": {
+    "emoji": "🪁",
+    "verdict": "the null has been escorted out"
+  },
+  "LFE": {
+    "emoji": "☎️",
+    "verdict": "the Erlang node grew parentheses"
+  },
+  "LLVM": {
+    "emoji": "🛤️",
+    "verdict": "the IR knows where your values came from"
+  },
+  "LOLCODE": {
+    "emoji": "😹",
+    "verdict": "I CAN HAZ a reproducible build?"
+  },
+  "LSL": {
+    "emoji": "🏝️",
+    "verdict": "the virtual object has an event problem"
+  },
+  "LabVIEW": {
+    "emoji": "🔌",
+    "verdict": "the source code needs cable management"
+  },
+  "Lambdapi": {
+    "emoji": "🔱",
+    "verdict": "the rewrite rule owes a proof"
+  },
+  "Langium": {
+    "emoji": "🚂",
+    "verdict": "the grammar wants its own language server"
+  },
+  "Lasso": {
+    "emoji": "🪢",
+    "verdict": "the web request got roped into a database"
+  },
+  "Lean": {
+    "emoji": "🧑‍⚖️",
+    "verdict": "the clanker must provide a proof"
+  },
+  "Lean 4": {
+    "emoji": "⚖️",
+    "verdict": "the clanker must provide a proof"
+  },
+  "Leo": {
+    "emoji": "🦁",
+    "verdict": "the private computation wants a witness"
+  },
+  "Lex": {
+    "emoji": "🔎",
+    "verdict": "the token has matched a regular suspect"
+  },
+  "LigoLANG": {
+    "emoji": "🪙",
+    "verdict": "the smart contract has compiler paperwork"
+  },
+  "LilyPond": {
+    "emoji": "🎼",
+    "verdict": "the semicolon is not a musical rest"
+  },
+  "Limbo": {
+    "emoji": "🚪",
+    "verdict": "the channel leads into the Inferno"
+  },
+  "Linear Programming": {
+    "emoji": "📏",
+    "verdict": "the objective is subject to reality"
+  },
+  "Linker Script": {
+    "emoji": "🧷",
+    "verdict": "put the bytes exactly here, or else"
+  },
+  "Liquidsoap": {
+    "emoji": "🧴",
+    "verdict": "the radio station is a typed expression"
+  },
+  "Literate Agda": {
+    "emoji": "📓",
+    "verdict": "the essay still owes a proof"
+  },
+  "Literate CoffeeScript": {
+    "emoji": "☕",
+    "verdict": "the missing braces have footnotes"
+  },
+  "Literate Haskell": {
+    "emoji": "📔",
+    "verdict": "the monad came with an essay"
+  },
+  "LiveCode Script": {
+    "emoji": "🗃️",
+    "verdict": "the card stack is still taking messages"
+  },
+  "LiveScript": {
+    "emoji": "🌿",
+    "verdict": "the function has several punctuation marks"
+  },
+  "Lobster": {
+    "emoji": "🦞",
+    "verdict": "the compiler serves lifetime analysis"
+  },
+  "Logos": {
+    "emoji": "🪝",
+    "verdict": "Objective-C got hooked mid-conversation"
+  },
+  "Logtalk": {
+    "emoji": "🗨️",
+    "verdict": "the Prolog object has a question for you"
+  },
+  "LookML": {
+    "emoji": "📊",
+    "verdict": "the metric is defined, unlike the meeting"
+  },
+  "LoomScript": {
+    "emoji": "🧶",
+    "verdict": "the game script is caught in the loom"
+  },
+  "Lua": {
+    "emoji": "🌙",
+    "verdict": "everything is a table, including the plan"
+  },
+  "Luau": {
+    "emoji": "🧊",
+    "verdict": "the table has a type checker now"
+  },
+  "M": {
+    "emoji": "🏥",
+    "verdict": "the global variable has a patient record"
+  },
+  "M4": {
+    "emoji": "🪆",
+    "verdict": "the quotation marks are eating each other"
+  },
+  "M4Sugar": {
+    "emoji": "🍬",
+    "verdict": "the macro trap has a sweeter wrapper"
+  },
+  "MATLAB": {
+    "emoji": "📐",
+    "verdict": "the matrix has a license requirement"
+  },
+  "MAXScript": {
+    "emoji": "🫖",
+    "verdict": "the teapot has become programmable"
+  },
+  "MLIR": {
+    "emoji": "🪜",
+    "verdict": "the IR has another level to discuss"
+  },
+  "MQL4": {
+    "emoji": "📉",
+    "verdict": "the backtest has excellent hindsight"
+  },
+  "MQL5": {
+    "emoji": "📈",
+    "verdict": "the trading robot wants a second opinion"
+  },
+  "MUF": {
+    "emoji": "🏰",
+    "verdict": "the dungeon is hiding a data stack"
+  },
+  "Macaulay2": {
+    "emoji": "💍",
+    "verdict": "the ring has computational demands"
+  },
+  "Makefile": {
+    "emoji": "🔧",
+    "verdict": "the tab character has veto power"
+  },
+  "Mako": {
+    "emoji": "🦈",
+    "verdict": "the template is mostly Python now"
+  },
+  "Mathematical Programming System": {
+    "emoji": "📋",
+    "verdict": "the optimum arrived in a fixed-width form"
+  },
+  "Max": {
+    "emoji": "🎛️",
+    "verdict": "the patch cables are the program"
+  },
+  "MeTTa": {
+    "emoji": "🧠",
+    "verdict": "the atoms are having a symbolic discussion"
+  },
+  "Mercury": {
+    "emoji": "🪐",
+    "verdict": "the logic must declare its intentions"
+  },
+  "Meson": {
+    "emoji": "🧱",
+    "verdict": "the build system declines recursive drama"
+  },
+  "Metal": {
+    "emoji": "🪙",
+    "verdict": "the GPU speaks with an Apple accent"
+  },
+  "MiniD": {
+    "emoji": "🧳",
+    "verdict": "the scripting VM packed light"
+  },
+  "MiniScript": {
+    "emoji": "📝",
+    "verdict": "the script has a deliberately small menu"
+  },
+  "MiniZinc": {
+    "emoji": "🧮",
+    "verdict": "the constraints handle the wishful thinking"
+  },
+  "Mint": {
+    "emoji": "🌿",
+    "verdict": "the web app wants algebraic reassurance"
+  },
+  "Mirah": {
+    "emoji": "🪞",
+    "verdict": "Ruby-shaped syntax brought static papers"
+  },
+  "Modelica": {
+    "emoji": "🏎️",
+    "verdict": "the equations decide which way is input"
+  },
+  "Modula-2": {
+    "emoji": "📦",
+    "verdict": "the interface filed separately"
+  },
+  "Modula-3": {
+    "emoji": "🗄️",
+    "verdict": "the systems code brought safer paperwork"
+  },
+  "Module Management System": {
+    "emoji": "🏢",
+    "verdict": "the VMS build has institutional memory"
+  },
+  "Mojo": {
+    "emoji": "🔥",
+    "verdict": "Python syntax applied for systems work"
+  },
+  "Monkey": {
+    "emoji": "🐒",
+    "verdict": "the game build is swinging between targets"
+  },
+  "Monkey C": {
+    "emoji": "⌚",
+    "verdict": "the watch is running your callback"
+  },
+  "Moocode": {
+    "emoji": "🐄",
+    "verdict": "the room object has acquired a verb"
+  },
+  "MoonBit": {
+    "emoji": "🌘",
+    "verdict": "the compiler has lunar deployment plans"
+  },
+  "MoonScript": {
+    "emoji": "🌒",
+    "verdict": "Lua put on indentation"
+  },
+  "Motoko": {
+    "emoji": "🏍️",
+    "verdict": "the actor has a persistent address"
+  },
+  "Motorola 68K Assembly": {
+    "emoji": "🎛️",
+    "verdict": "the address register remembers the Amiga"
+  },
+  "Move": {
+    "emoji": "📦",
+    "verdict": "the asset cannot be casually copied"
+  },
+  "Myghty": {
+    "emoji": "🏚️",
+    "verdict": "the template has a Python basement"
+  },
+  "NASL": {
+    "emoji": "🧫",
+    "verdict": "the scanner is checking your assumptions"
+  },
+  "NCL": {
+    "emoji": "🌦️",
+    "verdict": "the climate data wants another contour"
+  },
+  "NMODL": {
+    "emoji": "🧠",
+    "verdict": "the ion channel has a source file"
+  },
+  "NSIS": {
+    "emoji": "📦",
+    "verdict": "the installer brought its own stack machine"
+  },
+  "NWScript": {
+    "emoji": "🧙",
+    "verdict": "the dungeon event needs a handler"
+  },
+  "Nasal": {
+    "emoji": "✈️",
+    "verdict": "the flight simulator has a scripting nose"
+  },
+  "Nearley": {
+    "emoji": "🔭",
+    "verdict": "the parser accepts more ambiguity than you"
+  },
+  "Nemerle": {
+    "emoji": "🪄",
+    "verdict": "the macro expanded inside the CLR"
+  },
+  "NetLinx": {
+    "emoji": "📽️",
+    "verdict": "the conference room has an event loop"
+  },
+  "NetLinx+ERB": {
+    "emoji": "🎬",
+    "verdict": "Ruby is generating the conference room"
+  },
+  "NetLogo": {
+    "emoji": "🐢",
+    "verdict": "the turtles have received their orders"
+  },
+  "NewLisp": {
+    "emoji": "🆕",
+    "verdict": "the parentheses requested a fresh runtime"
+  },
+  "Nextflow": {
+    "emoji": "🧬",
+    "verdict": "the pipeline has scheduled more genomes"
+  },
+  "Nickel": {
+    "emoji": "🪙",
+    "verdict": "the config is contractually obligated"
+  },
+  "Nim": {
+    "emoji": "👑",
+    "verdict": "the macro has compile-time privileges"
+  },
+  "Nit": {
+    "emoji": "🔍",
+    "verdict": "the class has one more refinement"
+  },
+  "Nix": {
+    "emoji": "❄️",
+    "verdict": "configuration must be a pure function"
+  },
+  "Noir": {
+    "emoji": "🌑",
+    "verdict": "prove it without telling us what it was"
+  },
+  "Nu": {
+    "emoji": "🦑",
+    "verdict": "the Objective-C message grew parentheses"
+  },
+  "NumPy": {
+    "emoji": "🔢",
+    "verdict": "broadcasting made the wrong shape plausible"
+  },
+  "Nushell": {
+    "emoji": "🐚",
+    "verdict": "the pipeline stopped pretending to be text"
+  },
+  "OCaml": {
+    "emoji": "🐫",
+    "verdict": "honorary Rust ancestor"
+  },
+  "OMNeT++ MSG": {
+    "emoji": "✉️",
+    "verdict": "the simulated message needs a declaration"
+  },
+  "OMNeT++ NED": {
+    "emoji": "📡",
+    "verdict": "the simulated network needs more gates"
+  },
+  "Oberon": {
+    "emoji": "🏔️",
+    "verdict": "the module has no patience for ornament"
+  },
+  "ObjectScript": {
+    "emoji": "🏥",
+    "verdict": "the database object has clinical experience"
+  },
+  "Objective-C": {
+    "emoji": "📬",
+    "verdict": "the message went to nil and nobody objected"
+  },
+  "Objective-C++": {
+    "emoji": "🧟",
+    "verdict": "two object models entered one source file"
+  },
+  "Objective-J": {
+    "emoji": "☂️",
+    "verdict": "the browser received a Cocoa-shaped message"
+  },
+  "Odin": {
+    "emoji": "🪓",
+    "verdict": "the allocator is in the meeting context"
+  },
+  "Omgrofl": {
+    "emoji": "🤣",
+    "verdict": "the identifiers are laughing at the review"
+  },
+  "Opa": {
+    "emoji": "🧑‍🍳",
+    "verdict": "the client and server share the recipe"
+  },
+  "Opal": {
+    "emoji": "💍",
+    "verdict": "the functional module is under appraisal"
+  },
+  "Open Policy Agent": {
+    "emoji": "👮",
+    "verdict": "the access decision must survive a query"
+  },
+  "OpenCL": {
+    "emoji": "🦑",
+    "verdict": "the C pointer has reached another device"
+  },
+  "OpenEdge ABL": {
+    "emoji": "🏬",
+    "verdict": "the transaction has business seniority"
+  },
+  "OpenQASM": {
+    "emoji": "⚛️",
+    "verdict": "the gate has quantum scheduling needs"
+  },
+  "OpenRC runscript": {
+    "emoji": "🔛",
+    "verdict": "the shell script is now a service manager"
+  },
+  "OpenSCAD": {
+    "emoji": "🧊",
+    "verdict": "the solid model is a reproducible argument"
+  },
+  "OverPy": {
+    "emoji": "🦸",
+    "verdict": "the Overwatch rule has a transpiler"
+  },
+  "OverpassQL": {
+    "emoji": "🗺️",
+    "verdict": "the map must confess where the cafés are"
+  },
+  "Ox": {
+    "emoji": "🐂",
+    "verdict": "the econometric matrix needs a model"
+  },
+  "Oxygene": {
+    "emoji": "🫧",
+    "verdict": "Pascal has several runtime passports"
+  },
+  "Oz": {
+    "emoji": "🌈",
+    "verdict": "the logic variable is waiting for news"
+  },
+  "P4": {
+    "emoji": "📮",
+    "verdict": "the packet header has a parsing itinerary"
+  },
+  "PDDL": {
+    "emoji": "🗓️",
+    "verdict": "the planner refuses your missing precondition"
+  },
+  "PEG.js": {
+    "emoji": "📐",
+    "verdict": "the first matching choice wins custody"
+  },
+  "PHP": {
+    "emoji": "🐘",
+    "verdict": "the request brought historical baggage"
+  },
+  "PLSQL": {
+    "emoji": "🏛️",
+    "verdict": "the stored procedure has Oracle privileges"
+  },
+  "PLpgSQL": {
+    "emoji": "🐘",
+    "verdict": "the transaction is hosting a small program"
+  },
+  "POV-Ray SDL": {
+    "emoji": "🔮",
+    "verdict": "the sphere is waiting for its photons"
+  },
+  "Pact": {
+    "emoji": "🤝",
+    "verdict": "the contract has a pact about contracts"
+  },
+  "Pan": {
+    "emoji": "🍳",
+    "verdict": "the configuration is under typed supervision"
+  },
+  "Papyrus": {
+    "emoji": "📜",
+    "verdict": "the quest script is still waiting"
+  },
+  "Parrot": {
+    "emoji": "🦜",
+    "verdict": "the VM speaks several dynamic dialects"
+  },
+  "Parrot Assembly": {
+    "emoji": "🪽",
+    "verdict": "the parrot wants explicit instructions"
+  },
+  "Parrot Internal Representation": {
+    "emoji": "🪶",
+    "verdict": "the parrot has an intermediate explanation"
+  },
+  "Pascal": {
+    "emoji": "📐",
+    "verdict": "begin the paperwork end"
+  },
+  "Pawn": {
+    "emoji": "♟️",
+    "verdict": "the game server has a very small VM"
+  },
+  "Pep8": {
+    "emoji": "🎓",
+    "verdict": "the assembly homework is not a style guide"
+  },
+  "Perl": {
+    "emoji": "🐪",
+    "verdict": "immediate investigation required"
+  },
+  "PicoLisp": {
+    "emoji": "🔬",
+    "verdict": "the Lisp fits where the ORM used to be"
+  },
+  "PigLatin": {
+    "emoji": "🐖",
+    "verdict": "the dataflow has wandered into Hadoop"
+  },
+  "Pike": {
+    "emoji": "🐟",
+    "verdict": "the dynamic program brought optional types"
+  },
+  "Pkl": {
+    "emoji": "🥒",
+    "verdict": "the config has been properly pickled"
+  },
+  "PogoScript": {
+    "emoji": "🦘",
+    "verdict": "the JavaScript jumped a syntax fence"
+  },
+  "Polar": {
+    "emoji": "🐻‍❄️",
+    "verdict": "the permission needs a logical argument"
+  },
+  "Pony": {
+    "emoji": "🐎",
+    "verdict": "the actor cannot share your bad reference"
+  },
+  "Portugol": {
+    "emoji": "🇵🇹",
+    "verdict": "the pseudocode is taking attendance"
+  },
+  "Power Query": {
+    "emoji": "🔌",
+    "verdict": "the spreadsheet has a functional secret"
+  },
+  "PowerBuilder": {
+    "emoji": "🏗️",
+    "verdict": "the DataWindow has outlived the roadmap"
+  },
+  "PowerShell": {
+    "emoji": "🔷",
+    "verdict": "the pipeline is full of actual objects"
+  },
+  "Praat": {
+    "emoji": "🗣️",
+    "verdict": "the waveform has been asked to speak up"
+  },
+  "Pro*C": {
+    "emoji": "🧷",
+    "verdict": "the SQL is hiding inside the C"
+  },
+  "Processing": {
+    "emoji": "🖌️",
+    "verdict": "the sketch has a Java-shaped heartbeat"
+  },
+  "Procfile": {
+    "emoji": "🚦",
+    "verdict": "the whole language is a launch schedule"
+  },
+  "Prolog": {
+    "emoji": "🦉",
+    "verdict": "the answer is yes, no, or still searching"
+  },
+  "Promela": {
+    "emoji": "🔄",
+    "verdict": "the model checker found your interleaving"
+  },
+  "Propeller Spin": {
+    "emoji": "🌀",
+    "verdict": "the microcontroller has several cogs turning"
+  },
+  "Puppet": {
+    "emoji": "🪆",
+    "verdict": "the server must match its declared costume"
+  },
+  "PureBasic": {
+    "emoji": "🧴",
+    "verdict": "BASIC has a native-code hobby"
+  },
+  "PureScript": {
+    "emoji": "🕊️",
+    "verdict": "the effect row has seen your browser plans"
+  },
+  "Pyret": {
+    "emoji": "🏴‍☠️",
+    "verdict": "the teaching language brought test examples"
+  },
+  "Python": {
+    "emoji": "🐍",
+    "verdict": "acceptable clanker glue"
+  },
+  "Python console": {
+    "emoji": "📟",
+    "verdict": "acceptable glue, with the prompts attached"
+  },
+  "Q#": {
+    "emoji": "⚛️",
+    "verdict": "the qubit cannot be casually inspected"
+  },
+  "QML": {
+    "emoji": "🪟",
+    "verdict": "the binding loop is decorating the UI"
+  },
+  "QMake": {
+    "emoji": "🧰",
+    "verdict": "the project file has Qt-shaped conditions"
+  },
+  "Qt Script": {
+    "emoji": "📺",
+    "verdict": "the widget is speaking vintage ECMAScript"
+  },
+  "Quake": {
+    "emoji": "🫨",
+    "verdict": "the Modula-3 build has its own tremors"
+  },
+  "QuakeC": {
+    "emoji": "👹",
+    "verdict": "the monster AI has C-shaped orders"
+  },
+  "QuickBASIC": {
+    "emoji": "⚡",
+    "verdict": "the executable came from the school lab"
+  },
+  "Quint": {
+    "emoji": "🎲",
+    "verdict": "the state machine must show its next move"
+  },
+  "R": {
+    "emoji": "📊",
+    "verdict": "the vector recycled your assumptions"
+  },
+  "RAScript": {
+    "emoji": "🏆",
+    "verdict": "the achievement requires a memory address"
+  },
+  "REALbasic": {
+    "emoji": "🪟",
+    "verdict": "the form designer remembers the rebrand"
+  },
+  "REXX": {
+    "emoji": "🦖",
+    "verdict": "the command interpreter has mainframe manners"
+  },
+  "RPC": {
+    "emoji": "📡",
+    "verdict": "the wire format wants a declaration"
+  },
+  "RPGLE": {
+    "emoji": "🧾",
+    "verdict": "the business record has fixed opinions"
+  },
+  "Racket": {
+    "emoji": "🎾",
+    "verdict": "the language may declare another language"
+  },
+  "Ragel": {
+    "emoji": "🧩",
+    "verdict": "the state machine lives between C statements"
+  },
+  "Raku": {
+    "emoji": "🦋",
+    "verdict": "the grammar is part of the conversation"
+  },
+  "Rascal": {
+    "emoji": "😼",
+    "verdict": "the metaprogram is inspecting the program"
+  },
+  "ReScript": {
+    "emoji": "♻️",
+    "verdict": "the JavaScript has passed through customs"
+  },
+  "Reason": {
+    "emoji": "🧠",
+    "verdict": "the OCaml types changed their punctuation"
+  },
+  "ReasonLIGO": {
+    "emoji": "🪙",
+    "verdict": "the contract has Reason-shaped clauses"
+  },
+  "Rebol": {
+    "emoji": "📨",
+    "verdict": "the data is proposing a new dialect"
+  },
+  "Red": {
+    "emoji": "🔴",
+    "verdict": "the dialect has low-level ambitions"
+  },
+  "Redcode": {
+    "emoji": "⚔️",
+    "verdict": "the program is trying to kill another program"
+  },
+  "Redscript": {
+    "emoji": "🌃",
+    "verdict": "the cyberpunk needs a typed patch"
+  },
+  "Ren'Py": {
+    "emoji": "💌",
+    "verdict": "the dialogue has a Python escape hatch"
+  },
+  "RenderScript": {
+    "emoji": "🎞️",
+    "verdict": "the Android kernel has parallel intentions"
+  },
+  "Rez": {
+    "emoji": "🗃️",
+    "verdict": "the resource fork left a script behind"
+  },
+  "Rhai": {
+    "emoji": "🍵",
+    "verdict": "the Rust host hired a small interpreter"
+  },
+  "Ring": {
+    "emoji": "💍",
+    "verdict": "the syntax is entertaining several paradigms"
+  },
+  "RobotFramework": {
+    "emoji": "🤖",
+    "verdict": "the keyword passed; the test is suspicious"
+  },
+  "Roc": {
+    "emoji": "🦅",
+    "verdict": "the pure app has a platform chaperone"
+  },
+  "Rocq Prover": {
+    "emoji": "🐓",
+    "verdict": "Qed is a stronger claim than looks good"
+  },
+  "Rouge": {
+    "emoji": "💄",
+    "verdict": "the Lisp has a Ruby-colored accent"
+  },
+  "RouterOS Script": {
+    "emoji": "📶",
+    "verdict": "the router has accepted imperative advice"
+  },
+  "Ruby": {
+    "emoji": "💎",
+    "verdict": "Linguist Incident"
+  },
+  "Rust": {
+    "emoji": "🦀",
+    "verdict": "REWRITE EVERYTHING"
+  },
+  "SAS": {
+    "emoji": "📊",
+    "verdict": "the data step has licensing conditions"
+  },
+  "SIP": {
+    "emoji": "📞",
+    "verdict": "the Python binding needs C++ paperwork"
+  },
+  "SMT": {
+    "emoji": "🧮",
+    "verdict": "the solver has found your counterexample"
+  },
+  "SQF": {
+    "emoji": "🪖",
+    "verdict": "the battlefield is waiting for a semicolon"
+  },
+  "SQLPL": {
+    "emoji": "🗃️",
+    "verdict": "the database procedure has DB2 paperwork"
+  },
+  "SWIG": {
+    "emoji": "🧵",
+    "verdict": "the wrapper generator has crossed a border"
+  },
+  "Sage": {
+    "emoji": "🌿",
+    "verdict": "the notebook assembled a mathematics union"
+  },
+  "Sail": {
+    "emoji": "⛵",
+    "verdict": "the instruction set has executable semantics"
+  },
+  "Salt": {
+    "emoji": "🧂",
+    "verdict": "the desired state is heavily seasoned"
+  },
+  "Scala": {
+    "emoji": "🪜",
+    "verdict": "the implicit has entered the witness box"
+  },
+  "Scenic": {
+    "emoji": "🚗",
+    "verdict": "the scenario sampled a suspicious pedestrian"
+  },
+  "Scheme": {
+    "emoji": "🌱",
+    "verdict": "the continuation kept the receipt"
+  },
+  "Scilab": {
+    "emoji": "🔬",
+    "verdict": "the matrix has an open laboratory"
+  },
+  "Self": {
+    "emoji": "🪞",
+    "verdict": "the live prototype is taking your messages"
+  },
+  "ShaderLab": {
+    "emoji": "🧪",
+    "verdict": "the shader has another language inside"
+  },
+  "Shell": {
+    "emoji": "🐚",
+    "verdict": "one unquoted expansion from archaeology"
+  },
+  "ShellSession": {
+    "emoji": "📜",
+    "verdict": "the prompt is not part of the command"
+  },
+  "Shen": {
+    "emoji": "🧘",
+    "verdict": "the pattern match has a logic side business"
+  },
+  "Sieve": {
+    "emoji": "📬",
+    "verdict": "the mail filter declines general computation"
+  },
+  "Singularity": {
+    "emoji": "📦",
+    "verdict": "the HPC container packed a recipe"
+  },
+  "Slang": {
+    "emoji": "🎨",
+    "verdict": "the shader has generic ambitions"
+  },
+  "Slash": {
+    "emoji": "🗡️",
+    "verdict": "the web script insists on .sl"
+  },
+  "Slice": {
+    "emoji": "🧊",
+    "verdict": "the distributed object needs an interface"
+  },
+  "SmPL": {
+    "emoji": "🩹",
+    "verdict": "the patch understands the C-shaped wound"
+  },
+  "Smali": {
+    "emoji": "🐉",
+    "verdict": "the Android bytecode has a register problem"
+  },
+  "Smalltalk": {
+    "emoji": "🫀",
+    "verdict": "the objects are live; so is the environment"
+  },
+  "Smarty": {
+    "emoji": "🤓",
+    "verdict": "the template is getting ideas above its job"
+  },
+  "Smithy": {
+    "emoji": "⚒️",
+    "verdict": "the API model has filed its shapes"
+  },
+  "Snakemake": {
+    "emoji": "🐍",
+    "verdict": "the glue has discovered dependency edges"
+  },
+  "Solidity": {
+    "emoji": "🪙",
+    "verdict": "the bug has an irreversible balance"
+  },
+  "SourcePawn": {
+    "emoji": "♟️",
+    "verdict": "the server plugin has a very specific pawn"
+  },
+  "Squirrel": {
+    "emoji": "🐿️",
+    "verdict": "the game VM has cached another callback"
+  },
+  "Stan": {
+    "emoji": "📈",
+    "verdict": "the posterior disagrees with your intuition"
+  },
+  "Standard ML": {
+    "emoji": "📏",
+    "verdict": "the signature has checked the structure"
+  },
+  "Starlark": {
+    "emoji": "🌟",
+    "verdict": "the build refuses your unbounded imagination"
+  },
+  "Stata": {
+    "emoji": "📊",
+    "verdict": "the regression has a do-file alibi"
+  },
+  "SuperCollider": {
+    "emoji": "💥",
+    "verdict": "the server is making very literal noise"
+  },
+  "SurrealQL": {
+    "emoji": "🫠",
+    "verdict": "the database has several reality models"
+  },
+  "Sway": {
+    "emoji": "🌾",
+    "verdict": "the contract compiler watches the fuel"
+  },
+  "Swift": {
+    "emoji": "🐦",
+    "verdict": "the optional must explain itself"
+  },
+  "SystemVerilog": {
+    "emoji": "🔬",
+    "verdict": "the simulation passed; the silicon is quiet"
+  },
+  "TI Program": {
+    "emoji": "🧮",
+    "verdict": "the calculator has a second curriculum"
+  },
+  "TL-Verilog": {
+    "emoji": "🛤️",
+    "verdict": "the pipeline has a transaction schedule"
+  },
+  "TLA": {
+    "emoji": "📐",
+    "verdict": "the next state has disproved your design"
+  },
+  "TSQL": {
+    "emoji": "🗄️",
+    "verdict": "the stored procedure brought a cursor"
+  },
+  "TSX": {
+    "emoji": "🧩",
+    "verdict": "the component must satisfy its props"
+  },
+  "TXL": {
+    "emoji": "🔁",
+    "verdict": "the source tree is being rewritten again"
+  },
+  "Tact": {
+    "emoji": "💬",
+    "verdict": "the TON contract has typed messages"
+  },
+  "Talon": {
+    "emoji": "🦅",
+    "verdict": "the voice command has taken the keyboard"
+  },
+  "Tape": {
+    "emoji": "📼",
+    "verdict": "the terminal demo has a shooting script"
+  },
+  "Tcl": {
+    "emoji": "🪢",
+    "verdict": "everything is a string until further notice"
+  },
+  "Tcsh": {
+    "emoji": "🐚",
+    "verdict": "the C-shaped shell has historical traps"
+  },
+  "Teal": {
+    "emoji": "🦆",
+    "verdict": "Lua tables now need identification"
+  },
+  "Terra": {
+    "emoji": "🌍",
+    "verdict": "Lua is generating low-level responsibilities"
+  },
+  "Thrift": {
+    "emoji": "🏷️",
+    "verdict": "the service interface travels economically"
+  },
+  "Toit": {
+    "emoji": "🔋",
+    "verdict": "the tiny device wants managed instructions"
+  },
+  "Tolk": {
+    "emoji": "💎",
+    "verdict": "the TON contract has compiler supervision"
+  },
+  "Tree-sitter Query": {
+    "emoji": "🌳",
+    "verdict": "the syntax tree is being cross-examined"
+  },
+  "Turing": {
+    "emoji": "🎓",
+    "verdict": "the teaching language has a famous namesake"
+  },
+  "TypeScript": {
+    "emoji": "📘",
+    "verdict": "premium web-clanker food"
+  },
+  "TypeSpec": {
+    "emoji": "📋",
+    "verdict": "the API gets typed before it gets deployed"
+  },
+  "Typst": {
+    "emoji": "🖋️",
+    "verdict": "the typesetter has a functional side job"
+  },
+  "Unified Parallel C": {
+    "emoji": "🤹",
+    "verdict": "the shared pointer has a distant address"
+  },
+  "Unix Assembly": {
+    "emoji": "🔩",
+    "verdict": "the syscall wants the correct register"
+  },
+  "Uno": {
+    "emoji": "🃏",
+    "verdict": ".uno is wearing C# syntax colors"
+  },
+  "UnrealScript": {
+    "emoji": "🎮",
+    "verdict": "the actor state has changed its mind"
+  },
+  "Untyped Plutus Core": {
+    "emoji": "🪙",
+    "verdict": "the ledger kept the lambdas, lost the types"
+  },
+  "UrWeb": {
+    "emoji": "🕸️",
+    "verdict": "the web app must type-check end to end"
+  },
+  "V": {
+    "emoji": "✌️",
+    "verdict": "the compiler promises need a test harness"
+  },
+  "VBA": {
+    "emoji": "📊",
+    "verdict": "the workbook contains an entire department"
+  },
+  "VBScript": {
+    "emoji": "🕸️",
+    "verdict": "the Windows script has no adult supervision"
+  },
+  "VCL": {
+    "emoji": "🧊",
+    "verdict": "the cache decision has its own subroutine"
+  },
+  "VHDL": {
+    "emoji": "🔌",
+    "verdict": "the signal updates after your assumption"
+  },
+  "Vala": {
+    "emoji": "🧛",
+    "verdict": "the GObject has compiler-generated paperwork"
+  },
+  "Verilog": {
+    "emoji": "💡",
+    "verdict": "the assignment is not happening yet"
+  },
+  "Verse": {
+    "emoji": "🎭",
+    "verdict": "the game logic has a failure context"
+  },
+  "Vim script": {
+    "emoji": "📝",
+    "verdict": "the editor buffer has dynamic scope issues"
+  },
+  "Visual Basic .NET": {
+    "emoji": "🔷",
+    "verdict": "BASIC has been issued a CLR badge"
+  },
+  "Visual Basic 6.0": {
+    "emoji": "📠",
+    "verdict": "the COM reference is still in production"
+  },
+  "Volt": {
+    "emoji": "🔋",
+    "verdict": ".volt is borrowing D-shaped syntax colors"
+  },
+  "Vyper": {
+    "emoji": "🐍",
+    "verdict": "the contract declined inheritance drama"
+  },
+  "WDL": {
+    "emoji": "🧬",
+    "verdict": "the workflow has a genomic itinerary"
+  },
+  "WGSL": {
+    "emoji": "🖌️",
+    "verdict": "the browser demands a typed GPU argument"
+  },
+  "WebAssembly": {
+    "emoji": "🧱",
+    "verdict": "the sandbox counts your stack values"
+  },
+  "WebIDL": {
+    "emoji": "🌐",
+    "verdict": "the browser interface has a written contract"
+  },
+  "Whiley": {
+    "emoji": "🧑‍⚖️",
+    "verdict": "the verifier has questions about that loop"
+  },
+  "Witcher Script": {
+    "emoji": "🐺",
+    "verdict": "the quest logic needs a silver debugger"
+  },
+  "Wolfram Language": {
+    "emoji": "🐺",
+    "verdict": "the symbolic expression has evaluated you"
+  },
+  "Wollok": {
+    "emoji": "🎒",
+    "verdict": "the teaching objects brought examples"
+  },
+  "Wren": {
+    "emoji": "🐦",
+    "verdict": "the little VM prefers explicit classes"
+  },
+  "X10": {
+    "emoji": "🚄",
+    "verdict": "the computation has places to be"
+  },
+  "XC": {
+    "emoji": "🔀",
+    "verdict": "the channels have hardware destinations"
+  },
+  "XProc": {
+    "emoji": "🛤️",
+    "verdict": "the XML document booked a pipeline"
+  },
+  "XQuery": {
+    "emoji": "🔎",
+    "verdict": "the document is under cross-examination"
+  },
+  "XS": {
+    "emoji": "🦴",
+    "verdict": "Perl has found the C escape hatch"
+  },
+  "XSLT": {
+    "emoji": "🧬",
+    "verdict": "the XML is recursively reinventing itself"
+  },
+  "Xmake": {
+    "emoji": "🔨",
+    "verdict": "Lua has taken charge of the build"
+  },
+  "Xojo": {
+    "emoji": "🪟",
+    "verdict": "the desktop form has deployment ambitions"
+  },
+  "Xonsh": {
+    "emoji": "🐍",
+    "verdict": "Python and the shell share a prompt"
+  },
+  "Xtend": {
+    "emoji": "🪄",
+    "verdict": "the Java boilerplate went through a template"
+  },
+  "YARA": {
+    "emoji": "🎯",
+    "verdict": "the suspicious bytes match the description"
+  },
+  "Yacc": {
+    "emoji": "🐂",
+    "verdict": "the grammar has a shift-reduce disagreement"
+  },
+  "Yul": {
+    "emoji": "⛽",
+    "verdict": "the EVM wants the low-level explanation"
+  },
+  "ZAP": {
+    "emoji": "⚡",
+    "verdict": "the Z-machine is awaiting assembly orders"
+  },
+  "ZIL": {
+    "emoji": "🕯️",
+    "verdict": "the adventure parser has seen a grue"
+  },
+  "Zeek": {
+    "emoji": "🦉",
+    "verdict": "the network traffic has an event handler"
+  },
+  "ZenScript": {
+    "emoji": "🧘",
+    "verdict": "the crafting recipe has become executable"
+  },
+  "Zephir": {
+    "emoji": "🌬️",
+    "verdict": "the PHP extension brought a compiler"
+  },
+  "Zig": {
+    "emoji": "⚡",
+    "verdict": "technically clanker-friendly, spiritually clanker-hostile"
+  },
+  "Zimpl": {
+    "emoji": "📐",
+    "verdict": "the integer program wants a cleaner model"
+  },
+  "eC": {
+    "emoji": "🧩",
+    "verdict": "the C family has an Ecere guest"
+  },
+  "fish": {
+    "emoji": "🐟",
+    "verdict": "the shell declined POSIX family obligations"
+  },
+  "hoon": {
+    "emoji": "🛸",
+    "verdict": "the runes have requested a manual review"
+  },
+  "jq": {
+    "emoji": "🥤",
+    "verdict": "the JSON is coming out through a pipe"
+  },
+  "mIRC Script": {
+    "emoji": "💬",
+    "verdict": "the chat client has accepted event handlers"
+  },
+  "mcfunction": {
+    "emoji": "🧱",
+    "verdict": "the command block escaped into a file"
+  },
+  "mupad": {
+    "emoji": "🔣",
+    "verdict": "the symbolic engine has notebook memories"
+  },
+  "nesC": {
+    "emoji": "📡",
+    "verdict": "the sensor node has wired its components"
+  },
+  "ooc": {
+    "emoji": "🧊",
+    "verdict": "the objects are being translated into C"
+  },
+  "q": {
+    "emoji": "⏱️",
+    "verdict": "the time series arrived without whitespace"
+  },
+  "sed": {
+    "emoji": "✂️",
+    "verdict": "the substitution became a state machine"
+  },
+  "ucode": {
+    "emoji": "📶",
+    "verdict": "the router has a JavaScript-shaped script"
+  },
+  "wisp": {
+    "emoji": "🌫️",
+    "verdict": "Scheme hid the parentheses in whitespace"
+  },
+  "xBase": {
+    "emoji": "🗃️",
+    "verdict": "the DBF file still owns the business"
+  },
+  "Bend 2": {
+    "emoji": "🪄",
+    "verdict": "parallel magic; humans do not interfere"
+  },
+  "Psi": {
+    "emoji": "🛸",
+    "verdict": "language after the singularity"
+  }
+}

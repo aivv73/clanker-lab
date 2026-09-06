@@ -1,0 +1,2590 @@
+{
+  "id": "linguist-language-types-v1",
+  "source_sha256": "7c2bc5b59662de6c5d09cd4990e82b2541d4cd2ea7c8c213537730474f24a5c7",
+  "languages": {
+    "1C Enterprise": {
+      "type": "programming"
+    },
+    "2-Dimensional Array": {
+      "type": "data"
+    },
+    "4D": {
+      "type": "programming"
+    },
+    "ABAP": {
+      "type": "programming"
+    },
+    "ABAP CDS": {
+      "type": "programming"
+    },
+    "ABNF": {
+      "type": "data"
+    },
+    "AGS Script": {
+      "type": "programming"
+    },
+    "AIDL": {
+      "type": "programming"
+    },
+    "AL": {
+      "type": "programming"
+    },
+    "ALGOL": {
+      "type": "programming"
+    },
+    "AMPL": {
+      "type": "programming"
+    },
+    "ANTLR": {
+      "type": "programming"
+    },
+    "API Blueprint": {
+      "type": "markup"
+    },
+    "APL": {
+      "type": "programming"
+    },
+    "ASL": {
+      "type": "programming"
+    },
+    "ASN.1": {
+      "type": "data"
+    },
+    "ASP.NET": {
+      "type": "programming"
+    },
+    "ATS": {
+      "type": "programming"
+    },
+    "ActionScript": {
+      "type": "programming"
+    },
+    "Ada": {
+      "type": "programming"
+    },
+    "Adblock Filter List": {
+      "type": "data"
+    },
+    "Adobe Font Metrics": {
+      "type": "data"
+    },
+    "Agda": {
+      "type": "programming"
+    },
+    "Aiken": {
+      "type": "programming"
+    },
+    "Aleo": {
+      "type": "programming"
+    },
+    "Alloy": {
+      "type": "programming"
+    },
+    "Alpine Abuild": {
+      "type": "programming",
+      "group": "Shell"
+    },
+    "Altium Designer": {
+      "type": "data"
+    },
+    "AngelScript": {
+      "type": "programming"
+    },
+    "Answer Set Programming": {
+      "type": "programming"
+    },
+    "Ant Build System": {
+      "type": "data"
+    },
+    "Antlers": {
+      "type": "markup"
+    },
+    "ApacheConf": {
+      "type": "data"
+    },
+    "Apex": {
+      "type": "programming"
+    },
+    "Apollo Guidance Computer": {
+      "type": "programming",
+      "group": "Assembly"
+    },
+    "AppleScript": {
+      "type": "programming"
+    },
+    "Arc": {
+      "type": "programming"
+    },
+    "AsciiDoc": {
+      "type": "prose"
+    },
+    "AspectJ": {
+      "type": "programming"
+    },
+    "Assembly": {
+      "type": "programming"
+    },
+    "Astro": {
+      "type": "markup"
+    },
+    "Asymptote": {
+      "type": "programming"
+    },
+    "Augeas": {
+      "type": "programming"
+    },
+    "AutoHotkey": {
+      "type": "programming"
+    },
+    "AutoIt": {
+      "type": "programming"
+    },
+    "Avro IDL": {
+      "type": "data"
+    },
+    "Awk": {
+      "type": "programming"
+    },
+    "B": {
+      "type": "programming"
+    },
+    "B (Formal Method)": {
+      "type": "programming"
+    },
+    "B4X": {
+      "type": "programming"
+    },
+    "BAML": {
+      "type": "programming"
+    },
+    "BASIC": {
+      "type": "programming"
+    },
+    "BBCode": {
+      "type": "markup"
+    },
+    "BIRD2": {
+      "type": "data"
+    },
+    "BQN": {
+      "type": "programming"
+    },
+    "Ballerina": {
+      "type": "programming"
+    },
+    "Batchfile": {
+      "type": "programming"
+    },
+    "Beef": {
+      "type": "programming"
+    },
+    "Befunge": {
+      "type": "programming"
+    },
+    "Berry": {
+      "type": "programming"
+    },
+    "BibTeX": {
+      "type": "markup",
+      "group": "TeX"
+    },
+    "BibTeX Style": {
+      "type": "programming"
+    },
+    "Bicep": {
+      "type": "programming"
+    },
+    "Bikeshed": {
+      "type": "markup"
+    },
+    "Bison": {
+      "type": "programming",
+      "group": "Yacc"
+    },
+    "BitBake": {
+      "type": "programming"
+    },
+    "Blade": {
+      "type": "markup"
+    },
+    "BlitzBasic": {
+      "type": "programming"
+    },
+    "BlitzMax": {
+      "type": "programming"
+    },
+    "Blueprint": {
+      "type": "markup"
+    },
+    "Bluespec": {
+      "type": "programming"
+    },
+    "Bluespec BH": {
+      "type": "programming",
+      "group": "Bluespec"
+    },
+    "Boo": {
+      "type": "programming"
+    },
+    "Boogie": {
+      "type": "programming"
+    },
+    "Brainfuck": {
+      "type": "programming"
+    },
+    "BrighterScript": {
+      "type": "programming"
+    },
+    "Brightscript": {
+      "type": "programming"
+    },
+    "Browserslist": {
+      "type": "data"
+    },
+    "Bru": {
+      "type": "markup"
+    },
+    "BuildStream": {
+      "type": "data"
+    },
+    "C": {
+      "type": "programming"
+    },
+    "C#": {
+      "type": "programming"
+    },
+    "C++": {
+      "type": "programming"
+    },
+    "C-ObjDump": {
+      "type": "data"
+    },
+    "C2hs Haskell": {
+      "type": "programming",
+      "group": "Haskell"
+    },
+    "C3": {
+      "type": "programming"
+    },
+    "CAP CDS": {
+      "type": "programming"
+    },
+    "CIL": {
+      "type": "data"
+    },
+    "CLIPS": {
+      "type": "programming"
+    },
+    "CMake": {
+      "type": "programming"
+    },
+    "COBOL": {
+      "type": "programming"
+    },
+    "CODEOWNERS": {
+      "type": "data"
+    },
+    "COLLADA": {
+      "type": "data"
+    },
+    "CQL": {
+      "type": "programming"
+    },
+    "CSON": {
+      "type": "data"
+    },
+    "CSS": {
+      "type": "markup"
+    },
+    "CSV": {
+      "type": "data"
+    },
+    "CUE": {
+      "type": "programming"
+    },
+    "CWeb": {
+      "type": "programming"
+    },
+    "Cabal Config": {
+      "type": "data"
+    },
+    "Caddyfile": {
+      "type": "data"
+    },
+    "Cadence": {
+      "type": "programming"
+    },
+    "Cairo": {
+      "type": "programming",
+      "group": "Cairo"
+    },
+    "Cairo Zero": {
+      "type": "programming",
+      "group": "Cairo"
+    },
+    "CameLIGO": {
+      "type": "programming",
+      "group": "LigoLANG"
+    },
+    "Cangjie": {
+      "type": "programming"
+    },
+    "Cap'n Proto": {
+      "type": "programming"
+    },
+    "Carbon": {
+      "type": "programming"
+    },
+    "CartoCSS": {
+      "type": "programming"
+    },
+    "Ceylon": {
+      "type": "programming"
+    },
+    "Chapel": {
+      "type": "programming"
+    },
+    "Charity": {
+      "type": "programming"
+    },
+    "Checksums": {
+      "type": "data"
+    },
+    "ChucK": {
+      "type": "programming"
+    },
+    "Circom": {
+      "type": "programming"
+    },
+    "Cirru": {
+      "type": "programming"
+    },
+    "Clarion": {
+      "type": "programming"
+    },
+    "Clarity": {
+      "type": "programming"
+    },
+    "Classic ASP": {
+      "type": "programming"
+    },
+    "Clean": {
+      "type": "programming"
+    },
+    "Click": {
+      "type": "programming"
+    },
+    "Clojure": {
+      "type": "programming"
+    },
+    "Closure Templates": {
+      "type": "markup"
+    },
+    "Cloud Firestore Security Rules": {
+      "type": "data"
+    },
+    "Clue": {
+      "type": "programming"
+    },
+    "CoNLL-U": {
+      "type": "data"
+    },
+    "CodeQL": {
+      "type": "programming"
+    },
+    "CoffeeScript": {
+      "type": "programming"
+    },
+    "ColdFusion": {
+      "type": "programming"
+    },
+    "ColdFusion CFC": {
+      "type": "programming",
+      "group": "ColdFusion"
+    },
+    "Common Lisp": {
+      "type": "programming"
+    },
+    "Common Workflow Language": {
+      "type": "programming"
+    },
+    "Component Pascal": {
+      "type": "programming"
+    },
+    "Cooklang": {
+      "type": "markup"
+    },
+    "Cool": {
+      "type": "programming"
+    },
+    "Cpp-ObjDump": {
+      "type": "data"
+    },
+    "Creole": {
+      "type": "prose"
+    },
+    "Crystal": {
+      "type": "programming"
+    },
+    "Csound": {
+      "type": "programming"
+    },
+    "Csound Document": {
+      "type": "programming"
+    },
+    "Csound Score": {
+      "type": "programming"
+    },
+    "Cuda": {
+      "type": "programming"
+    },
+    "Cue Sheet": {
+      "type": "data"
+    },
+    "Curry": {
+      "type": "programming"
+    },
+    "Cycript": {
+      "type": "programming"
+    },
+    "Cylc": {
+      "type": "data",
+      "group": "INI"
+    },
+    "Cypher": {
+      "type": "programming"
+    },
+    "Cython": {
+      "type": "programming"
+    },
+    "D": {
+      "type": "programming"
+    },
+    "D-ObjDump": {
+      "type": "data"
+    },
+    "D2": {
+      "type": "markup"
+    },
+    "DIGITAL Command Language": {
+      "type": "programming"
+    },
+    "DM": {
+      "type": "programming"
+    },
+    "DNS Zone": {
+      "type": "data"
+    },
+    "DTrace": {
+      "type": "programming"
+    },
+    "Dafny": {
+      "type": "programming"
+    },
+    "Darcs Patch": {
+      "type": "data"
+    },
+    "Dart": {
+      "type": "programming"
+    },
+    "Daslang": {
+      "type": "programming"
+    },
+    "DataWeave": {
+      "type": "programming"
+    },
+    "Debian Package Control File": {
+      "type": "data"
+    },
+    "DenizenScript": {
+      "type": "programming"
+    },
+    "Dhall": {
+      "type": "programming"
+    },
+    "Diff": {
+      "type": "data"
+    },
+    "DirectX 3D File": {
+      "type": "data"
+    },
+    "Dockerfile": {
+      "type": "programming"
+    },
+    "Dogescript": {
+      "type": "programming"
+    },
+    "Dotenv": {
+      "type": "data"
+    },
+    "Dune": {
+      "type": "programming"
+    },
+    "Dylan": {
+      "type": "programming"
+    },
+    "E": {
+      "type": "programming"
+    },
+    "E-mail": {
+      "type": "data"
+    },
+    "EBNF": {
+      "type": "data"
+    },
+    "ECL": {
+      "type": "programming"
+    },
+    "ECLiPSe": {
+      "type": "programming",
+      "group": "Prolog"
+    },
+    "EJS": {
+      "type": "markup"
+    },
+    "EQ": {
+      "type": "programming"
+    },
+    "Eagle": {
+      "type": "data"
+    },
+    "Earthly": {
+      "type": "programming"
+    },
+    "Easybuild": {
+      "type": "data",
+      "group": "Python"
+    },
+    "Ecere Projects": {
+      "type": "data",
+      "group": "JavaScript"
+    },
+    "Ecmarkup": {
+      "type": "markup",
+      "group": "HTML"
+    },
+    "Edge": {
+      "type": "markup"
+    },
+    "EdgeQL": {
+      "type": "programming"
+    },
+    "EditorConfig": {
+      "type": "data",
+      "group": "INI"
+    },
+    "Edje Data Collection": {
+      "type": "data"
+    },
+    "Eiffel": {
+      "type": "programming"
+    },
+    "Elixir": {
+      "type": "programming"
+    },
+    "Elm": {
+      "type": "programming"
+    },
+    "Elvish": {
+      "type": "programming"
+    },
+    "Elvish Transcript": {
+      "type": "programming",
+      "group": "Elvish"
+    },
+    "Emacs Lisp": {
+      "type": "programming"
+    },
+    "EmberScript": {
+      "type": "programming"
+    },
+    "Erlang": {
+      "type": "programming"
+    },
+    "Euphoria": {
+      "type": "programming"
+    },
+    "F#": {
+      "type": "programming"
+    },
+    "F*": {
+      "type": "programming"
+    },
+    "FIGlet Font": {
+      "type": "data"
+    },
+    "FIRRTL": {
+      "type": "programming"
+    },
+    "FLUX": {
+      "type": "programming"
+    },
+    "FPP": {
+      "type": "programming"
+    },
+    "Factor": {
+      "type": "programming"
+    },
+    "Fancy": {
+      "type": "programming"
+    },
+    "Fantom": {
+      "type": "programming"
+    },
+    "Faust": {
+      "type": "programming"
+    },
+    "Fennel": {
+      "type": "programming"
+    },
+    "Filebench WML": {
+      "type": "programming"
+    },
+    "Filterscript": {
+      "type": "programming",
+      "group": "RenderScript"
+    },
+    "FlatBuffers": {
+      "type": "data"
+    },
+    "Flix": {
+      "type": "programming"
+    },
+    "Fluent": {
+      "type": "programming"
+    },
+    "Formatted": {
+      "type": "data"
+    },
+    "Forth": {
+      "type": "programming"
+    },
+    "Fortran": {
+      "type": "programming",
+      "group": "Fortran"
+    },
+    "Fortran Free Form": {
+      "type": "programming",
+      "group": "Fortran"
+    },
+    "FreeBASIC": {
+      "type": "programming"
+    },
+    "FreeMarker": {
+      "type": "programming"
+    },
+    "Frege": {
+      "type": "programming"
+    },
+    "Futhark": {
+      "type": "programming"
+    },
+    "G-code": {
+      "type": "programming"
+    },
+    "GAML": {
+      "type": "programming"
+    },
+    "GAMS": {
+      "type": "programming"
+    },
+    "GAP": {
+      "type": "programming"
+    },
+    "GCC Machine Description": {
+      "type": "programming"
+    },
+    "GDB": {
+      "type": "programming"
+    },
+    "GDScript": {
+      "type": "programming"
+    },
+    "GDShader": {
+      "type": "programming"
+    },
+    "GEDCOM": {
+      "type": "data"
+    },
+    "GLSL": {
+      "type": "programming"
+    },
+    "GN": {
+      "type": "data"
+    },
+    "GSC": {
+      "type": "programming"
+    },
+    "Game Maker Language": {
+      "type": "programming"
+    },
+    "Gemfile.lock": {
+      "type": "data"
+    },
+    "Gemini": {
+      "type": "prose"
+    },
+    "Genero 4gl": {
+      "type": "programming"
+    },
+    "Genero per": {
+      "type": "markup"
+    },
+    "Genie": {
+      "type": "programming"
+    },
+    "Genshi": {
+      "type": "programming"
+    },
+    "Gentoo Ebuild": {
+      "type": "programming",
+      "group": "Shell"
+    },
+    "Gentoo Eclass": {
+      "type": "programming",
+      "group": "Shell"
+    },
+    "Gerber Image": {
+      "type": "data"
+    },
+    "Gettext Catalog": {
+      "type": "prose"
+    },
+    "Gherkin": {
+      "type": "programming"
+    },
+    "Git Attributes": {
+      "type": "data"
+    },
+    "Git Commit": {
+      "type": "data"
+    },
+    "Git Config": {
+      "type": "data",
+      "group": "INI"
+    },
+    "Git Revision List": {
+      "type": "data"
+    },
+    "Gleam": {
+      "type": "programming"
+    },
+    "Glimmer JS": {
+      "type": "programming",
+      "group": "JavaScript"
+    },
+    "Glimmer TS": {
+      "type": "programming",
+      "group": "TypeScript"
+    },
+    "Glyph": {
+      "type": "programming"
+    },
+    "Glyph Bitmap Distribution Format": {
+      "type": "data"
+    },
+    "Gno": {
+      "type": "programming"
+    },
+    "Gnuplot": {
+      "type": "programming"
+    },
+    "Go": {
+      "type": "programming"
+    },
+    "Go Checksums": {
+      "type": "data"
+    },
+    "Go Module": {
+      "type": "data"
+    },
+    "Go Template": {
+      "type": "markup"
+    },
+    "Go Workspace": {
+      "type": "data"
+    },
+    "Godot Resource": {
+      "type": "data"
+    },
+    "Golo": {
+      "type": "programming"
+    },
+    "Gosu": {
+      "type": "programming"
+    },
+    "Grace": {
+      "type": "programming"
+    },
+    "Gradle": {
+      "type": "data"
+    },
+    "Gradle Kotlin DSL": {
+      "type": "data",
+      "group": "Gradle"
+    },
+    "Grammatical Framework": {
+      "type": "programming"
+    },
+    "Graph Modeling Language": {
+      "type": "data"
+    },
+    "GraphQL": {
+      "type": "data"
+    },
+    "Graphviz (DOT)": {
+      "type": "data"
+    },
+    "Groovy": {
+      "type": "programming"
+    },
+    "Groovy Server Pages": {
+      "type": "programming",
+      "group": "Groovy"
+    },
+    "GtkRC": {
+      "type": "data"
+    },
+    "HAProxy": {
+      "type": "data"
+    },
+    "HCL": {
+      "type": "programming"
+    },
+    "HIP": {
+      "type": "programming"
+    },
+    "HLSL": {
+      "type": "programming"
+    },
+    "HOCON": {
+      "type": "data"
+    },
+    "HTML": {
+      "type": "markup"
+    },
+    "HTML+ECR": {
+      "type": "markup",
+      "group": "HTML"
+    },
+    "HTML+EEX": {
+      "type": "markup",
+      "group": "HTML"
+    },
+    "HTML+ERB": {
+      "type": "markup",
+      "group": "HTML"
+    },
+    "HTML+PHP": {
+      "type": "markup",
+      "group": "HTML"
+    },
+    "HTML+Razor": {
+      "type": "markup",
+      "group": "HTML"
+    },
+    "HTTP": {
+      "type": "data"
+    },
+    "HXML": {
+      "type": "data"
+    },
+    "Hack": {
+      "type": "programming"
+    },
+    "Haml": {
+      "type": "markup"
+    },
+    "Handlebars": {
+      "type": "markup"
+    },
+    "Harbour": {
+      "type": "programming"
+    },
+    "Hare": {
+      "type": "programming"
+    },
+    "Haskell": {
+      "type": "programming"
+    },
+    "Haxe": {
+      "type": "programming"
+    },
+    "HiveQL": {
+      "type": "programming"
+    },
+    "HolyC": {
+      "type": "programming"
+    },
+    "Hosts File": {
+      "type": "data"
+    },
+    "Hurl": {
+      "type": "programming"
+    },
+    "Hy": {
+      "type": "programming"
+    },
+    "HyPhy": {
+      "type": "programming"
+    },
+    "IDL": {
+      "type": "programming"
+    },
+    "IGOR Pro": {
+      "type": "programming"
+    },
+    "IL Assembly": {
+      "type": "programming"
+    },
+    "INI": {
+      "type": "data"
+    },
+    "IRC log": {
+      "type": "data"
+    },
+    "ISPC": {
+      "type": "programming"
+    },
+    "Idris": {
+      "type": "programming"
+    },
+    "Ignore List": {
+      "type": "data"
+    },
+    "ImHex Pattern Language": {
+      "type": "programming"
+    },
+    "ImageJ Macro": {
+      "type": "programming"
+    },
+    "Imba": {
+      "type": "programming"
+    },
+    "Inform 7": {
+      "type": "programming"
+    },
+    "Ink": {
+      "type": "programming"
+    },
+    "Inno Setup": {
+      "type": "programming"
+    },
+    "Io": {
+      "type": "programming"
+    },
+    "Ioke": {
+      "type": "programming"
+    },
+    "Isabelle": {
+      "type": "programming"
+    },
+    "Isabelle ROOT": {
+      "type": "programming",
+      "group": "Isabelle"
+    },
+    "J": {
+      "type": "programming"
+    },
+    "JAR Manifest": {
+      "type": "data"
+    },
+    "JASS": {
+      "type": "programming"
+    },
+    "JCL": {
+      "type": "programming"
+    },
+    "JFlex": {
+      "type": "programming",
+      "group": "Lex"
+    },
+    "JSON": {
+      "type": "data"
+    },
+    "JSON with Comments": {
+      "type": "data",
+      "group": "JSON"
+    },
+    "JSON5": {
+      "type": "data"
+    },
+    "JSONLD": {
+      "type": "data"
+    },
+    "JSONiq": {
+      "type": "programming"
+    },
+    "Jac": {
+      "type": "programming"
+    },
+    "Jai": {
+      "type": "programming"
+    },
+    "Janet": {
+      "type": "programming"
+    },
+    "Jasmin": {
+      "type": "programming"
+    },
+    "Java": {
+      "type": "programming"
+    },
+    "Java Properties": {
+      "type": "data"
+    },
+    "Java Server Pages": {
+      "type": "programming",
+      "group": "Java"
+    },
+    "Java Template Engine": {
+      "type": "programming",
+      "group": "Java"
+    },
+    "JavaScript": {
+      "type": "programming"
+    },
+    "JavaScript+ERB": {
+      "type": "programming",
+      "group": "JavaScript"
+    },
+    "Jest Snapshot": {
+      "type": "data"
+    },
+    "JetBrains MPS": {
+      "type": "programming"
+    },
+    "Jinja": {
+      "type": "markup"
+    },
+    "Jison": {
+      "type": "programming",
+      "group": "Yacc"
+    },
+    "Jison Lex": {
+      "type": "programming",
+      "group": "Lex"
+    },
+    "Jolie": {
+      "type": "programming"
+    },
+    "Jsonnet": {
+      "type": "programming"
+    },
+    "Julia": {
+      "type": "programming"
+    },
+    "Julia REPL": {
+      "type": "programming",
+      "group": "Julia"
+    },
+    "Jupyter Notebook": {
+      "type": "markup"
+    },
+    "Just": {
+      "type": "programming"
+    },
+    "KCL": {
+      "type": "programming"
+    },
+    "KDL": {
+      "type": "data"
+    },
+    "KFramework": {
+      "type": "programming"
+    },
+    "KRL": {
+      "type": "programming"
+    },
+    "Kaitai Struct": {
+      "type": "programming"
+    },
+    "KakouneScript": {
+      "type": "programming"
+    },
+    "KerboScript": {
+      "type": "programming"
+    },
+    "KiCad Layout": {
+      "type": "data"
+    },
+    "KiCad Legacy Layout": {
+      "type": "data"
+    },
+    "KiCad Schematic": {
+      "type": "data"
+    },
+    "Kickstart": {
+      "type": "data"
+    },
+    "Kit": {
+      "type": "markup"
+    },
+    "KoLmafia ASH": {
+      "type": "programming"
+    },
+    "Koka": {
+      "type": "programming"
+    },
+    "Kotlin": {
+      "type": "programming"
+    },
+    "Kusto": {
+      "type": "data"
+    },
+    "LFE": {
+      "type": "programming"
+    },
+    "LLVM": {
+      "type": "programming"
+    },
+    "LOLCODE": {
+      "type": "programming"
+    },
+    "LSL": {
+      "type": "programming"
+    },
+    "LTspice Symbol": {
+      "type": "data"
+    },
+    "LabVIEW": {
+      "type": "programming"
+    },
+    "Lambdapi": {
+      "type": "programming"
+    },
+    "Langium": {
+      "type": "programming"
+    },
+    "Lark": {
+      "type": "data"
+    },
+    "Lasso": {
+      "type": "programming"
+    },
+    "Latte": {
+      "type": "markup"
+    },
+    "Lean": {
+      "type": "programming"
+    },
+    "Lean 4": {
+      "type": "programming",
+      "group": "Lean"
+    },
+    "Leo": {
+      "type": "programming"
+    },
+    "Less": {
+      "type": "markup"
+    },
+    "Lex": {
+      "type": "programming"
+    },
+    "LigoLANG": {
+      "type": "programming",
+      "group": "LigoLANG"
+    },
+    "LilyPond": {
+      "type": "programming"
+    },
+    "Limbo": {
+      "type": "programming"
+    },
+    "Linear Programming": {
+      "type": "programming"
+    },
+    "Linker Script": {
+      "type": "programming"
+    },
+    "Linux Kernel Module": {
+      "type": "data"
+    },
+    "Liquid": {
+      "type": "markup"
+    },
+    "Liquidsoap": {
+      "type": "programming"
+    },
+    "Literate Agda": {
+      "type": "programming",
+      "group": "Agda"
+    },
+    "Literate CoffeeScript": {
+      "type": "programming",
+      "group": "CoffeeScript"
+    },
+    "Literate Haskell": {
+      "type": "programming",
+      "group": "Haskell"
+    },
+    "LiveCode Script": {
+      "type": "programming"
+    },
+    "LiveScript": {
+      "type": "programming"
+    },
+    "Lobster": {
+      "type": "programming"
+    },
+    "Logos": {
+      "type": "programming"
+    },
+    "Logtalk": {
+      "type": "programming"
+    },
+    "LookML": {
+      "type": "programming"
+    },
+    "LoomScript": {
+      "type": "programming"
+    },
+    "Lua": {
+      "type": "programming"
+    },
+    "Luau": {
+      "type": "programming"
+    },
+    "M": {
+      "type": "programming"
+    },
+    "M3U": {
+      "type": "data"
+    },
+    "M4": {
+      "type": "programming"
+    },
+    "M4Sugar": {
+      "type": "programming",
+      "group": "M4"
+    },
+    "MATLAB": {
+      "type": "programming"
+    },
+    "MAXScript": {
+      "type": "programming"
+    },
+    "MDX": {
+      "type": "markup"
+    },
+    "MLIR": {
+      "type": "programming"
+    },
+    "MQL4": {
+      "type": "programming"
+    },
+    "MQL5": {
+      "type": "programming"
+    },
+    "MTML": {
+      "type": "markup"
+    },
+    "MUF": {
+      "type": "programming",
+      "group": "Forth"
+    },
+    "Macaulay2": {
+      "type": "programming"
+    },
+    "Makefile": {
+      "type": "programming"
+    },
+    "Mako": {
+      "type": "programming"
+    },
+    "Markdown": {
+      "type": "prose"
+    },
+    "Marko": {
+      "type": "markup"
+    },
+    "Mask": {
+      "type": "markup"
+    },
+    "Mathematical Programming System": {
+      "type": "programming"
+    },
+    "Maven POM": {
+      "type": "data",
+      "group": "XML"
+    },
+    "Max": {
+      "type": "programming"
+    },
+    "MeTTa": {
+      "type": "programming"
+    },
+    "Mercury": {
+      "type": "programming"
+    },
+    "Mermaid": {
+      "type": "markup"
+    },
+    "Meson": {
+      "type": "programming"
+    },
+    "Metal": {
+      "type": "programming"
+    },
+    "Microsoft Developer Studio Project": {
+      "type": "data"
+    },
+    "Microsoft Visual Studio Solution": {
+      "type": "data"
+    },
+    "MiniD": {
+      "type": "programming"
+    },
+    "MiniScript": {
+      "type": "programming"
+    },
+    "MiniYAML": {
+      "type": "data"
+    },
+    "MiniZinc": {
+      "type": "programming"
+    },
+    "MiniZinc Data": {
+      "type": "data"
+    },
+    "Mint": {
+      "type": "programming"
+    },
+    "Mirah": {
+      "type": "programming"
+    },
+    "Modelica": {
+      "type": "programming"
+    },
+    "Modula-2": {
+      "type": "programming"
+    },
+    "Modula-3": {
+      "type": "programming"
+    },
+    "Module Management System": {
+      "type": "programming"
+    },
+    "Mojo": {
+      "type": "programming"
+    },
+    "Monkey": {
+      "type": "programming"
+    },
+    "Monkey C": {
+      "type": "programming"
+    },
+    "Moocode": {
+      "type": "programming"
+    },
+    "MoonBit": {
+      "type": "programming"
+    },
+    "MoonScript": {
+      "type": "programming"
+    },
+    "Motoko": {
+      "type": "programming"
+    },
+    "Motorola 68K Assembly": {
+      "type": "programming",
+      "group": "Assembly"
+    },
+    "Move": {
+      "type": "programming"
+    },
+    "Muse": {
+      "type": "prose"
+    },
+    "Mustache": {
+      "type": "markup"
+    },
+    "Myghty": {
+      "type": "programming"
+    },
+    "NASL": {
+      "type": "programming"
+    },
+    "NCL": {
+      "type": "programming"
+    },
+    "NEON": {
+      "type": "data"
+    },
+    "NL": {
+      "type": "data"
+    },
+    "NMODL": {
+      "type": "programming"
+    },
+    "NPM Config": {
+      "type": "data",
+      "group": "INI"
+    },
+    "NSIS": {
+      "type": "programming"
+    },
+    "NWScript": {
+      "type": "programming"
+    },
+    "Nasal": {
+      "type": "programming"
+    },
+    "Nearley": {
+      "type": "programming"
+    },
+    "Nemerle": {
+      "type": "programming"
+    },
+    "NetLinx": {
+      "type": "programming"
+    },
+    "NetLinx+ERB": {
+      "type": "programming"
+    },
+    "NetLogo": {
+      "type": "programming"
+    },
+    "NewLisp": {
+      "type": "programming"
+    },
+    "Nextflow": {
+      "type": "programming"
+    },
+    "Nginx": {
+      "type": "data"
+    },
+    "Nickel": {
+      "type": "programming"
+    },
+    "Nim": {
+      "type": "programming"
+    },
+    "Ninja": {
+      "type": "data"
+    },
+    "Nit": {
+      "type": "programming"
+    },
+    "Nix": {
+      "type": "programming"
+    },
+    "Noir": {
+      "type": "programming"
+    },
+    "Nu": {
+      "type": "programming"
+    },
+    "NumPy": {
+      "type": "programming",
+      "group": "Python"
+    },
+    "Nunjucks": {
+      "type": "markup"
+    },
+    "Nushell": {
+      "type": "programming"
+    },
+    "OASv2-json": {
+      "type": "data",
+      "group": "OpenAPI Specification v2"
+    },
+    "OASv2-yaml": {
+      "type": "data",
+      "group": "OpenAPI Specification v2"
+    },
+    "OASv3-json": {
+      "type": "data",
+      "group": "OpenAPI Specification v3"
+    },
+    "OASv3-yaml": {
+      "type": "data",
+      "group": "OpenAPI Specification v3"
+    },
+    "OCaml": {
+      "type": "programming"
+    },
+    "OMNeT++ MSG": {
+      "type": "programming"
+    },
+    "OMNeT++ NED": {
+      "type": "programming"
+    },
+    "Oberon": {
+      "type": "programming"
+    },
+    "ObjDump": {
+      "type": "data"
+    },
+    "Object Data Instance Notation": {
+      "type": "data"
+    },
+    "ObjectScript": {
+      "type": "programming"
+    },
+    "Objective-C": {
+      "type": "programming"
+    },
+    "Objective-C++": {
+      "type": "programming"
+    },
+    "Objective-J": {
+      "type": "programming"
+    },
+    "Odin": {
+      "type": "programming"
+    },
+    "Omgrofl": {
+      "type": "programming"
+    },
+    "Opa": {
+      "type": "programming"
+    },
+    "Opal": {
+      "type": "programming"
+    },
+    "Open Policy Agent": {
+      "type": "programming"
+    },
+    "OpenAPI Specification v2": {
+      "type": "data"
+    },
+    "OpenAPI Specification v3": {
+      "type": "data"
+    },
+    "OpenCL": {
+      "type": "programming",
+      "group": "C"
+    },
+    "OpenEdge ABL": {
+      "type": "programming"
+    },
+    "OpenQASM": {
+      "type": "programming"
+    },
+    "OpenRC runscript": {
+      "type": "programming",
+      "group": "Shell"
+    },
+    "OpenSCAD": {
+      "type": "programming"
+    },
+    "OpenStep Property List": {
+      "type": "data"
+    },
+    "OpenType Feature File": {
+      "type": "data"
+    },
+    "Option List": {
+      "type": "data"
+    },
+    "Org": {
+      "type": "prose"
+    },
+    "OverPy": {
+      "type": "programming"
+    },
+    "OverpassQL": {
+      "type": "programming"
+    },
+    "Ox": {
+      "type": "programming"
+    },
+    "Oxygene": {
+      "type": "programming"
+    },
+    "Oz": {
+      "type": "programming"
+    },
+    "P4": {
+      "type": "programming"
+    },
+    "PDDL": {
+      "type": "programming"
+    },
+    "PEG.js": {
+      "type": "programming"
+    },
+    "PHP": {
+      "type": "programming"
+    },
+    "PLSQL": {
+      "type": "programming"
+    },
+    "PLpgSQL": {
+      "type": "programming"
+    },
+    "POV-Ray SDL": {
+      "type": "programming"
+    },
+    "Pact": {
+      "type": "programming"
+    },
+    "Pan": {
+      "type": "programming"
+    },
+    "Papyrus": {
+      "type": "programming"
+    },
+    "Parrot": {
+      "type": "programming"
+    },
+    "Parrot Assembly": {
+      "type": "programming",
+      "group": "Parrot"
+    },
+    "Parrot Internal Representation": {
+      "type": "programming",
+      "group": "Parrot"
+    },
+    "Pascal": {
+      "type": "programming"
+    },
+    "Pawn": {
+      "type": "programming"
+    },
+    "Pep8": {
+      "type": "programming"
+    },
+    "Perl": {
+      "type": "programming"
+    },
+    "Pic": {
+      "type": "markup",
+      "group": "Roff"
+    },
+    "Pickle": {
+      "type": "data"
+    },
+    "PicoLisp": {
+      "type": "programming"
+    },
+    "PigLatin": {
+      "type": "programming"
+    },
+    "Pike": {
+      "type": "programming"
+    },
+    "Pip Requirements": {
+      "type": "data"
+    },
+    "Pkl": {
+      "type": "programming"
+    },
+    "PlantUML": {
+      "type": "data"
+    },
+    "Pod": {
+      "type": "prose"
+    },
+    "Pod 6": {
+      "type": "prose"
+    },
+    "PogoScript": {
+      "type": "programming"
+    },
+    "Polar": {
+      "type": "programming"
+    },
+    "Pony": {
+      "type": "programming"
+    },
+    "Portugol": {
+      "type": "programming"
+    },
+    "PostCSS": {
+      "type": "markup",
+      "group": "CSS"
+    },
+    "PostScript": {
+      "type": "markup"
+    },
+    "Power Query": {
+      "type": "programming"
+    },
+    "PowerBuilder": {
+      "type": "programming"
+    },
+    "PowerShell": {
+      "type": "programming"
+    },
+    "Praat": {
+      "type": "programming"
+    },
+    "Prisma": {
+      "type": "data"
+    },
+    "Pro*C": {
+      "type": "programming"
+    },
+    "Processing": {
+      "type": "programming"
+    },
+    "Procfile": {
+      "type": "programming"
+    },
+    "Proguard": {
+      "type": "data"
+    },
+    "Prolog": {
+      "type": "programming"
+    },
+    "Promela": {
+      "type": "programming"
+    },
+    "Propeller Spin": {
+      "type": "programming"
+    },
+    "Protocol Buffer": {
+      "type": "data"
+    },
+    "Protocol Buffer Text Format": {
+      "type": "data"
+    },
+    "Public Key": {
+      "type": "data"
+    },
+    "Pug": {
+      "type": "markup"
+    },
+    "Puppet": {
+      "type": "programming"
+    },
+    "Pure Data": {
+      "type": "data"
+    },
+    "PureBasic": {
+      "type": "programming"
+    },
+    "PureScript": {
+      "type": "programming"
+    },
+    "Pyret": {
+      "type": "programming"
+    },
+    "Python": {
+      "type": "programming"
+    },
+    "Python console": {
+      "type": "programming",
+      "group": "Python"
+    },
+    "Python traceback": {
+      "type": "data",
+      "group": "Python"
+    },
+    "Q#": {
+      "type": "programming"
+    },
+    "QML": {
+      "type": "programming"
+    },
+    "QMake": {
+      "type": "programming"
+    },
+    "Qt Script": {
+      "type": "programming"
+    },
+    "Quake": {
+      "type": "programming"
+    },
+    "QuakeC": {
+      "type": "programming"
+    },
+    "Quartus Simulation IP": {
+      "type": "data"
+    },
+    "QuickBASIC": {
+      "type": "programming"
+    },
+    "Quint": {
+      "type": "programming"
+    },
+    "R": {
+      "type": "programming"
+    },
+    "RAML": {
+      "type": "markup"
+    },
+    "RAScript": {
+      "type": "programming"
+    },
+    "RBS": {
+      "type": "data",
+      "group": "Ruby"
+    },
+    "RDoc": {
+      "type": "prose"
+    },
+    "REALbasic": {
+      "type": "programming"
+    },
+    "REXX": {
+      "type": "programming"
+    },
+    "RMarkdown": {
+      "type": "prose"
+    },
+    "RON": {
+      "type": "data"
+    },
+    "ROS Interface": {
+      "type": "data"
+    },
+    "RPC": {
+      "type": "programming"
+    },
+    "RPGLE": {
+      "type": "programming"
+    },
+    "RPM Spec": {
+      "type": "data"
+    },
+    "RUNOFF": {
+      "type": "markup"
+    },
+    "Racket": {
+      "type": "programming"
+    },
+    "Ragel": {
+      "type": "programming"
+    },
+    "Raku": {
+      "type": "programming"
+    },
+    "Rascal": {
+      "type": "programming"
+    },
+    "Raw token data": {
+      "type": "data"
+    },
+    "ReScript": {
+      "type": "programming"
+    },
+    "Readline Config": {
+      "type": "data",
+      "group": "INI"
+    },
+    "Reason": {
+      "type": "programming"
+    },
+    "ReasonLIGO": {
+      "type": "programming",
+      "group": "LigoLANG"
+    },
+    "Rebol": {
+      "type": "programming"
+    },
+    "Record Jar": {
+      "type": "data"
+    },
+    "Red": {
+      "type": "programming"
+    },
+    "Redcode": {
+      "type": "programming"
+    },
+    "Redirect Rules": {
+      "type": "data"
+    },
+    "Redscript": {
+      "type": "programming"
+    },
+    "Regular Expression": {
+      "type": "data"
+    },
+    "Ren'Py": {
+      "type": "programming"
+    },
+    "RenderScript": {
+      "type": "programming"
+    },
+    "Rez": {
+      "type": "programming"
+    },
+    "Rhai": {
+      "type": "programming"
+    },
+    "Rich Text Format": {
+      "type": "markup"
+    },
+    "Ring": {
+      "type": "programming"
+    },
+    "Riot": {
+      "type": "markup"
+    },
+    "RobotFramework": {
+      "type": "programming"
+    },
+    "Robots Exclusion Rules": {
+      "type": "data"
+    },
+    "Roc": {
+      "type": "programming"
+    },
+    "Rocq Prover": {
+      "type": "programming"
+    },
+    "Roff": {
+      "type": "markup"
+    },
+    "Roff Manpage": {
+      "type": "markup",
+      "group": "Roff"
+    },
+    "Rouge": {
+      "type": "programming"
+    },
+    "RouterOS Script": {
+      "type": "programming"
+    },
+    "Ruby": {
+      "type": "programming"
+    },
+    "Rust": {
+      "type": "programming"
+    },
+    "SAS": {
+      "type": "programming"
+    },
+    "SCSS": {
+      "type": "markup"
+    },
+    "SELinux Policy": {
+      "type": "data"
+    },
+    "SIP": {
+      "type": "programming"
+    },
+    "SMT": {
+      "type": "programming"
+    },
+    "SPARQL": {
+      "type": "data"
+    },
+    "SQF": {
+      "type": "programming"
+    },
+    "SQL": {
+      "type": "data"
+    },
+    "SQLPL": {
+      "type": "programming"
+    },
+    "SRecode Template": {
+      "type": "markup"
+    },
+    "SSH Config": {
+      "type": "data",
+      "group": "INI"
+    },
+    "STAR": {
+      "type": "data"
+    },
+    "STL": {
+      "type": "data"
+    },
+    "STON": {
+      "type": "data",
+      "group": "Smalltalk"
+    },
+    "SVG": {
+      "type": "data"
+    },
+    "SWIG": {
+      "type": "programming"
+    },
+    "Sage": {
+      "type": "programming"
+    },
+    "Sail": {
+      "type": "programming"
+    },
+    "Salt": {
+      "type": "programming"
+    },
+    "Sass": {
+      "type": "markup"
+    },
+    "Scala": {
+      "type": "programming"
+    },
+    "Scaml": {
+      "type": "markup"
+    },
+    "Scenic": {
+      "type": "programming"
+    },
+    "Scheme": {
+      "type": "programming"
+    },
+    "Scilab": {
+      "type": "programming"
+    },
+    "Self": {
+      "type": "programming"
+    },
+    "ShaderLab": {
+      "type": "programming"
+    },
+    "Shell": {
+      "type": "programming"
+    },
+    "ShellCheck Config": {
+      "type": "data"
+    },
+    "ShellSession": {
+      "type": "programming"
+    },
+    "Shen": {
+      "type": "programming"
+    },
+    "Sieve": {
+      "type": "programming"
+    },
+    "Simple File Verification": {
+      "type": "data",
+      "group": "Checksums"
+    },
+    "Singularity": {
+      "type": "programming"
+    },
+    "Slang": {
+      "type": "programming"
+    },
+    "Slash": {
+      "type": "programming"
+    },
+    "Slice": {
+      "type": "programming"
+    },
+    "Slim": {
+      "type": "markup"
+    },
+    "Slint": {
+      "type": "markup"
+    },
+    "SmPL": {
+      "type": "programming"
+    },
+    "Smali": {
+      "type": "programming"
+    },
+    "Smalltalk": {
+      "type": "programming"
+    },
+    "Smarty": {
+      "type": "programming"
+    },
+    "Smithy": {
+      "type": "programming"
+    },
+    "Snakemake": {
+      "type": "programming",
+      "group": "Python"
+    },
+    "Solidity": {
+      "type": "programming"
+    },
+    "Soong": {
+      "type": "data"
+    },
+    "SourcePawn": {
+      "type": "programming"
+    },
+    "SpiceDB Schema": {
+      "type": "data"
+    },
+    "Spline Font Database": {
+      "type": "data"
+    },
+    "Squirrel": {
+      "type": "programming"
+    },
+    "Stan": {
+      "type": "programming"
+    },
+    "Standard ML": {
+      "type": "programming"
+    },
+    "Starlark": {
+      "type": "programming"
+    },
+    "Stata": {
+      "type": "programming"
+    },
+    "StringTemplate": {
+      "type": "markup"
+    },
+    "Stylus": {
+      "type": "markup"
+    },
+    "SubRip Text": {
+      "type": "data"
+    },
+    "SugarSS": {
+      "type": "markup"
+    },
+    "SuperCollider": {
+      "type": "programming"
+    },
+    "SurrealQL": {
+      "type": "programming"
+    },
+    "Survex data": {
+      "type": "data"
+    },
+    "Svelte": {
+      "type": "markup"
+    },
+    "Sway": {
+      "type": "programming"
+    },
+    "Sweave": {
+      "type": "prose"
+    },
+    "Swift": {
+      "type": "programming"
+    },
+    "SystemVerilog": {
+      "type": "programming"
+    },
+    "TI Program": {
+      "type": "programming"
+    },
+    "TL-Verilog": {
+      "type": "programming"
+    },
+    "TLA": {
+      "type": "programming"
+    },
+    "TMDL": {
+      "type": "data"
+    },
+    "TOML": {
+      "type": "data"
+    },
+    "TSPLIB data": {
+      "type": "data"
+    },
+    "TSQL": {
+      "type": "programming"
+    },
+    "TSV": {
+      "type": "data"
+    },
+    "TSX": {
+      "type": "programming",
+      "group": "TypeScript"
+    },
+    "TXL": {
+      "type": "programming"
+    },
+    "Tact": {
+      "type": "programming"
+    },
+    "Talon": {
+      "type": "programming"
+    },
+    "Tape": {
+      "type": "programming"
+    },
+    "Tcl": {
+      "type": "programming"
+    },
+    "Tcsh": {
+      "type": "programming",
+      "group": "Shell"
+    },
+    "TeX": {
+      "type": "markup"
+    },
+    "Tea": {
+      "type": "markup"
+    },
+    "Teal": {
+      "type": "programming"
+    },
+    "Terra": {
+      "type": "programming"
+    },
+    "Terraform Template": {
+      "type": "markup",
+      "group": "HCL"
+    },
+    "Texinfo": {
+      "type": "prose"
+    },
+    "Text": {
+      "type": "prose"
+    },
+    "TextGrid": {
+      "type": "data"
+    },
+    "TextMate Properties": {
+      "type": "data"
+    },
+    "Textile": {
+      "type": "prose"
+    },
+    "Thrift": {
+      "type": "programming"
+    },
+    "Toit": {
+      "type": "programming"
+    },
+    "Tolk": {
+      "type": "programming"
+    },
+    "Tor Config": {
+      "type": "data"
+    },
+    "Tree-sitter Query": {
+      "type": "programming"
+    },
+    "Turing": {
+      "type": "programming"
+    },
+    "Turtle": {
+      "type": "data"
+    },
+    "Twig": {
+      "type": "markup"
+    },
+    "Type Language": {
+      "type": "data"
+    },
+    "TypeScript": {
+      "type": "programming"
+    },
+    "TypeSpec": {
+      "type": "programming"
+    },
+    "Typst": {
+      "type": "programming"
+    },
+    "Unified Parallel C": {
+      "type": "programming",
+      "group": "C"
+    },
+    "Unity3D Asset": {
+      "type": "data"
+    },
+    "Unix Assembly": {
+      "type": "programming",
+      "group": "Assembly"
+    },
+    "Uno": {
+      "type": "programming"
+    },
+    "UnrealScript": {
+      "type": "programming"
+    },
+    "Untyped Plutus Core": {
+      "type": "programming"
+    },
+    "UrWeb": {
+      "type": "programming"
+    },
+    "V": {
+      "type": "programming"
+    },
+    "VBA": {
+      "type": "programming"
+    },
+    "VBScript": {
+      "type": "programming"
+    },
+    "VCL": {
+      "type": "programming"
+    },
+    "VHDL": {
+      "type": "programming"
+    },
+    "Vala": {
+      "type": "programming"
+    },
+    "Valve Data Format": {
+      "type": "data"
+    },
+    "Velocity Template Language": {
+      "type": "markup"
+    },
+    "Vento": {
+      "type": "markup"
+    },
+    "Verilog": {
+      "type": "programming"
+    },
+    "Verse": {
+      "type": "programming"
+    },
+    "Vespa Schema Definition": {
+      "type": "data"
+    },
+    "Vim Help File": {
+      "type": "prose"
+    },
+    "Vim Snippet": {
+      "type": "markup"
+    },
+    "Vim script": {
+      "type": "programming"
+    },
+    "Visual Basic .NET": {
+      "type": "programming"
+    },
+    "Visual Basic 6.0": {
+      "type": "programming"
+    },
+    "Volt": {
+      "type": "programming"
+    },
+    "Vue": {
+      "type": "markup"
+    },
+    "Vyper": {
+      "type": "programming"
+    },
+    "WDL": {
+      "type": "programming"
+    },
+    "WGSL": {
+      "type": "programming"
+    },
+    "Wavefront Material": {
+      "type": "data"
+    },
+    "Wavefront Object": {
+      "type": "data"
+    },
+    "Web Ontology Language": {
+      "type": "data"
+    },
+    "WebAssembly": {
+      "type": "programming"
+    },
+    "WebAssembly Interface Type": {
+      "type": "data"
+    },
+    "WebIDL": {
+      "type": "programming"
+    },
+    "WebVTT": {
+      "type": "data"
+    },
+    "Wget Config": {
+      "type": "data",
+      "group": "INI"
+    },
+    "Whiley": {
+      "type": "programming"
+    },
+    "Wikitext": {
+      "type": "prose"
+    },
+    "Win32 Message File": {
+      "type": "data"
+    },
+    "Windows Registry Entries": {
+      "type": "data"
+    },
+    "Witcher Script": {
+      "type": "programming"
+    },
+    "Wolfram Language": {
+      "type": "programming"
+    },
+    "Wollok": {
+      "type": "programming"
+    },
+    "World of Warcraft Addon Data": {
+      "type": "data"
+    },
+    "Wren": {
+      "type": "programming"
+    },
+    "X BitMap": {
+      "type": "data",
+      "group": "C"
+    },
+    "X Font Directory Index": {
+      "type": "data"
+    },
+    "X PixMap": {
+      "type": "data",
+      "group": "C"
+    },
+    "X10": {
+      "type": "programming"
+    },
+    "XC": {
+      "type": "programming"
+    },
+    "XCompose": {
+      "type": "data"
+    },
+    "XML": {
+      "type": "data"
+    },
+    "XML Property List": {
+      "type": "data",
+      "group": "XML"
+    },
+    "XPages": {
+      "type": "data"
+    },
+    "XProc": {
+      "type": "programming"
+    },
+    "XQuery": {
+      "type": "programming"
+    },
+    "XS": {
+      "type": "programming"
+    },
+    "XSLT": {
+      "type": "programming"
+    },
+    "Xmake": {
+      "type": "programming"
+    },
+    "Xojo": {
+      "type": "programming"
+    },
+    "Xonsh": {
+      "type": "programming"
+    },
+    "Xtend": {
+      "type": "programming"
+    },
+    "YAML": {
+      "type": "data"
+    },
+    "YANG": {
+      "type": "data"
+    },
+    "YARA": {
+      "type": "programming"
+    },
+    "YASnippet": {
+      "type": "markup"
+    },
+    "Yacc": {
+      "type": "programming"
+    },
+    "Yul": {
+      "type": "programming"
+    },
+    "ZAP": {
+      "type": "programming"
+    },
+    "ZIL": {
+      "type": "programming"
+    },
+    "Zeek": {
+      "type": "programming"
+    },
+    "ZenScript": {
+      "type": "programming"
+    },
+    "Zephir": {
+      "type": "programming"
+    },
+    "Zig": {
+      "type": "programming"
+    },
+    "Zimpl": {
+      "type": "programming"
+    },
+    "Zmodel": {
+      "type": "data"
+    },
+    "cURL Config": {
+      "type": "data",
+      "group": "INI"
+    },
+    "crontab": {
+      "type": "data"
+    },
+    "desktop": {
+      "type": "data",
+      "group": "INI"
+    },
+    "dircolors": {
+      "type": "data"
+    },
+    "eC": {
+      "type": "programming"
+    },
+    "edn": {
+      "type": "data"
+    },
+    "fish": {
+      "type": "programming",
+      "group": "Shell"
+    },
+    "hoon": {
+      "type": "programming"
+    },
+    "iCalendar": {
+      "type": "data"
+    },
+    "jq": {
+      "type": "programming"
+    },
+    "kvlang": {
+      "type": "markup"
+    },
+    "mIRC Script": {
+      "type": "programming"
+    },
+    "mcfunction": {
+      "type": "programming"
+    },
+    "mdsvex": {
+      "type": "markup"
+    },
+    "mupad": {
+      "type": "programming"
+    },
+    "nanorc": {
+      "type": "data",
+      "group": "INI"
+    },
+    "nesC": {
+      "type": "programming"
+    },
+    "ooc": {
+      "type": "programming"
+    },
+    "pkg-config": {
+      "type": "data"
+    },
+    "q": {
+      "type": "programming"
+    },
+    "reStructuredText": {
+      "type": "prose"
+    },
+    "sed": {
+      "type": "programming"
+    },
+    "templ": {
+      "type": "markup"
+    },
+    "ucode": {
+      "type": "programming"
+    },
+    "vCard": {
+      "type": "data"
+    },
+    "wisp": {
+      "type": "programming"
+    },
+    "xBase": {
+      "type": "programming"
+    }
+  }
+}

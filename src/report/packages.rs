@@ -50,19 +50,19 @@ pub(crate) struct PackagesReport {
     sort: Sort,
     selected_population: usize,
     matched_packages: usize,
-    packages: Vec<Row>,
+    pub(super) packages: Vec<Row>,
 }
 
 #[derive(Serialize)]
-struct Row {
-    name: String,
-    version: String,
+pub(super) struct Row {
+    pub(super) name: String,
+    pub(super) version: String,
     primary_language: Option<String>,
-    language_bytes: u64,
-    total_bytes: u64,
+    pub(super) language_bytes: u64,
+    pub(super) total_bytes: u64,
     share: f64,
-    fidelity: RevisionFidelity,
-    stale: bool,
+    pub(super) fidelity: RevisionFidelity,
+    pub(super) stale: bool,
 }
 
 fn matching(

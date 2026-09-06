@@ -103,9 +103,9 @@ pub(crate) struct LanguageRow {
 pub struct SourceBytesReport {
     schema_version: ReportSchemaVersion,
     report: ReportKind,
-    snapshot_staleness: SnapshotStaleness,
+    pub(super) snapshot_staleness: SnapshotStaleness,
     selection: PopulationSelection,
-    fidelity: FidelitySelection,
+    pub(super) fidelity: FidelitySelection,
     installed_total: u64,
     selected_population: u64,
     coverage: Coverage,
@@ -128,20 +128,45 @@ pub struct SourceBytesReport {
     approximate_bytes: u64,
     /// Summed source bytes across each unique target counted once under the
     /// selected fidelity.
-    total_source_bytes: u64,
+    pub(super) total_source_bytes: u64,
     /// Stale contribution included in `total_source_bytes`, disclosed separately.
     /// Zero in `approximate` mode.
-    stale_source_bytes: u64,
+    pub(super) stale_source_bytes: u64,
     /// Per-language totals sorted by bytes descending and name ascending.
     /// Counts always sum to `total_source_bytes`.
-    languages: Vec<LanguageRow>,
+    pub(super) languages: Vec<LanguageRow>,
 }
 
 impl SourceBytesReport {
+    #[cfg(test)]
+    pub(super) fn test_languages(languages: Vec<LanguageRow>) -> Self {
+        Self {
+            schema_version: ReportSchemaVersion::CURRENT,
+            report: ReportKind::SourceBytes,
+            snapshot_staleness: SnapshotStaleness::Current,
+            selection: PopulationSelection::new(super::InstallReasonSelection::All, []),
+            fidelity: FidelitySelection::Exact,
+            installed_total: 0, selected_population: 0,
+            coverage: Coverage::missing_only(0),
+            unique_targets: 0, stale_targets: 0, exact_targets: 0, exact_bytes: 0,
+            approximate_targets: 0, approximate_bytes: 0, stale_source_bytes: 0,
+            total_source_bytes: languages.iter().map(|row| row.bytes).sum(),
+            languages,
+        }
+    }
+
     /// Exact analyzed share in percent, mirroring `count` so `--min-coverage`
     /// gates both reports on the same denominator.
     pub fn analyzed_coverage_percent(&self) -> f64 {
         self.coverage.analyzed_percent()
+    }
+
+    pub(super) fn approximate_coverage_ratio(&self) -> f64 {
+        if self.coverage.denominator == 0 {
+            0.0
+        } else {
+            self.coverage.approximate as f64 / self.coverage.denominator as f64
+        }
     }
 
     pub fn meets_coverage(&self, minimum: Option<f64>) -> bool {
@@ -400,7 +425,7 @@ impl SourceBytesReport {
                 self.coverage.source_free_packages
             ));
         }
-        rendered.push_str("\n");
+        rendered.push('\n');
         match self.fidelity {
             FidelitySelection::Exact => {
                 if self.coverage.stale > 0 {
