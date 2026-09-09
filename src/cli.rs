@@ -116,6 +116,16 @@ pub enum Command {
         top: Option<usize>,
     },
 
+    /// Report installed-payload visibility and confirmed prebuilt binary matches.
+    Blobs {
+        /// Show all packages, including unresolved provenance.
+        #[arg(long, conflicts_with = "top")]
+        all: bool,
+        /// Show the top N packages by confirmed opaque installed bytes.
+        #[arg(long, conflicts_with = "all", value_parser = parse_top)]
+        top: Option<usize>,
+    },
+
     /// Inspect stored source-provider outcomes for the selected package versions.
     Providers,
 

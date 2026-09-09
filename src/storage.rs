@@ -196,6 +196,16 @@ const MIGRATION_9: &str = "
     ALTER TABLE language_profiles ADD COLUMN fidelity TEXT NOT NULL DEFAULT 'exact-packaged-source';
 ";
 
+const MIGRATION_10: &str = "
+    CREATE TABLE source_payload_evidence (
+        target_id INTEGER NOT NULL REFERENCES analysis_targets(id),
+        checksum TEXT NOT NULL,
+        manifest_json TEXT NOT NULL,
+        recorded_at TEXT NOT NULL,
+        PRIMARY KEY (target_id, checksum)
+    ) STRICT;
+";
+
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) struct MigrationVersion(u32);
 
@@ -209,7 +219,9 @@ impl MigrationVersion {
     const VERSION_6: Self = Self(6);
     const VERSION_7: Self = Self(7);
     const VERSION_8: Self = Self(8);
-    const CURRENT: Self = Self(9);
+    const VERSION_9: Self = Self(9);
+    const VERSION_10: Self = Self(10);
+    const CURRENT: Self = Self(11);
 
     const fn from_database(value: u32) -> Self {
         Self(value)
@@ -319,6 +331,8 @@ pub(crate) struct ProviderPackage {
     pub(crate) acquisitions: Vec<Option<crate::acquisition::AcquisitionRecord>>,
     pub(crate) analyses: Vec<Option<crate::linguist::LanguageRecord>>,
     pub(crate) analysis_state: crate::linguist::AnalysisState,
+    pub(crate) installed_bytes: u64,
+    pub(crate) payload_manifests: Vec<Option<crate::payload::SourceManifest>>,
 }
 
 pub(crate) struct PublishedSnapshot {
@@ -400,7 +414,7 @@ impl Database {
         {
             let mut statement = transaction
                 .prepare(
-                    "SELECT origin, install_reason, name, version FROM installed_packages
+                    "SELECT origin, install_reason, name, version, installed_bytes FROM installed_packages
                      WHERE snapshot_id = ?1 ORDER BY name",
                 )
                 .map_err(StorageError::Sqlite)?;
@@ -411,11 +425,12 @@ impl Database {
                         row.get::<_, String>(1)?,
                         row.get::<_, String>(2)?,
                         row.get::<_, String>(3)?,
+                        row.get::<_, u64>(4)?,
                     ))
                 })
                 .map_err(StorageError::Sqlite)?;
             for row in rows {
-                let (origin, install_reason, name, version) = row.map_err(StorageError::Sqlite)?;
+                let (origin, install_reason, name, version, installed_bytes) = row.map_err(StorageError::Sqlite)?;
                 if include_providers {
                     let attempts = self.provider_attempts(&name, &version)?;
                     let acquisitions = attempts
@@ -437,7 +452,13 @@ impl Database {
                         })
                         .collect::<Result<Vec<_>, StorageError>>()?;
                     let analysis_state = package_analysis_state(&transaction, &name, &version)?;
+                    let payload_manifests = attempts.iter().map(|attempt| match &attempt.outcome {
+                        AttemptOutcome::Resolved { target, .. } => read_source_manifest(&transaction, target),
+                        _ => Ok(None),
+                    }).collect::<Result<Vec<_>, StorageError>>()?;
                     provider_packages.push(ProviderPackage {
+                        installed_bytes,
+                        payload_manifests,
                         acquisitions,
                         analyses,
                         analysis_state,
@@ -554,15 +575,27 @@ impl Database {
     }
 }
 
+fn read_source_manifest(connection: &Connection, target: &AnalysisTarget) -> Result<Option<crate::payload::SourceManifest>, StorageError> {
+    let json: Option<String> = connection.query_row(
+        "SELECT manifest_json FROM source_payload_evidence JOIN analysis_targets ON analysis_targets.id = target_id
+         WHERE location = ?1 AND revision = ?2 AND subdirectory = ?3 AND checksum = ?4",
+        (target.location.as_str(), optional_text(target.revision.as_deref()), optional_text(target.subdirectory.as_deref()), optional_text(target.checksum.as_deref())),
+        |row| row.get(0)).optional().map_err(StorageError::Sqlite)?;
+    json.map(|json| serde_json::from_str(&json).map_err(|error| StorageError::InvalidPackageMetadata {
+        field: "source payload manifest", value: target.location.clone(),
+        message: if error.is_syntax() { "invalid JSON" } else { "invalid payload evidence" },
+    })).transpose()
+}
+
 fn read_acquisition(
     connection: &Connection,
     target: &AnalysisTarget,
 ) -> Result<Option<crate::acquisition::AcquisitionRecord>, StorageError> {
-    connection.query_row("SELECT state, reason, downloaded_bytes, extracted_bytes, files, verified_revision, content_sha256
+    connection.query_row("SELECT state, reason, downloaded_bytes, extracted_bytes, files, verified_revision, content_sha256, submodules_json
         FROM source_acquisitions JOIN analysis_targets ON analysis_targets.id = source_acquisitions.target_id
         WHERE location = ?1 AND revision = ?2 AND subdirectory = ?3 AND checksum = ?4",
         rusqlite::params![target.location, optional_text(target.revision.as_deref()), optional_text(target.subdirectory.as_deref()), optional_text(target.checksum.as_deref())],
-        |row| Ok(crate::acquisition::AcquisitionRecord { state: row.get(0)?, reason: row.get(1)?, downloaded_bytes: row.get(2)?, extracted_bytes: row.get(3)?, files: row.get(4)?, verified_revision: row.get(5)?, content_sha256: row.get(6)? }))
+        |row| Ok(crate::acquisition::AcquisitionRecord { state: row.get(0)?, reason: row.get(1)?, downloaded_bytes: row.get(2)?, extracted_bytes: row.get(3)?, files: row.get(4)?, verified_revision: row.get(5)?, content_sha256: row.get(6)?, submodules: serde_json::from_str(&row.get::<_, String>(7)?).map_err(|error| rusqlite::Error::FromSqlConversionFailure(7, rusqlite::types::Type::Text, Box::new(error)))? }))
         .optional().map_err(StorageError::Sqlite)
 }
 
@@ -742,21 +775,33 @@ impl RefreshTransaction<'_> {
         package_analysis_state(&self.transaction, name, version)
     }
 
+    pub(crate) fn record_source_manifest(&self, target: &AnalysisTarget, manifest: &crate::payload::SourceManifest) -> Result<(), StorageError> {
+        let json = serde_json::to_string(manifest).expect("source manifest serialization");
+        self.transaction.execute(
+            "INSERT INTO source_payload_evidence (target_id, checksum, manifest_json, recorded_at)
+             SELECT id, ?4, ?5, strftime('%Y-%m-%dT%H:%M:%fZ', 'now') FROM analysis_targets
+             WHERE location = ?1 AND revision = ?2 AND subdirectory = ?3
+             ON CONFLICT(target_id, checksum) DO UPDATE SET manifest_json=excluded.manifest_json, recorded_at=excluded.recorded_at",
+            (target.location.as_str(), optional_text(target.revision.as_deref()), optional_text(target.subdirectory.as_deref()), optional_text(target.checksum.as_deref()), json)
+        ).map_err(StorageError::Sqlite)?;
+        Ok(())
+    }
+
     pub(crate) fn record_acquisition(
         &self,
         target: &AnalysisTarget,
         result: &crate::acquisition::AcquisitionRecord,
     ) -> Result<(), StorageError> {
         self.transaction.execute(
-            "INSERT INTO source_acquisitions (target_id, checksum, state, reason, downloaded_bytes, extracted_bytes, files, verified_revision, content_sha256, recorded_at)
-             SELECT id, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, strftime('%Y-%m-%dT%H:%M:%fZ', 'now') FROM analysis_targets
+            "INSERT INTO source_acquisitions (target_id, checksum, state, reason, downloaded_bytes, extracted_bytes, files, verified_revision, content_sha256, submodules_json, recorded_at)
+             SELECT id, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, strftime('%Y-%m-%dT%H:%M:%fZ', 'now') FROM analysis_targets
              WHERE location = ?1 AND revision = ?2 AND subdirectory = ?3
              ON CONFLICT(target_id, checksum) DO UPDATE SET state=excluded.state, reason=excluded.reason,
              downloaded_bytes=excluded.downloaded_bytes, extracted_bytes=excluded.extracted_bytes, files=excluded.files,
-             verified_revision=excluded.verified_revision, content_sha256=excluded.content_sha256, recorded_at=excluded.recorded_at",
+             verified_revision=excluded.verified_revision, content_sha256=excluded.content_sha256, submodules_json=excluded.submodules_json, recorded_at=excluded.recorded_at",
             rusqlite::params![target.location, optional_text(target.revision.as_deref()), optional_text(target.subdirectory.as_deref()),
                 optional_text(target.checksum.as_deref()), result.state, result.reason, result.downloaded_bytes, result.extracted_bytes,
-                result.files, result.verified_revision, result.content_sha256]
+                result.files, result.verified_revision, result.content_sha256, serde_json::to_string(&result.submodules).expect("submodule records serialize")]
         ).map_err(StorageError::Sqlite)?;
         Ok(())
     }
@@ -1028,6 +1073,16 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
                 .execute_batch(MIGRATION_9)
                 .map_err(StorageError::InvalidSchema)?;
         }
+        if version <= MigrationVersion::VERSION_9 {
+            transaction.execute_batch(MIGRATION_10).map_err(StorageError::InvalidSchema)?;
+        }
+        if version <= MigrationVersion::VERSION_10 {
+            // Fixtures and repaired older databases can already contain this additive column.
+            let exists: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('source_acquisitions') WHERE name = 'submodules_json')", [], |row| row.get(0)).map_err(StorageError::InvalidSchema)?;
+            if !exists {
+                transaction.execute_batch("ALTER TABLE source_acquisitions ADD COLUMN submodules_json TEXT NOT NULL DEFAULT '[]';").map_err(StorageError::InvalidSchema)?;
+            }
+        }
         transaction
             .pragma_update(
                 None,
@@ -1045,7 +1100,8 @@ fn migrate(connection: &mut Connection) -> Result<(), StorageError> {
 }
 
 fn validate_schema(connection: &Connection) -> Result<(), StorageError> {
-    connection.prepare("SELECT target_id, checksum, state, reason, downloaded_bytes, extracted_bytes, files, verified_revision, content_sha256, recorded_at FROM source_acquisitions LIMIT 0").map_err(StorageError::InvalidSchema)?;
+    connection.prepare("SELECT target_id, checksum, manifest_json, recorded_at FROM source_payload_evidence LIMIT 0").map_err(StorageError::InvalidSchema)?;
+    connection.prepare("SELECT target_id, checksum, state, reason, downloaded_bytes, extracted_bytes, files, verified_revision, content_sha256, submodules_json, recorded_at FROM source_acquisitions LIMIT 0").map_err(StorageError::InvalidSchema)?;
     connection.prepare("SELECT target_id, checksum, state, reason, total_bytes, primary_language, languages_json, adapter, source, fidelity, recorded_at FROM language_profiles LIMIT 0").map_err(StorageError::InvalidSchema)?;
     connection
         .prepare(

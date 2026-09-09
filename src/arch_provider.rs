@@ -1,5 +1,6 @@
 pub(crate) mod http;
 pub(crate) mod recipe;
+mod source_roles;
 #[cfg(test)]
 mod tests;
 
@@ -19,10 +20,21 @@ use crate::storage::{RefreshTransaction, StorageError};
 /// response bytes alongside [`http::MAX_CONCURRENT_FETCHES`].
 const GROUP_BATCH: usize = 32;
 
+/// Recorded when a rebuild-suffixed version skips its Arch recipe lookup.
+pub(crate) const REBUILD_LOOKUP_SKIPPED: &str =
+    "cachyos rebuild version; arch recipe lookup skipped";
+
 /// Fetch once per package base/version, then record each split-package member.
 /// Members with an already-resolved attempt reuse the stored evidence without
 /// refetching; unresolved attempts are retried. At most [`GROUP_BATCH`] fetched
 /// documents are retained in memory at once.
+///
+/// When `cachyos` is set, groups whose version carries a rebuild suffix (as
+/// recognized by the CachyOS rebuild mapping) skip fetching: such a tag
+/// cannot exist upstream, so the request would only burn rate-limit budget
+/// for a guaranteed 404. The CachyOS provider resolves those groups through
+/// its rebuild mapping instead; the skipped Arch lookup is recorded with
+/// [`REBUILD_LOOKUP_SKIPPED`] so the gap stays visible.
 pub(crate) fn record_attempts<'a, W: io::Write>(
     refresh: &RefreshTransaction<'_>,
     packages: impl IntoIterator<Item = &'a InstalledPackage>,
@@ -30,6 +42,7 @@ pub(crate) fn record_attempts<'a, W: io::Write>(
     progress: &mut Progress<W>,
     require_checksums: bool,
     proxy: Option<&ProxyUrl>,
+    cachyos: bool,
 ) -> Result<(), StorageError> {
     let provider = SourceProvider::parse("arch").expect("static provider name is valid");
     let mut groups = BTreeMap::<_, Vec<_>>::new();
@@ -62,6 +75,25 @@ pub(crate) fn record_attempts<'a, W: io::Write>(
         }
         if fresh.is_empty() {
             skipped += 1;
+            continue;
+        }
+        if cachyos && crate::cachyos_provider::rebuild_version(version).is_some() {
+            let unresolved = fresh.len() as u64;
+            for package in fresh {
+                if interrupt::is_requested() {
+                    return Err(StorageError::Interrupted);
+                }
+                refresh.record_provider_attempt(&ProviderAttempt {
+                    package_name: package.name().to_owned(),
+                    package_version: package.version().to_owned(),
+                    provider: provider.clone(),
+                    outcome: AttemptOutcome::Unresolved {
+                        reason: REBUILD_LOOKUP_SKIPPED.to_owned(),
+                    },
+                    recipe: None,
+                })?;
+            }
+            progress.advance(1, 0, 0, unresolved);
             continue;
         }
         let project = format!(

@@ -179,6 +179,9 @@ pub(crate) fn record_api_profiles<W: Write>(
             summary.skipped_exact += 1;
             continue;
         }
+        // The Languages API describes a whole repository, never a selected
+        // packaging directory within it.
+        if target.subdirectory.is_some() { continue; }
         let Some((owner, repository)) = parse_github_repo(&target.location) else {
             continue;
         };

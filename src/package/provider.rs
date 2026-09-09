@@ -62,7 +62,7 @@ pub(crate) struct AnalysisTarget {
     pub(crate) location: String,
     pub(crate) revision: Option<String>,
     pub(crate) subdirectory: Option<String>,
-    /// Recipe checksum, encoded as sha256:HEX or sha512:HEX.
+    /// Recipe checksum, encoded as sha256:HEX, sha512:HEX, or b2:HEX.
     pub(crate) checksum: Option<String>,
 }
 

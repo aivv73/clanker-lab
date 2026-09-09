@@ -157,7 +157,7 @@ fn newer_database_is_refused_without_mutation() {
     let path = directory.path().join("paclang.db");
     let connection = Connection::open(&path).unwrap();
     connection
-        .execute_batch("CREATE TABLE marker (id INTEGER); PRAGMA user_version = 10;")
+.execute_batch("CREATE TABLE marker (id INTEGER); PRAGMA user_version = 12;")
         .unwrap();
     drop(connection);
 
@@ -168,7 +168,7 @@ fn newer_database_is_refused_without_mutation() {
     assert!(matches!(
         error,
         StorageError::UnsupportedSchemaVersion(version)
-            if version == MigrationVersion::from_database(10)
+            if version == MigrationVersion::from_database(12)
     ));
 
     let connection = Connection::open(&path).unwrap();
@@ -182,7 +182,7 @@ fn newer_database_is_refused_without_mutation() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 10);
+    assert_eq!(version, 12);
     assert_eq!(inventory_tables, 0);
 }
 
@@ -212,7 +212,7 @@ fn concurrent_first_open_runs_one_complete_migration() {
     let version: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 9);
+    assert_eq!(version, 11);
 }
 
 #[test]
@@ -239,7 +239,7 @@ fn version_one_database_migrates_to_current() {
     let version: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 9);
+    assert_eq!(version, 11);
     let snapshots: u32 = connection
         .query_row("SELECT count(*) FROM inventory_snapshots", [], |row| {
             row.get(0)
@@ -287,7 +287,7 @@ fn version_two_snapshot_migrates_with_unknown_staleness() {
     let version: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 9);
+    assert_eq!(version, 11);
 }
 
 fn table_row_count(connection: &Connection, table: &str) -> u32 {
@@ -405,7 +405,7 @@ fn version_three_snapshot_migrates_with_evidence_tables() {
     let version: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 9);
+    assert_eq!(version, 11);
     assert!(table_exists(&connection, "analysis_targets"));
     assert!(table_exists(&connection, "provider_attempts"));
     let stored = connection.query_row(
@@ -844,7 +844,7 @@ fn version_four_migration_preserves_attempts_and_adds_optional_provenance() {
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
             .unwrap(),
-        9
+        11
     );
     let mut new = old[0].clone();
     new.recipe = Some(
@@ -907,6 +907,11 @@ fn version_five_migration_preserves_attempts_and_adds_acquisition_state() {
     let result = crate::acquisition::AcquisitionRecord {
         state: "resource_limited".to_owned(),
         reason: Some("source file count exceeded".to_owned()),
+        submodules: vec![crate::acquisition::SubmoduleRecord {
+            path: "vendor/library".to_owned(),
+            url: "https://example.org/library.git".to_owned(),
+            verified_revision: "a".repeat(40),
+        }],
         ..Default::default()
     };
     refresh.record_acquisition(target, &result).unwrap();
@@ -974,7 +979,7 @@ fn version_six_migrates_preserving_targets_attempts_and_acquisitions() {
             .connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
             .unwrap(),
-        9
+        11
     );
     assert_eq!(
         table_row_count(&database.connection, "source_acquisitions"),

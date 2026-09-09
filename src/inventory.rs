@@ -311,7 +311,7 @@ pub(crate) fn read_live_fingerprint() -> Result<InventoryFingerprint, InventoryE
     ))
 }
 
-fn run_command(command: &'static str, arguments: &[&str]) -> Result<Output, InventoryError> {
+pub(crate) fn run_command(command: &'static str, arguments: &[&str]) -> Result<Output, InventoryError> {
     if interrupt::is_requested() {
         return Err(InventoryError::Interrupted);
     }

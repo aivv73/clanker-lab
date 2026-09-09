@@ -9,6 +9,7 @@ mod interrupt;
 mod inventory;
 mod linguist;
 mod package;
+mod payload;
 mod progress;
 mod proxy;
 mod report;
@@ -92,7 +93,7 @@ fn main() -> ExitCode {
     let format = cli
         .format
         .unwrap_or_else(|| {
-            if matches!(&cli.command, Some(Command::Riir { .. } | Command::ClankerIndex { .. })) {
+            if matches!(&cli.command, Some(Command::Riir { .. } | Command::ClankerIndex { .. } | Command::Blobs { .. })) {
                 Format::Terminal
             } else {
                 Format::for_terminal(io::stdout().is_terminal())
@@ -161,6 +162,7 @@ fn run(
             };
             render_source_bytes_report(format, selection, min_coverage, fidelity, all, top, SourcePresentation::Clanker)
         }
+        Command::Blobs { all, top } => render_blobs_report(format, selection, min_coverage, all, top),
         Command::Providers => render_snapshot_report(format, selection, min_coverage, true),
         Command::Refresh {
             metadata_only: _,
@@ -202,6 +204,7 @@ fn run(
                     &mut progress,
                     sources_only,
                     proxy_url.as_deref(),
+                    cachyos,
                 )
                 .map_err(map_storage_error);
                 progress.finish();
@@ -420,6 +423,10 @@ fn render_source_bytes_report(
             crate::report::source_bytes::stale_breakdown(&profiles),
         );
     }
+    let (visibility, staleness) = if matches!(presentation, SourcePresentation::Clanker) {
+        let (visibility, staleness) = checked_payload_report(&snapshot, &selection, staleness)?;
+        (Some(visibility.summary), staleness)
+    } else { (None, staleness) };
     let candidates = if matches!(presentation, SourcePresentation::Riir(_)) {
         report::riir::candidates(&snapshot, &database, staleness, selection.clone(), fidelity)?
     } else {
@@ -435,7 +442,7 @@ fn render_source_bytes_report(
     let limit = crate::report::source_bytes::display_limit(all, top);
     let rendered = match presentation {
         SourcePresentation::Riir(bar) => report::riir::RiirReport::new(&report, candidates).render(format, bar),
-        SourcePresentation::Clanker => report::clanker_index::ClankerIndexReport::new(&report).render(format, limit),
+        SourcePresentation::Clanker => report::clanker_index::ClankerIndexReport::new(&report).with_visibility(visibility.expect("clanker visibility")).render(format, limit),
         SourcePresentation::Bytes => format.render_source_bytes(&report, limit),
     }.map_err(AppError::render)?;
     let meets_coverage = report.meets_coverage(min_coverage);
@@ -558,4 +565,38 @@ fn format_from_arguments() -> Option<Format> {
         }
     }
     None
+}
+
+fn checked_payload_report(
+    snapshot: &storage::PublishedSnapshot,
+    selection: &report::PopulationSelection,
+    staleness: SnapshotStaleness,
+) -> Result<(payload::Report, SnapshotStaleness), AppError> {
+    let result = payload::build(snapshot, selection, staleness);
+    if matches!(staleness, SnapshotStaleness::Current) {
+        let after = inventory::read_live_fingerprint().map_err(map_inventory_error)?;
+        if snapshot.fingerprint.as_ref() != Some(&after) {
+            return Ok((payload::build(snapshot, selection, SnapshotStaleness::Stale), SnapshotStaleness::Stale));
+        }
+    }
+    if interrupt::is_requested() { return Err(AppError::Interrupted); }
+    Ok((result, staleness))
+}
+
+fn render_blobs_report(
+    format: Format, selection: report::PopulationSelection, min_coverage: Option<f64>,
+    all: bool, top: Option<usize>,
+) -> Result<RunOutput, AppError> {
+    let database = storage::Database::open(&storage::database_path().map_err(AppError::storage)?).map_err(AppError::storage)?;
+    let snapshot = database.published_provider_snapshot().map_err(AppError::storage)?.ok_or(AppError::NoSnapshot)?;
+    let live = inventory::read_live_fingerprint().map_err(map_inventory_error)?;
+    let staleness = match &snapshot.fingerprint {
+        Some(fingerprint) if *fingerprint == live => SnapshotStaleness::Current,
+        Some(_) => SnapshotStaleness::Stale,
+        None => SnapshotStaleness::Unknown,
+    };
+    let (payload, staleness) = checked_payload_report(&snapshot, &selection, staleness)?;
+    let count = CountReport::from_provider_snapshot(&snapshot, staleness, selection.clone());
+    let rendered = report::blobs::render(&payload, format, staleness, &selection, all, top).map_err(AppError::render)?;
+    Ok(RunOutput { rendered, meets_coverage: count.meets_coverage(min_coverage), snapshot_read_guard: Some(snapshot) })
 }

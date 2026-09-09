@@ -7,6 +7,7 @@ description = "Inspect programming-language analysis for installed ALPM packages
 
 [dependencies]
 base64 = "0.22.1"
+blake2 = "0.10.6"
 clap = { version = "4.5.47", features = ["derive", "env"] }
 curl = "0.4.50"
 fs2 = "0.4.3"

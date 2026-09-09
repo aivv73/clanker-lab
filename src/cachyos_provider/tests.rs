@@ -200,7 +200,7 @@ fn nested_recipes_keep_their_full_directory_and_custom_presence() {
 #[test]
 fn rebuild_fallback_reports_the_actual_source_failure() {
     let recipe = Recipe::from_srcinfo(
-        b"pkgbase = wget\n\tpkgver = 1.25.0\n\tpkgrel = 6\n\tsource = git+https://gitlab.com/gnuwget/wget.git?signed#tag=v1.25.0\n\tsource = git+https://git.savannah.gnu.org/git/gnulib.git\npkgname = wget\n",
+        b"pkgbase = wget\n\tpkgver = 1.25.0\n\tpkgrel = 6\n\tsource = git+https://gitlab.com/gnuwget/wget.git?signed#tag=v1.25.0\n\tsource = git+https://git.savannah.gnu.org/git/unclassified.git\npkgname = wget\n",
         RecipeProvenance::new("https://example.org/recipe", COMMIT).unwrap(),
     );
     assert_eq!(
@@ -213,7 +213,7 @@ fn rebuild_fallback_reports_the_actual_source_failure() {
             }
         ),
         AttemptOutcome::Unresolved {
-            reason: "unpinned Git source is unsupported".to_owned()
+            reason: "unclassified unpinned secondary Git source: https://git.savannah.gnu.org/git/unclassified.git; full inputs in pinned recipe".to_owned()
         }
     );
 }

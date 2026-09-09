@@ -1,14 +1,24 @@
-use super::{AcquisitionRecord, Error, Limits, account, safe_path};
+use super::{AcquisitionRecord, Error, Limits, account, materialize_links, safe_path};
 use crate::package::provider::AnalysisTarget;
 use git2::{
-    AutotagOption, FetchOptions, IndexEntry, IndexTime, ObjectType, Oid, RemoteCallbacks,
-    RemoteRedirect, Repository, RepositoryInitOptions, Signature,
+    AutotagOption, FetchOptions, IndexEntry, IndexTime, ObjectType, Oid, ProxyOptions,
+    RemoteCallbacks, RemoteRedirect, Repository, RepositoryInitOptions, Signature,
 };
 use std::cell::Cell;
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
+
+struct Context<'a> {
+    limits: &'a Limits,
+    directory: &'a Path,
+    record: &'a mut AcquisitionRecord,
+    proxy: Option<&'a str>,
+    expanded: u64,
+    repositories: usize,
+}
 
 pub(super) fn fetch(
     target: &AnalysisTarget,
@@ -19,6 +29,45 @@ pub(super) fn fetch(
     proxy: Option<&str>,
 ) -> Result<(), Error> {
     git2::opts::strict_hash_verification(true);
+    let mut context = Context {
+        limits,
+        directory,
+        record,
+        proxy,
+        expanded: 0,
+        repositories: 0,
+    };
+    let (repo, id) = fetch_repository(target, &mut context)?;
+    context.record.verified_revision = Some(id.to_string());
+    let mut links = Vec::new();
+    materialize_repository(
+        &repo,
+        id,
+        &target.location,
+        tree,
+        Path::new(""),
+        &mut context,
+        &mut links,
+        0,
+    )?;
+    materialize_links(tree, &links)?;
+    initialize(tree)
+}
+
+fn fetch_repository(
+    target: &AnalysisTarget,
+    context: &mut Context<'_>,
+) -> Result<(Repository, Oid), Error> {
+    let limits = context.limits;
+    let proxy = context.proxy;
+    if context.repositories >= 129 {
+        return Err(Error::Limited("Git submodule count exceeded"));
+    }
+    let directory = context
+        .directory
+        .join(format!("upstream-{}", context.repositories));
+    context.repositories += 1;
+    super::http::validate_url(&target.location)?;
     let revision = target
         .revision
         .as_deref()
@@ -41,7 +90,7 @@ pub(super) fn fetch(
         _ => return Err(Error::Failed("Git source must pin a tag or full commit")),
     };
     let repo = Repository::init_opts(
-        directory.join("upstream"),
+        directory,
         RepositoryInitOptions::new()
             .bare(true)
             .external_template(false),
@@ -56,14 +105,25 @@ pub(super) fn fetch(
     let mut callbacks = RemoteCallbacks::new();
     callbacks.transfer_progress(|stats| {
         downloaded.set(stats.received_bytes() as u64);
-        if downloaded.get() > limits.max_download_bytes {
+        if downloaded.get()
+            > limits
+                .max_download_bytes
+                .saturating_sub(context.record.downloaded_bytes)
+        {
             limited.set(true);
             return false;
         }
         true
     });
+    // libgit2 defaults to GIT_PROXY_NONE, which ignores http.proxy config.
+    // Pass the explicit URL in fetch options; retain NONE without --proxy-url.
+    let mut proxy_options = ProxyOptions::new();
+    if let Some(url) = proxy {
+        proxy_options.url(url);
+    }
     let mut options = FetchOptions::new();
     options
+        .proxy_options(proxy_options)
         .remote_callbacks(callbacks)
         .depth(1)
         .download_tags(AutotagOption::None)
@@ -74,7 +134,11 @@ pub(super) fn fetch(
         Some(&mut options),
         None,
     );
-    record.downloaded_bytes = downloaded.get();
+    drop(options);
+    context.record.downloaded_bytes = context
+        .record
+        .downloaded_bytes
+        .saturating_add(downloaded.get());
     if limited.get() {
         return Err(Error::Limited("source download byte limit exceeded"));
     }
@@ -90,15 +154,15 @@ pub(super) fn fetch(
     // Verify every fetched object's hash. Check expanded object sizes before
     // reading bodies; reject a pack whose expansion exceeds the source budget.
     let odb = repo.odb()?;
-    let mut expanded = 0u64;
     let mut object_error = None;
     let verified = odb.foreach(|oid| {
         let checked = (|| -> Result<(), Error> {
             let (size, _) = odb.read_header(*oid)?;
-            expanded = expanded
+            context.expanded = context
+                .expanded
                 .checked_add(size as u64)
                 .ok_or(Error::Limited("Git object expansion limit exceeded"))?;
-            if expanded > limits.max_extracted_bytes {
+            if context.expanded > limits.max_extracted_bytes {
                 return Err(Error::Limited("Git object expansion limit exceeded"));
             }
             let object = odb.read(*oid)?;
@@ -117,29 +181,57 @@ pub(super) fn fetch(
         return Err(error);
     }
     verified?;
-    record.verified_revision = Some(commit.id().to_string());
-    write_tree(
-        &repo,
-        &commit.tree()?,
-        tree,
-        Path::new(""),
-        limits,
-        record,
-        0,
-    )?;
-    initialize(tree)
+    let id = commit.id();
+    drop(commit);
+    drop(odb);
+    drop(remote);
+    Ok((repo, id))
 }
 
+#[allow(clippy::too_many_arguments)]
+fn materialize_repository(
+    repo: &Repository,
+    id: Oid,
+    url: &str,
+    destination: &Path,
+    prefix: &Path,
+    context: &mut Context<'_>,
+    links: &mut Vec<(std::path::PathBuf, String)>,
+    depth: usize,
+) -> Result<(), Error> {
+    if depth > 8 {
+        return Err(Error::Limited("Git submodule nesting limit exceeded"));
+    }
+    let source = repo.find_commit(id)?.tree()?;
+    let modules = submodule_urls(repo, &source)?;
+    write_tree(
+        repo,
+        &source,
+        destination,
+        prefix,
+        prefix,
+        url,
+        &modules,
+        context,
+        links,
+        depth,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
 fn write_tree(
     repo: &Repository,
     source: &git2::Tree<'_>,
     destination: &Path,
     prefix: &Path,
-    limits: &Limits,
-    record: &mut AcquisitionRecord,
+    repository_prefix: &Path,
+    repository_url: &str,
+    modules: &BTreeMap<std::path::PathBuf, String>,
+    context: &mut Context<'_>,
+    links: &mut Vec<(std::path::PathBuf, String)>,
     depth: usize,
 ) -> Result<(), Error> {
-    if depth > 128 {
+    if prefix.components().count() > 128 {
         return Err(Error::Limited("source tree depth exceeded"));
     }
     for entry in source {
@@ -154,27 +246,29 @@ fn write_tree(
         let output = destination.join(&path);
         match entry.kind() {
             Some(ObjectType::Tree) => {
-                account(record, limits, 0)?;
+                account(context.record, context.limits, 0)?;
                 fs::create_dir(&output)?;
                 write_tree(
                     repo,
                     &repo.find_tree(entry.id())?,
                     destination,
                     &path,
-                    limits,
-                    record,
-                    depth + 1,
+                    repository_prefix,
+                    repository_url,
+                    modules,
+                    context,
+                    links,
+                    depth,
                 )?;
             }
             Some(ObjectType::Blob) => {
                 let (size, _) = repo.odb()?.read_header(entry.id())?;
-                account(record, limits, size as u64)?;
+                account(context.record, context.limits, size as u64)?;
                 let blob = repo.find_blob(entry.id())?;
                 if entry.filemode() == 0o120000 {
                     let value = std::str::from_utf8(blob.content())
                         .map_err(|_| Error::Failed("Git symlink is not UTF-8"))?;
-                    safe_path(value)?;
-                    std::os::unix::fs::symlink(value, output)?;
+                    links.push((path, value.to_owned()));
                 } else {
                     fs::OpenOptions::new()
                         .write(true)
@@ -191,14 +285,196 @@ fn write_tree(
                     )?;
                 }
             }
-            _ => {
-                return Err(Error::Failed(
-                    "Git submodules are unsupported; source tree is incomplete",
-                ));
+            Some(ObjectType::Commit) if entry.filemode() == 0o160000 => {
+                let relative = path
+                    .strip_prefix(repository_prefix)
+                    .map_err(|_| Error::Failed("invalid submodule path"))?;
+                let location = modules.get(relative).ok_or(Error::Failed(
+                    "Git gitlink has no root .gitmodules mapping; source tree is incomplete",
+                ))?;
+                let location = resolve_submodule_url(repository_url, location)?;
+                if depth >= 8 {
+                    return Err(Error::Limited("Git submodule nesting limit exceeded"));
+                }
+                let target = AnalysisTarget {
+                    location: location.clone(),
+                    revision: Some(format!("commit:{}", entry.id())),
+                    subdirectory: None,
+                    checksum: None,
+                };
+                let (child, id) = fetch_repository(&target, context)?;
+                account(context.record, context.limits, 0)?;
+                fs::create_dir(&output)?;
+                context.record.submodules.push(super::SubmoduleRecord {
+                    path: path.to_string_lossy().into_owned(),
+                    url: location.clone(),
+                    verified_revision: id.to_string(),
+                });
+                materialize_repository(
+                    &child,
+                    id,
+                    &location,
+                    destination,
+                    &path,
+                    context,
+                    links,
+                    depth + 1,
+                )?;
             }
+            _ => return Err(Error::Failed("unsupported Git tree object")),
         }
     }
     Ok(())
+}
+
+fn resolve_submodule_url(parent: &str, child: &str) -> Result<String, Error> {
+    if child.len() > 4096 || child.contains('\\') || child.chars().any(char::is_control) {
+        return Err(Error::Failed("invalid Git submodule URL"));
+    }
+    let resolved = if child.starts_with("../") || child.starts_with("./") {
+        let mut base = super::http::validate_url(parent)?;
+        base.set_query(None);
+        // Git resolves relative URLs from the repository directory itself.
+        base.set_path(&format!("{}/", base.path().trim_end_matches('/')));
+        base.join(child)
+            .map_err(|_| Error::Failed("invalid relative submodule URL"))?
+            .to_string()
+    } else {
+        child.to_owned()
+    };
+    let url = super::http::validate_url(&resolved)?;
+    if url.query().is_some() {
+        return Err(Error::Failed("Git submodule URL query is unsupported"));
+    }
+    Ok(url.to_string())
+}
+
+/// Parse a bounded, deliberately restricted Git config subset, never loading
+/// includes or running update commands. Unsupported syntax fails explicitly.
+fn submodule_urls(
+    repo: &Repository,
+    tree: &git2::Tree<'_>,
+) -> Result<BTreeMap<std::path::PathBuf, String>, Error> {
+    let Some(entry) = tree.get_name(".gitmodules") else {
+        return Ok(BTreeMap::new());
+    };
+    if entry.filemode() != 0o100644 && entry.filemode() != 0o100755 {
+        return Err(Error::Failed(".gitmodules must be a regular file"));
+    }
+    let (size, _) = repo.odb()?.read_header(entry.id())?;
+    if size > 65536 {
+        return Err(Error::Limited(".gitmodules size limit exceeded"));
+    }
+    let blob = repo.find_blob(entry.id())?;
+    let text = std::str::from_utf8(blob.content())
+        .map_err(|_| Error::Failed(".gitmodules is not UTF-8"))?;
+    parse_modules(text)
+}
+
+fn config_value(input: &str) -> Result<String, Error> {
+    let mut result = String::new();
+    let mut quoted = false;
+    let mut escaped = false;
+    for ch in input.trim().chars() {
+        if escaped {
+            result.push(match ch {
+                'n' => '\n',
+                't' => '\t',
+                'b' => '\u{8}',
+                '\\' => '\\',
+                '"' => '"',
+                _ => return Err(Error::Failed("unsupported .gitmodules escape")),
+            });
+            escaped = false;
+        } else {
+            match ch {
+                '\\' => escaped = true,
+                '"' => quoted = !quoted,
+                '#' | ';' if !quoted => break,
+                _ => result.push(ch),
+            }
+        }
+    }
+    if quoted || escaped {
+        return Err(Error::Failed(
+            "unsupported .gitmodules quoting or continuation",
+        ));
+    }
+    Ok(result.trim().to_owned())
+}
+
+fn parse_modules(text: &str) -> Result<BTreeMap<std::path::PathBuf, String>, Error> {
+    let mut sections = BTreeMap::<String, BTreeMap<String, String>>::new();
+    let mut current = None;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+        if line.starts_with('[') {
+            let end = line
+                .rfind(']')
+                .ok_or(Error::Failed("invalid .gitmodules section"))?;
+            let tail = line[end + 1..].trim();
+            if !tail.is_empty() && !tail.starts_with('#') && !tail.starts_with(';') {
+                return Err(Error::Failed("invalid .gitmodules section suffix"));
+            }
+            let section = line[1..end].trim();
+            let (kind, name) = section
+                .split_once(char::is_whitespace)
+                .ok_or(Error::Failed("unsupported .gitmodules section"))?;
+            let name = name.trim();
+            if !kind.eq_ignore_ascii_case("submodule")
+                || !name.starts_with('"')
+                || !name.ends_with('"')
+            {
+                return Err(Error::Failed(
+                    "unsupported .gitmodules section; includes are not allowed",
+                ));
+            }
+            let name = config_value(name)?;
+            if name.is_empty() || sections.contains_key(&name) {
+                return Err(Error::Failed("duplicate or empty .gitmodules section"));
+            }
+            sections.insert(name.clone(), BTreeMap::new());
+            if sections.len() > 128 {
+                return Err(Error::Limited("Git submodule count exceeded"));
+            }
+            current = Some(name);
+        } else {
+            let section = current
+                .as_ref()
+                .ok_or(Error::Failed(".gitmodules key outside section"))?;
+            let (key, value) = line.split_once('=').unwrap_or((line, "true"));
+            let key = key.trim().to_ascii_lowercase();
+            if !key.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-') || key.is_empty() {
+                return Err(Error::Failed("invalid .gitmodules key"));
+            }
+            let value = config_value(value)?;
+            if sections
+                .get_mut(section)
+                .unwrap()
+                .insert(key, value)
+                .is_some()
+            {
+                return Err(Error::Failed("duplicate .gitmodules key"));
+            }
+        }
+    }
+    let mut result = BTreeMap::new();
+    for values in sections.values() {
+        let path = values
+            .get("path")
+            .ok_or(Error::Failed("submodule path missing"))?;
+        let url = values
+            .get("url")
+            .ok_or(Error::Failed("submodule URL missing"))?;
+        let path = safe_path(path)?;
+        if result.insert(path, url.clone()).is_some() {
+            return Err(Error::Failed("duplicate submodule path"));
+        }
+    }
+    Ok(result)
 }
 
 /// Build a fresh repository without config, hooks, filters, ignored-file rules,
@@ -261,4 +537,101 @@ pub(super) fn initialize(tree: &Path) -> Result<(), Error> {
         &[],
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn submodule_urls_follow_repository_relative_semantics_and_reject_other_transports() {
+        let parent = "https://code.qt.io/qt/qtquick3d";
+        assert_eq!(
+            resolve_submodule_url(parent, "../qtquick3d-assimp.git").unwrap(),
+            "https://code.qt.io/qt/qtquick3d-assimp.git"
+        );
+        assert_eq!(
+            resolve_submodule_url(parent, "./child.git").unwrap(),
+            "https://code.qt.io/qt/qtquick3d/child.git"
+        );
+        for url in [
+            "git@github.com:owner/repo.git",
+            "ssh://host/repo",
+            "file:///tmp/repo",
+            "/tmp/repo",
+            "http://example.org/repo",
+            "https://user:pass@example.org/repo",
+            "https://example.org/repo#main",
+            "https://example.org/repo?branch=main",
+            "../bad\\repo",
+        ] {
+            assert!(resolve_submodule_url(parent, url).is_err(), "{url}");
+        }
+    }
+
+    #[test]
+    fn submodule_metadata_is_bounded_unambiguous_and_never_loads_includes() {
+        let modules = parse_modules("[submodule \"gir\"] # comment\n path = \"vendor/gir\"\n url = ../gir.git # comment\n update = none\n branch = main\n").unwrap();
+        assert_eq!(modules[Path::new("vendor/gir")], "../gir.git");
+        for text in [
+            "[include]\npath = /etc/gitconfig",
+            "[submodule \"x\"]\npath = ../escape\nurl = ../x.git",
+            "[submodule \"x\"]\npath = .git/x\nurl = ../x.git",
+            "[submodule \"x\"]\npath = x\npath = y\nurl = ../x.git",
+            "[submodule \"x\"]\npath = x",
+            "[submodule \"x\"]\npath = x\nurl = ../x.git\n[submodule \"y\"]\npath = x\nurl = ../y.git",
+            "[submodule \"x\"]\npath = x\nurl = \"unterminated",
+        ] {
+            assert!(parse_modules(text).is_err(), "{text}");
+        }
+        let many = (0..129)
+            .map(|i| format!("[submodule \"{i}\"]\npath = p{i}\nurl = ../x.git\n"))
+            .collect::<String>();
+        assert!(matches!(parse_modules(&many), Err(Error::Limited(_))));
+    }
+
+    #[test]
+    fn gitlinks_without_root_metadata_fail_instead_of_silently_omitting_source() {
+        let directory = tempfile::tempdir().unwrap();
+        let repo = Repository::init_bare(directory.path().join("repo")).unwrap();
+        let mut builder = repo.treebuilder(None).unwrap();
+        builder
+            .insert("missing", Oid::from_str(&"a".repeat(40)).unwrap(), 0o160000)
+            .unwrap();
+        let tree = repo.find_tree(builder.write().unwrap()).unwrap();
+        let signature = Signature::now("Fixture", "fixture@example.org").unwrap();
+        let id = repo
+            .commit(None, &signature, &signature, "fixture", &tree, &[])
+            .unwrap();
+        let limits = Limits {
+            source_jobs: 1,
+            max_download_bytes: 1024,
+            max_extracted_bytes: 4096,
+            max_source_files: 100,
+            source_timeout_seconds: 15,
+        };
+        let mut record = AcquisitionRecord::default();
+        let mut context = Context {
+            limits: &limits,
+            directory: directory.path(),
+            record: &mut record,
+            proxy: None,
+            expanded: 0,
+            repositories: 0,
+        };
+        let result = materialize_repository(
+            &repo,
+            id,
+            "https://example.org/root.git",
+            directory.path(),
+            Path::new(""),
+            &mut context,
+            &mut Vec::new(),
+            0,
+        );
+        assert!(
+            matches!(result, Err(Error::Failed(reason)) if reason.contains("no root .gitmodules mapping"))
+        );
+        assert_eq!(context.repositories, 0);
+    }
 }

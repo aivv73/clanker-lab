@@ -1,3 +1,4 @@
+pub(crate) mod blobs;
 pub(crate) mod clanker_index;
 mod clanker_policy;
 mod clanker_presentation;

@@ -690,3 +690,142 @@ fn clanker_discloses_stale_analysis_and_handles_empty_population() {
     let human = String::from_utf8(query(&["clanker-index"]).stdout).unwrap();
     assert!(human.contains("stale source bytes (included): 100 B"));
 }
+
+#[test]
+fn blobs_partitions_installed_bytes_and_never_equates_unresolved_with_opaque() {
+    use sha2::{Digest, Sha256};
+    let data = tempfile::tempdir().unwrap();
+    let bin = fixture_bin();
+    let files = tempfile::tempdir().unwrap();
+    assert!(
+        refresh(&["--format", "json"], data.path(), bin.path())
+            .status
+            .success()
+    );
+    let query = |args: &[&str]| run_with_inventory(args, data.path(), bin.path());
+    let initial: serde_json::Value =
+        serde_json::from_slice(&query(&["blobs", "--format", "json"]).stdout).unwrap();
+    assert_eq!(initial["opaque_bytes"], 0);
+    assert_eq!(initial["unknown_bytes"], initial["denominator_bytes"]);
+
+    let mut elf = vec![0u8; 128];
+    elf[..7].copy_from_slice(b"\x7fELF\x02\x01\x01");
+    elf[16] = 3;
+    for name in ["alpha", "suite-cli"] {
+        std::fs::write(files.path().join(name), &elf).unwrap();
+    }
+    let sha = format!("{:x}", Sha256::digest(&elf));
+    let pacman = std::fs::read_to_string(bin.path().join("pacman")).unwrap();
+    let wrapper = format!(
+        "#!/bin/sh\nif [ \"$1\" = '-Qql' ]; then printf '%s/%s\\n' '{}' \"$3\"; exit 0; fi\n",
+        files.path().display()
+    );
+    write_executable(
+        &bin.path().join("pacman"),
+        &pacman.replacen("#!/bin/sh\n", &wrapper, 1),
+    );
+    for (name, version, state) in [
+        ("alpha", "1.0-1", "no_language"),
+        ("foreign-tool", "3.0-1", "analyzed"),
+        ("suite-cli", "2.0-1", "analyzed"),
+    ] {
+        seed_profile(
+            data.path(),
+            name,
+            version,
+            &format!("https://example.invalid/{name}.tar.gz"),
+            state,
+        );
+    }
+    let db = Connection::open(data.path().join("paclang/paclang.db")).unwrap();
+    db.execute("UPDATE analysis_targets SET revision = ''", [])
+        .unwrap();
+    db.execute("UPDATE installed_packages SET installed_bytes = CASE name WHEN 'alpha' THEN 256 WHEN 'foreign-tool' THEN 512 WHEN 'suite-cli' THEN 1024 ELSE 80 END", []).unwrap();
+    db.execute("UPDATE provider_attempts SET recipe_location = 'https://example.invalid/recipe', recipe_commit = ?1", ["a".repeat(40)]).unwrap();
+    db.execute(
+        "UPDATE language_profiles SET languages_json = ?1 WHERE state = 'analyzed'",
+        [r#"[{"language":"Rust","bytes":100}]"#],
+    )
+    .unwrap();
+    db.execute("INSERT INTO source_acquisitions (target_id, checksum, state, downloaded_bytes, extracted_bytes, files, content_sha256, recorded_at)
+        SELECT target_id, checksum, 'acquired', 128, 128, 1, ?1, 'now' FROM language_profiles", [&sha]).unwrap();
+    let binary_manifest = serde_json::json!({"complete":true,"reason":null,"source_representation":false,"binaries":[{"path":"bin/app","bytes":128,"sha256":sha}]}).to_string();
+    db.execute("INSERT INTO source_payload_evidence (target_id, checksum, manifest_json, recorded_at)
+        SELECT target_id, checksum, CASE state WHEN 'no_language' THEN ?1 ELSE ?2 END, 'now' FROM language_profiles",
+        rusqlite::params![binary_manifest, r#"{"complete":true,"reason":null,"source_representation":true,"binaries":[]}"#]).unwrap();
+    db.execute("INSERT INTO provider_attempts (package_name, package_version, provider, outcome, target_id, evidence_grade, recorded_at, recipe_location, recipe_commit, source_checksum)
+        SELECT 'suite-cli', '2.0-1', 'cachyos', outcome, target_id, evidence_grade, recorded_at, recipe_location, recipe_commit, source_checksum FROM provider_attempts WHERE package_name = 'alpha'", []).unwrap();
+    db.execute("INSERT INTO provider_attempts (package_name, package_version, provider, outcome, recorded_at, recipe_location, recipe_commit)
+        VALUES ('suite-docs','2.0-1','arch','source_free','now','https://example.invalid/recipe',?1)", ["a".repeat(40)]).unwrap();
+
+    let output = query(&["blobs", "--format", "json"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["denominator_bytes"], 1792);
+    assert_eq!(report["source_free_bytes"], 80);
+    assert_eq!(report["opaque_bytes"], 256);
+    assert_eq!(report["source_visible_bytes"], 1408);
+    assert_eq!(report["unknown_bytes"], 128);
+    let rows = report["packages"].as_array().unwrap();
+    let alpha = rows.iter().find(|r| r["name"] == "alpha").unwrap();
+    let mixed = rows.iter().find(|r| r["name"] == "suite-cli").unwrap();
+    assert_eq!(alpha["classification"], "opaque-binary");
+    assert_eq!(alpha["evidence"][0]["sha256"], sha);
+    assert_eq!(alpha["provenance_state"], "opaque-confirmed");
+    assert_eq!(mixed["classification"], "mixed");
+    assert_eq!(mixed["opaque_bytes"], 128);
+    assert_eq!(mixed["source_visible_bytes"], 896);
+    let clanker: serde_json::Value =
+        serde_json::from_slice(&query(&["clanker-index", "--format", "json"]).stdout).unwrap();
+    assert_eq!(clanker["source_visibility"]["opaque_bytes"], 256);
+    assert_eq!(clanker["grade"], "S+");
+    for format in ["terminal", "markdown", "toon"] {
+        assert!(query(&["blobs", "--format", format]).status.success());
+    }
+    let filtered: serde_json::Value =
+        serde_json::from_slice(&query(&["blobs", "--package", "alpha", "--format", "json"]).stdout)
+            .unwrap();
+    assert_eq!(filtered["denominator_bytes"], 256);
+    assert_eq!(filtered["opaque_ratio"], 0.5);
+    let free: serde_json::Value = serde_json::from_slice(
+        &query(&["blobs", "--package", "suite-docs", "--format", "json"]).stdout,
+    )
+    .unwrap();
+    assert_eq!(free["denominator_bytes"], 0);
+    assert!(free["opaque_ratio"].is_null());
+
+    // A modified installed binary is not assigned opacity by name or size.
+    let mut modified = elf.clone();
+    modified[127] = 1;
+    std::fs::write(files.path().join("alpha"), &modified).unwrap();
+    let mismatch: serde_json::Value =
+        serde_json::from_slice(&query(&["blobs", "--package", "alpha", "--format", "json"]).stdout)
+            .unwrap();
+    assert_eq!(mismatch["opaque_bytes"], 0);
+    assert_eq!(mismatch["unknown_bytes"], 256);
+    std::fs::write(files.path().join("alpha"), &elf).unwrap();
+
+    // A source-bearing prebuilt input is suspicion, not confirmed opacity.
+    db.execute("UPDATE source_payload_evidence SET manifest_json = replace(manifest_json, 'false', 'true')", []).unwrap();
+    db.execute("UPDATE language_profiles SET state='analyzed', total_bytes=100, languages_json=?1 WHERE state='no_language'", [r#"[{"language":"C","bytes":100}]"#]).unwrap();
+    let suspected: serde_json::Value =
+        serde_json::from_slice(&query(&["blobs", "--package", "alpha", "--format", "json"]).stdout)
+            .unwrap();
+    assert_eq!(suspected["opaque_bytes"], 0);
+    assert_eq!(suspected["unknown_bytes"], 128);
+    assert_eq!(
+        suspected["packages"][0]["provenance_state"],
+        "opaque-suspected"
+    );
+    // Upgrade invalidates current-version mappings and disallows live matching
+    // against the stale inventory instead of transferring a binary label.
+    upgrade_alpha_to_1_1(bin.path());
+    let stale: serde_json::Value =
+        serde_json::from_slice(&query(&["blobs", "--format", "json"]).stdout).unwrap();
+    assert_eq!(stale["snapshot_staleness"], "stale");
+    assert_eq!(stale["opaque_bytes"], 0);
+}

@@ -38,6 +38,8 @@ pub(crate) struct ClankerIndexReport<'a> {
     policy: &'static str,
     language_registry: RegistryIdentity,
     fidelity: FidelitySelection,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_visibility: Option<crate::payload::Summary>,
     grade: Option<Tier>,
     gradeable_bytes: u64,
     ungraded_programming_bytes: u64,
@@ -118,6 +120,7 @@ impl<'a> ClankerIndexReport<'a> {
                 source_sha256: &policy::registry().source_sha256,
             },
             fidelity: source.fidelity,
+            source_visibility: None,
             grade: policy::aggregate(weighted_sum, u128::from(gradeable_bytes)),
             gradeable_bytes,
             ungraded_programming_bytes,
@@ -132,6 +135,11 @@ impl<'a> ClankerIndexReport<'a> {
             unknown_type_languages,
             source_analysis: source,
         }
+    }
+
+    pub(crate) fn with_visibility(mut self, summary: crate::payload::Summary) -> Self {
+        self.source_visibility = Some(summary);
+        self
     }
 
     pub(crate) fn render(
@@ -166,6 +174,10 @@ impl<'a> ClankerIndexReport<'a> {
             presentation::system_grade(self.grade),
             self.policy,
         );
+        if let Some(visibility) = &self.source_visibility {
+            output.push_str(&visibility.human());
+            output.push('\n');
+        }
         let visible = limit
             .unwrap_or(self.languages.len())
             .min(self.languages.len());

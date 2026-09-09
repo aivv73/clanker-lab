@@ -311,9 +311,13 @@ fn throttled_recipe_recovers_after_retry_after_delay() {
 #[test]
 fn persistent_throttling_stops_after_three_retries() {
     let (url, thread) = rate_limit_server(vec![429; 4], "0");
-    let results = fetch_all(&[url], None).unwrap();
+    let results = fetch_all(std::slice::from_ref(&url), None).unwrap();
     assert!(matches!(results[0], Err(FetchError::RateLimited(_))));
     thread.join().unwrap();
+    // Exhausted retries open a finite host-wide circuit. Later batches wait
+    // it out (see finite_host_cooldown_is_waited_out_not_skipped) instead of
+    // hammering the server; only over-long circuits skip immediately.
+    assert!(matches!(super::host_defer_state(&url), super::DeferState::Wait(_)));
 }
 
 #[test]
@@ -335,4 +339,89 @@ fn retry_preserves_successes_and_input_order() {
     );
     ready_thread.join().unwrap();
     retry_thread.join().unwrap();
+}
+
+#[test]
+fn host_cooldown_survives_batches_and_provider_paths() {
+    // The full first batch reaches the server; only later batches observe the
+    // cooldown set by exhausted retries, including an unrepresentably long
+    // Retry-After. Remaining items in the same batch are paced, not deferred.
+    let (url, thread) = rate_limit_server(vec![429; 8], "999999999999999999999");
+    let urls = vec![url.clone(); 10];
+    let results = fetch_all(&urls, None).unwrap();
+    assert!(results[..8].iter().all(|r| matches!(r, Err(FetchError::RateLimited(_)))));
+    assert!(results[8..].iter().all(|r| *r == Err(FetchError::Failed(super::HOST_DEFERRED))));
+    thread.join().unwrap();
+    let mut fallback = url;
+    fallback.set_path("/another-provider/recipe");
+    let (healthy, thread) = server(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok".to_vec());
+    assert_eq!(fetch_all(&[fallback, healthy], None).unwrap(), vec![
+        Err(FetchError::Failed(super::HOST_DEFERRED)), Ok(b"ok".to_vec())
+    ]);
+    thread.join().unwrap();
+}
+
+#[test]
+fn expired_host_cooldown_allows_requests_again() {
+    let (url, thread) = server(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok".to_vec());
+    super::HOST_COOLDOWNS.get_or_init(Default::default).lock().unwrap()
+        .insert(url.origin().ascii_serialization(), Some(Instant::now() - Duration::from_secs(1)));
+    assert_eq!(fetch_all(&[url], None).unwrap(), vec![Ok(b"ok".to_vec())]);
+    thread.join().unwrap();
+}
+
+#[test]
+fn finite_host_cooldown_is_waited_out_not_skipped() {
+    // A later batch (or a provider fallback sharing the origin) waits for a
+    // finite cooldown to expire and then proceeds, instead of losing the
+    // request to an explicit deferral.
+    let (url, thread) = server(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok".to_vec());
+    super::HOST_COOLDOWNS.get_or_init(Default::default).lock().unwrap()
+        .insert(url.origin().ascii_serialization(), Some(Instant::now() + Duration::from_millis(400)));
+    let start = Instant::now();
+    assert_eq!(fetch_all(&[url], None).unwrap(), vec![Ok(b"ok".to_vec())]);
+    assert!(start.elapsed() >= Duration::from_millis(400));
+    thread.join().unwrap();
+}
+
+#[test]
+fn overlong_host_cooldown_still_skips_immediately() {
+    // Cooldowns beyond the wait budget (and unrepresentable ones) keep the
+    // immediate deferral so one episode cannot stall the refresh for minutes.
+    // No server is needed: the deferral happens before any connection.
+    let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let url: url::Url = format!("http://127.0.0.1:{port}/recipe").parse().unwrap();
+    super::HOST_COOLDOWNS.get_or_init(Default::default).lock().unwrap()
+        .insert(url.origin().ascii_serialization(), Some(Instant::now() + Duration::from_secs(3600)));
+    let start = Instant::now();
+    assert_eq!(
+        fetch_all(std::slice::from_ref(&url), None).unwrap(),
+        vec![Err(FetchError::Failed(super::HOST_DEFERRED))]
+    );
+    assert!(start.elapsed() < Duration::from_secs(5));
+    // The skipped cooldown stays in place for the next caller.
+    assert!(super::host_is_deferred(&url));
+}
+
+#[test]
+fn pacing_survives_calls_and_recovers_gradually() {
+    let (url, thread) = rate_limit_server(vec![200, 200], "0");
+    assert!(fetch_all(std::slice::from_ref(&url), None).unwrap()[0].is_ok());
+    let start = Instant::now();
+    assert!(fetch_all(&[url], None).unwrap()[0].is_ok());
+    // Conservative start: one request with a one-second pause between groups.
+    assert!(start.elapsed() >= Duration::from_millis(900));
+    thread.join().unwrap();
+
+    let mut state = super::HostPacing::default();
+    assert_eq!(state.concurrency, 1);
+    assert_eq!(state.interval, Duration::from_secs(1));
+    super::observe_host(&mut state, true, 8);
+    assert_eq!(state.concurrency, 1);
+    assert_eq!(state.interval, Duration::from_secs(1));
+    super::observe_host(&mut state, false, 7);
+    assert_eq!(state.concurrency, 1);
+    super::observe_host(&mut state, false, 1);
+    assert_eq!(state.concurrency, 2);
+    assert_eq!(state.interval, Duration::from_millis(250));
 }
