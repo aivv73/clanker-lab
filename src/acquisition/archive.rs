@@ -1,6 +1,6 @@
 //! Small libarchive boundary: decode only; never ask libarchive to write paths,
 //! restore ownership/permissions, follow links, or execute external filters.
-use super::{AcquisitionRecord, Error, Limits, account, ensure_directories, safe_path};
+use super::{AcquisitionRecord, Error, Limits, account, ensure_directories, safe_path, materialize_links};
 use std::ffi::{CStr, CString, c_char, c_int, c_uint, c_void};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -9,6 +9,7 @@ use std::path::Path;
 
 #[link(name = "archive")]
 unsafe extern "C" {
+    fn archive_error_string(a: *mut c_void) -> *const c_char;
     fn archive_read_new() -> *mut c_void;
     fn archive_read_free(a: *mut c_void) -> c_int;
     fn archive_read_support_filter_gzip(a: *mut c_void) -> c_int;
@@ -73,12 +74,17 @@ pub(super) fn extract(
         }
         let mut buffer = [0u8; 65_536];
         let mut links = Vec::new();
+        let mut hardlinks = Vec::new();
         loop {
             let mut entry = std::ptr::null_mut();
             match archive_read_next_header(reader.0, &mut entry) {
                 1 => break,
                 0 if !entry.is_null() => {}
-                _ => return Err(Error::Failed("malformed or truncated source archive")),
+                _ => {
+                    let message = archive_error_string(reader.0);
+                    let detail = if message.is_null() { "unknown decoder error".into() } else { CStr::from_ptr(message).to_string_lossy() };
+                    return Err(Error::Detail(format!("malformed or truncated source archive: {detail}")));
+                },
             }
             let raw = archive_entry_pathname(entry);
             if raw.is_null() {
@@ -90,10 +96,16 @@ pub(super) fn extract(
             if matches!(name, "." | "./") && archive_entry_filetype(entry) == 0o040000 {
                 continue;
             }
-            let path = safe_path(name)?;
+            let path = safe_path(name).map_err(|e| Error::Detail(format!("archive entry {name:?}: {e:?}")))?;
             let destination = tree.join(&path);
             if !archive_entry_hardlink(entry).is_null() {
-                return Err(Error::Failed("archive hard links are unsupported"));
+                let target = CStr::from_ptr(archive_entry_hardlink(entry)).to_str()
+                    .map_err(|_| Error::Failed("hard link target is not UTF-8"))?;
+                let target = safe_path(target).map_err(|e| Error::Detail(format!("archive hard link {name:?} -> {target:?}: {e:?}")))?;
+                account(record, limits, 0)?;
+                if let Some(parent) = path.parent() { ensure_directories(tree, parent, limits, record)?; }
+                hardlinks.push((path, target));
+                continue;
             }
             match archive_entry_filetype(entry) {
                 0o040000 => {
@@ -110,12 +122,12 @@ pub(super) fn extract(
                         .to_owned();
                     // Conservative relative links only; defer creation so no
                     // archive entry can traverse a previously written symlink.
-                    safe_path(&value)?;
+
                     account(record, limits, value.len() as u64)?;
                     if let Some(parent) = path.parent() {
                         ensure_directories(tree, parent, limits, record)?;
                     }
-                    links.push((destination, value));
+                    links.push((path, value));
                 }
                 0o100000 => {
                     let size = u64::try_from(archive_entry_size(entry))
@@ -164,8 +176,40 @@ pub(super) fn extract(
                 }
             }
         }
-        for (path, value) in links {
-            std::os::unix::fs::symlink(value, path)?;
+        // Links are archive-root-relative; support forward references, but
+        // never link through a symlink or to a directory/outside file.
+        let targets: std::collections::HashMap<_, _> = hardlinks.iter().cloned().collect();
+        for (path, target) in &hardlinks {
+            let mut target = target;
+            for _ in 0..40 {
+                match targets.get(target) { Some(next) => target = next, None => break }
+            }
+            if targets.contains_key(target) { return Err(Error::Failed("cyclic or excessive hard link chain")); }
+            let mut full = tree.to_path_buf();
+            for component in target.components() {
+                full.push(component);
+                if fs::symlink_metadata(&full)?.file_type().is_symlink() { return Err(Error::Failed("hard link target traverses symlink")); }
+            }
+            let meta = fs::symlink_metadata(&full)?;
+            if !meta.is_file() { return Err(Error::Failed("hard link target is not a regular file")); }
+            if meta.len() > limits.max_extracted_bytes.saturating_sub(record.extracted_bytes) {
+                return Err(Error::Limited("expanded source byte limit exceeded"));
+            }
+            record.extracted_bytes += meta.len();
+            fs::hard_link(full, tree.join(path))?;
+        }
+        // Validate against the final root: the caller strips a sole wrapper
+        // directory. Otherwise a link to its parent would escape after rename.
+        let entries: Vec<_> = fs::read_dir(tree)?.collect::<Result<_, _>>()?;
+        if entries.len() == 1 && entries[0].file_type()?.is_dir()
+            && links.iter().all(|(path, _)| path.starts_with(entries[0].file_name()))
+        {
+            let wrapper = entries[0].file_name();
+            let relative: Vec<_> = links.iter().map(|(path, value)|
+                (path.strip_prefix(&wrapper).unwrap().to_path_buf(), value.clone())).collect();
+            materialize_links(&tree.join(wrapper), &relative)?;
+        } else {
+            materialize_links(tree, &links)?;
         }
     }
     Ok(())

@@ -2,6 +2,8 @@
 mod tests;
 
 use std::time::{Duration, Instant, SystemTime};
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 
 use curl::easy::{Easy2, Handler, WriteError};
 use curl::multi::Multi;
@@ -19,6 +21,104 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 /// keeping a full-system refresh from degrading to one round trip per
 /// package base.
 pub(crate) const MAX_CONCURRENT_FETCHES: usize = 8;
+
+// Shared by recipe batches, provider fallbacks, and API requests in this process.
+// Key by network origin (including port), never by provider name or URL path.
+// None represents a Retry-After too large for Instant to represent.
+static HOST_COOLDOWNS: OnceLock<Mutex<HashMap<String, Option<Instant>>>> = OnceLock::new();
+const HOST_COOLDOWN: Duration = Duration::from_secs(60);
+const HOST_DEFERRED: &str = "recipe request deferred: host cooldown after HTTP 429";
+// Waiting out a finite cooldown costs one pause per throttling episode and
+// lets later batches and provider fallbacks proceed. Skipping instead turned
+// a single 429 into hundreds of lost requests (including the CachyOS Arch
+// rebuild fallbacks, which share the GitLab origin with the Arch stage).
+// GitLab backs pressure off with multi-minute Retry-After values (observed
+// 455 s through a shared proxy), so the budget covers those; only absurdly
+// long cooldowns still skip immediately.
+const MAX_DEFER_WAIT: Duration = Duration::from_secs(600);
+
+enum DeferState {
+    Ready,
+    Wait(Duration),
+    Skip,
+}
+
+fn host_defer_state(url: &Url) -> DeferState {
+    let mut hosts = HOST_COOLDOWNS.get_or_init(Default::default).lock().unwrap();
+    let key = url.origin().ascii_serialization();
+    match hosts.get(&key) {
+        Some(None) => DeferState::Skip,
+        Some(Some(until)) => {
+            let now = Instant::now();
+            if *until > now {
+                let remaining = *until - now;
+                if remaining > MAX_DEFER_WAIT {
+                    DeferState::Skip
+                } else {
+                    DeferState::Wait(remaining)
+                }
+            } else {
+                hosts.remove(&key);
+                DeferState::Ready
+            }
+        }
+        None => DeferState::Ready,
+    }
+}
+
+fn host_is_deferred(url: &Url) -> bool {
+    !matches!(host_defer_state(url), DeferState::Ready)
+}
+
+fn defer_host(url: &Url, retry_after: Option<Duration>) {
+    let delay = retry_after.unwrap_or_default().max(HOST_COOLDOWN);
+    let until = Instant::now().checked_add(delay);
+    let mut hosts = HOST_COOLDOWNS.get_or_init(Default::default).lock().unwrap();
+    hosts.entry(url.origin().ascii_serialization())
+        .and_modify(|old| *old = match (*old, until) {
+            (Some(a), Some(b)) => Some(a.max(b)),
+            _ => None,
+        })
+        .or_insert(until);
+}
+
+// The transport is driven synchronously; this state survives provider calls.
+static HOST_PACING: OnceLock<Mutex<HashMap<String, HostPacing>>> = OnceLock::new();
+const NORMAL_INTERVAL: Duration = Duration::from_millis(250);
+const THROTTLED_INTERVAL: Duration = Duration::from_secs(1);
+
+struct HostPacing {
+    concurrency: usize,
+    interval: Duration,
+    next: Instant,
+    successes: usize,
+}
+
+impl Default for HostPacing {
+    fn default() -> Self {
+        // Start conservative (one request at a time with a one-second pause)
+        // and ramp up only after sustained success. Starting at the normal
+        // limits caused the first throttled responses to defer nearly all
+        // remaining work.
+        Self { concurrency: 1, interval: THROTTLED_INTERVAL, next: Instant::now(), successes: 0 }
+    }
+}
+
+fn observe_host(state: &mut HostPacing, throttled: bool, successes: usize) {
+    if throttled {
+        state.concurrency = 1;
+        state.interval = THROTTLED_INTERVAL;
+        state.successes = 0;
+    } else if state.concurrency == 1 {
+        state.successes += successes;
+        if state.successes >= 8 {
+            state.concurrency = 2;
+            state.interval = NORMAL_INTERVAL;
+            state.successes = 0;
+        }
+    }
+    state.next = Instant::now() + state.interval;
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct RecipeEndpoint(Url);
@@ -248,7 +348,7 @@ fn fetch_chunk_with_retries(
             .enumerate()
             .filter_map(|(index, result)| match result {
                 Err(FetchError::RateLimited(delay)) => {
-                    Some((index, delay.unwrap_or(Duration::from_secs(1 << retry))))
+                    Some((index, delay.unwrap_or_default().max(Duration::from_secs(1 << retry))))
                 }
                 _ => None,
             })
@@ -260,12 +360,27 @@ fn fetch_chunk_with_retries(
             break;
         }
         wait_for_retry(delay)?;
+        {
+            let mut hosts = HOST_COOLDOWNS.get_or_init(Default::default).lock().unwrap();
+            for (index, _) in &pending {
+                hosts.remove(&chunk[*index].origin().ascii_serialization());
+            }
+        }
         let urls: Vec<_> = pending
             .iter()
             .map(|(index, _)| chunk[*index].clone())
             .collect();
         for ((index, _), result) in pending.into_iter().zip(fetch_chunk(&urls, config)?) {
             results[index] = result;
+        }
+    }
+    // Exhausted retries open a host-wide circuit. Later batches and fallback
+    // providers wait it out (up to MAX_DEFER_WAIT) instead of starting another
+    // retry storm; only over-long cooldowns return an explicit deferred
+    // result. Long Retry-After values are never shortened to our budget.
+    for (url, result) in chunk.iter().zip(&results) {
+        if let Err(FetchError::RateLimited(delay)) = result {
+            defer_host(url, *delay);
         }
     }
     Ok(results)
@@ -291,11 +406,80 @@ fn fetch_chunk(
     chunk: &[Url],
     config: &RequestConfig<'_>,
 ) -> Result<Vec<Result<Vec<u8>, FetchError>>, FetchError> {
+    let mut results = vec![None; chunk.len()];
+    while results.iter().any(Option::is_none) {
+        if interrupt::is_requested() { return Err(FetchError::Interrupted); }
+        let mut selected = Vec::new();
+        let mut counts = HashMap::<String, usize>::new();
+        let mut wait = Duration::from_secs(60);
+        {
+            let mut hosts = HOST_PACING.get_or_init(Default::default).lock().unwrap();
+            for (index, url) in chunk.iter().enumerate() {
+                if results[index].is_some() { continue; }
+                match host_defer_state(url) {
+                    // Finite cooldowns are waited out below: one pause per
+                    // throttling episode, then later batches and provider
+                    // fallbacks proceed. Only over-long cooldowns skip.
+                    DeferState::Wait(remaining) => { wait = wait.min(remaining); continue; }
+                    DeferState::Skip => {
+                        results[index] = Some(Err(FetchError::Failed(HOST_DEFERRED)));
+                        continue;
+                    }
+                    DeferState::Ready => {}
+                }
+                let key = url.origin().ascii_serialization();
+                let state = hosts.entry(key.clone()).or_default();
+                let remaining = state.next.saturating_duration_since(Instant::now());
+                if !remaining.is_zero() { wait = wait.min(remaining); continue; }
+                let count = counts.entry(key).or_default();
+                if *count < state.concurrency && selected.len() < MAX_CONCURRENT_FETCHES {
+                    selected.push(index);
+                    *count += 1;
+                }
+            }
+        }
+        if selected.is_empty() {
+            if results.iter().any(Option::is_none) { wait_for_retry(wait)?; }
+            continue;
+        }
+        let urls: Vec<_> = selected.iter().map(|&i| chunk[i].clone()).collect();
+        let fetched = fetch_wave(&urls, config)?;
+        let mut observations = HashMap::<String, (bool, usize)>::new();
+        for ((index, url), result) in selected.into_iter().zip(&urls).zip(fetched) {
+            let entry = observations.entry(url.origin().ascii_serialization()).or_default();
+            if matches!(&result, Err(FetchError::RateLimited(_))) {
+                entry.0 = true;
+            }
+            // Never open the host-wide cooldown here: remaining items in this
+            // chunk must still be paced and attempted, and scheduled retries
+            // probe after their backoff. Only exhausted retries in
+            // `fetch_chunk_with_retries` defer later batches. Deferring on the
+            // first 429 skipped nearly all remaining work and reported a
+            // completed refresh with almost nothing fetched.
+            entry.1 += usize::from(result.is_ok());
+            results[index] = Some(result);
+        }
+        let mut hosts = HOST_PACING.get_or_init(Default::default).lock().unwrap();
+        for (key, (throttled, successes)) in observations {
+            observe_host(hosts.entry(key).or_default(), throttled, successes);
+        }
+    }
+    Ok(results.into_iter().map(Option::unwrap).collect())
+}
+
+fn fetch_wave(
+    chunk: &[Url],
+    config: &RequestConfig<'_>,
+) -> Result<Vec<Result<Vec<u8>, FetchError>>, FetchError> {
     let multi = Multi::new();
     let mut results: Vec<Option<Result<Vec<u8>, FetchError>>> =
         (0..chunk.len()).map(|_| None).collect();
     let mut handles = Vec::new();
     for (index, url) in chunk.iter().enumerate() {
+        if host_is_deferred(url) {
+            results[index] = Some(Err(FetchError::Failed(HOST_DEFERRED)));
+            continue;
+        }
         match configure(url, config).and_then(|mut easy| {
             easy.get_mut().byte_limit = config.byte_limit;
             multi

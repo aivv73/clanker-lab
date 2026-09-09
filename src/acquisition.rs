@@ -3,6 +3,9 @@
 mod archive;
 mod git;
 mod http;
+pub(crate) fn initialize_analysis_tree(tree: &Path) -> Result<(), String> {
+    git::initialize(tree).map_err(|error| format!("cannot initialize analysis tree: {error:?}"))
+}
 #[cfg(test)]
 mod tests;
 
@@ -12,6 +15,7 @@ use std::path::{Component, Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+use blake2::Blake2b512;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
@@ -48,6 +52,15 @@ pub(crate) struct AcquisitionRecord {
     pub files: u64,
     pub verified_revision: Option<String>,
     pub content_sha256: Option<String>,
+    #[serde(default)]
+    pub submodules: Vec<SubmoduleRecord>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct SubmoduleRecord {
+    pub path: String,
+    pub url: String,
+    pub verified_revision: String,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -201,6 +214,7 @@ pub(crate) fn record_sources<'a, W: Write>(
     acquire_targets(&attempted, limits, proxy, |target, result, materialized| {
         // Pipeline handoff: the language analyzer consumes the disposable
         // repository here, before the handle leaves this callback.
+        let mut source_representation = None;
         if let Some(source) = materialized {
             debug_assert!(source.repository().join(".git").is_dir());
             if let Some(executable) = linguist.linguist_executable.as_deref() {
@@ -209,10 +223,25 @@ pub(crate) fn record_sources<'a, W: Write>(
                     target.subdirectory.as_deref(),
                     executable,
                     std::time::Duration::from_secs(linguist.linguist_timeout_seconds),
+                    limits.max_source_files,
                 );
-                refresh.record_language_profile(target, &language_record(outcome, executable))?;
+                let record = language_record(outcome, executable);
+                source_representation = match record.state.as_str() {
+                    "analyzed" if record.total_bytes > 0 => Some(true),
+                    "no_language" => Some(false),
+                    _ => None,
+                };
+                refresh.record_language_profile(target, &record)?;
             }
         }
+        let mut manifest = match materialized {
+            Some(source) => crate::payload::inspect_source(
+                &source.repository(), target.subdirectory.as_deref(), limits,
+            ),
+            None => crate::payload::SourceManifest::unavailable("source acquisition incomplete"),
+        };
+        manifest.source_representation = source_representation;
+        refresh.record_source_manifest(target, &manifest)?;
         match result.state.as_str() {
             "acquired" => summary.acquired += 1,
             "resource_limited" => summary.resource_limited += 1,
@@ -422,6 +451,12 @@ pub(crate) fn worker(directory: &Path) -> bool {
     let outcome = (|| -> Result<(), Box<dyn std::error::Error>> {
         let job: Job =
             serde_json::from_reader(File::open(directory.join("job.json"))?.take(65_536))?;
+        // libarchive converts UTF-8 archive names using LC_CTYPE. The isolated
+        // worker otherwise inherits the C locale and rejects valid names.
+        // This process is single-threaded; never change locale in the parent.
+        if unsafe { nix::libc::setlocale(nix::libc::LC_CTYPE, c"C.UTF-8".as_ptr()) }.is_null() {
+            return Err("source worker requires the C.UTF-8 locale".into());
+        }
         // The worker is single-threaded and has not opened a repository yet.
         // Disable user/system URL rewrites, proxies, templates and filters.
         let empty_config = directory.join("empty-config");
@@ -484,23 +519,11 @@ fn materialize(
         let archive = directory.join("download");
         http::download(&target.location, &archive, limits, record, proxy)?;
         let (kind, expected) = checksum.split_once(':').expect("validated checksum");
-        let mut file = File::open(&archive)?;
-        let mut buffer = [0u8; 65_536];
-        let mut sha256 = Sha256::new();
-        let mut sha512 = sha2::Sha512::new();
-        loop {
-            let n = file.read(&mut buffer)?;
-            if n == 0 {
-                break;
-            }
-            sha256.update(&buffer[..n]);
-            sha512.update(&buffer[..n]);
-        }
-        let digest = format!("{:x}", sha256.finalize());
-        let actual = if kind == "sha256" {
-            digest.clone()
-        } else {
-            format!("{:x}", sha512.finalize())
+        let (digest, sha512_digest, b2_digest) = archive_digests(&archive)?;
+        let actual = match kind {
+            "sha256" => digest.clone(),
+            "sha512" => sha512_digest,
+            _ => b2_digest,
         };
         if !actual.eq_ignore_ascii_case(expected) {
             return Err(Error::Failed("archive checksum mismatch"));
@@ -526,6 +549,31 @@ fn materialize(
     Ok(())
 }
 
+/// SHA-256, SHA-512, and BLAKE2b-512 hex digests of one downloaded archive.
+/// A single streaming pass feeds all three hashers; verification selects its
+/// checksum kind afterwards.
+fn archive_digests(archive: &Path) -> Result<(String, String, String), Error> {
+    let mut file = File::open(archive)?;
+    let mut buffer = [0u8; 65_536];
+    let mut sha256 = Sha256::new();
+    let mut sha512 = sha2::Sha512::new();
+    let mut b2 = Blake2b512::new();
+    loop {
+        let n = file.read(&mut buffer)?;
+        if n == 0 {
+            break;
+        }
+        sha256.update(&buffer[..n]);
+        sha512.update(&buffer[..n]);
+        b2.update(&buffer[..n]);
+    }
+    Ok((
+        format!("{:x}", sha256.finalize()),
+        format!("{:x}", sha512.finalize()),
+        format!("{:x}", b2.finalize()),
+    ))
+}
+
 pub(crate) fn validate_checksum(value: &str) -> Result<(), Error> {
     let (kind, hash) = value
         .split_once(':')
@@ -533,6 +581,7 @@ pub(crate) fn validate_checksum(value: &str) -> Result<(), Error> {
     let len = match kind {
         "sha256" => 64,
         "sha512" => 128,
+        "b2" => 128,
         _ => return Err(Error::Failed("unsupported source checksum")),
     };
     if hash.len() != len || !hash.bytes().all(|b| b.is_ascii_hexdigit()) {
@@ -542,7 +591,7 @@ pub(crate) fn validate_checksum(value: &str) -> Result<(), Error> {
 }
 
 pub(crate) fn safe_path(value: &str) -> Result<PathBuf, Error> {
-    if value.len() > 4096 || value.contains(['\\', ':']) || value.chars().any(char::is_control) {
+    if value.len() > 4096 || value.contains('\\') || value.chars().any(char::is_control) {
         return Err(Error::Failed("unsafe source path"));
     }
     let mut path = PathBuf::new();
@@ -560,6 +609,58 @@ pub(crate) fn safe_path(value: &str) -> Result<PathBuf, Error> {
         return Err(Error::Failed("empty source path"));
     }
     Ok(path)
+}
+
+// Resolve link components in filesystem order, expanding other pending links
+// before processing '..'. Lexical normalization alone misses chain escapes.
+pub(super) fn materialize_links(root: &Path, links: &[(PathBuf, String)]) -> Result<(), Error> {
+    use std::collections::{HashMap, VecDeque};
+    let map: HashMap<_, _> = links.iter().map(|(p, v)| (p.clone(), v)).collect();
+    if map.len() != links.len() { return Err(Error::Failed("duplicate source symlink")); }
+    for (path, target) in links {
+        let check = || -> Result<(), Error> {
+            let mut pending: VecDeque<String> = path.parent().unwrap_or(Path::new("")).components()
+                .map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
+            pending.extend(target.split('/').map(str::to_owned));
+            let mut resolved = PathBuf::new();
+            let mut expansions = 0;
+            if target.is_empty() || target.starts_with('/') || target.len() > 4096 {
+                return Err(Error::Failed("invalid relative symlink target"));
+            }
+            while let Some(part) = pending.pop_front() {
+                match part.as_str() {
+                    "" | "." => continue,
+                    ".." => {
+                        if !resolved.pop() { return Err(Error::Failed("symlink escapes source root")); }
+                    }
+                    _ => {
+                        safe_path(&part)?;
+                        resolved.push(&part);
+                        if let Some(value) = map.get(&resolved) {
+                            expansions += 1;
+                            if expansions > 40 { return Err(Error::Failed("cyclic or excessive symlink chain")); }
+                            if value.is_empty() || value.starts_with('/') || value.len() > 4096 {
+                                return Err(Error::Failed("invalid relative symlink target"));
+                            }
+                            resolved.pop();
+                            for component in value.split('/').rev() { pending.push_front(component.to_owned()); }
+                        }
+                    }
+                }
+                if resolved.components().count() > 128 { return Err(Error::Limited("source tree depth exceeded")); }
+            }
+            // No symlink may be used as the parent of another entry.
+            let mut parent = root.to_path_buf();
+            for part in path.parent().unwrap_or(Path::new("")).components() {
+                parent.push(part);
+                if !fs::symlink_metadata(&parent)?.is_dir() { return Err(Error::Failed("symlink parent is not a directory")); }
+            }
+            Ok(())
+        };
+        check().map_err(|e| Error::Detail(format!("source symlink {:?} -> {:?}: {e:?}", path, target)))?;
+    }
+    for (path, target) in links { std::os::unix::fs::symlink(target, root.join(path))?; }
+    Ok(())
 }
 
 pub(super) fn account(

@@ -694,7 +694,10 @@ fn cachyos_recipes_and_arch_rebuild_fallbacks_are_acquired() {
         let archive = super::sources::tar();
         let checksum = format!("{:x}", Sha256::digest(&archive));
         let mut routes = Vec::new();
-        for _ in 0..9 {
+        // Eight requests: the rebuild-suffixed suite group skips its Arch
+        // lookup (no ?ref=2.0-1.1 request), resolving via the CachyOS
+        // fallback instead. Previously this loop served nine.
+        for _ in 0..8 {
             let mut stream = accept(&listener);
             let request = request(&mut stream);
             let route = request.split_whitespace().nth(1).unwrap().to_owned();
@@ -748,6 +751,10 @@ fn cachyos_recipes_and_arch_rebuild_fallbacks_are_acquired() {
                 .filter(|route| route.contains("%2Fsuite/") && route.ends_with("?ref=2.0-1"))
                 .count(),
             1
+        );
+        assert!(
+            routes.iter().all(|route| !route.ends_with("ref=2.0-1.1")),
+            "rebuild-suffixed tag must never be requested from Arch: {routes:?}"
         );
     });
     let output = command(data.path())
@@ -814,6 +821,14 @@ fn cachyos_recipes_and_arch_rebuild_fallbacks_are_acquired() {
     );
     let provenance: String = db.query_row("SELECT recipe_location FROM provider_attempts WHERE provider='cachyos' AND package_name='alpha'", [], |row| row.get(0)).unwrap();
     assert!(provenance.ends_with(&format!("/contents/alpha/.SRCINFO?ref={COMMIT}")));
+    let skipped: Vec<(String, String)> = db.prepare("SELECT package_name, failure_reason FROM provider_attempts WHERE provider='arch' AND package_name LIKE 'suite%' ORDER BY package_name").unwrap().query_map([], |row| Ok((row.get(0)?, row.get(1)?))).unwrap().map(Result::unwrap).collect();
+    assert_eq!(
+        skipped,
+        vec![
+            ("suite-cli".into(), "cachyos rebuild version; arch recipe lookup skipped".into()),
+            ("suite-docs".into(), "cachyos rebuild version; arch recipe lookup skipped".into()),
+        ]
+    );
 }
 
 #[test]

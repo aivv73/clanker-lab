@@ -399,6 +399,26 @@ fn source_interruption_rolls_back_and_reaps_workers() {
 #[test]
 fn git_worker_fetches_only_pinned_revisions_and_materializes_a_clean_repo() {
     let upstream = tempfile::tempdir().unwrap();
+    let signature = git2::Signature::now("Fixture", "fixture@example.org").unwrap();
+    let mut child_pin = None;
+    let mut pins = Vec::new();
+    for name in ["grandchild.git", "child.git"] {
+        let child = git2::Repository::init_bare(upstream.path().join(name)).unwrap();
+        child.config().unwrap().set_bool("uploadpack.allowReachableSHA1InWant", true).unwrap();
+        let mut files = child.treebuilder(None).unwrap();
+        files.insert("pinned.rs", child.blob(b"pinned child source\n").unwrap(), 0o100644).unwrap();
+        if let Some(pin) = child_pin {
+            files.insert("nested", pin, 0o160000).unwrap();
+            files.insert(".gitmodules", child.blob(b"[submodule \"nested\"]\npath = nested\nurl = ../grandchild.git\nupdate = !touch /tmp/paclang-must-not-run\n").unwrap(), 0o100644).unwrap();
+        }
+        let tree = child.find_tree(files.write().unwrap()).unwrap();
+        let pin = child.commit(Some("refs/heads/main"), &signature, &signature, "pinned", &tree, &[]).unwrap();
+        files.insert("pinned.rs", child.blob(b"wrong branch HEAD\n").unwrap(), 0o100644).unwrap();
+        child.commit(Some("refs/heads/main"), &signature, &signature, "new HEAD", &child.find_tree(files.write().unwrap()).unwrap(), &[&child.find_commit(pin).unwrap()]).unwrap();
+        child.set_head("refs/heads/main").unwrap();
+        pins.push(pin);
+        child_pin = Some(pin);
+    }
     let repo = git2::Repository::init_bare(upstream.path().join("upstream.git")).unwrap();
     repo.config()
         .unwrap()
@@ -407,6 +427,10 @@ fn git_worker_fetches_only_pinned_revisions_and_materializes_a_clean_repo() {
     let blob = repo.blob(b"packaged source\n").unwrap();
     let mut builder = repo.treebuilder(None).unwrap();
     builder.insert("main.rs", blob, 0o100644).unwrap();
+    builder.insert("vendor", child_pin.unwrap(), 0o160000).unwrap();
+    builder.insert(".gitmodules", repo.blob(b"[submodule \"vendor\"]\npath = vendor\nurl = ../child.git\nbranch = main\nupdate = none\n").unwrap(), 0o100644).unwrap();
+    let link = repo.blob(b".").unwrap();
+    builder.insert("self", link, 0o120000).unwrap();
     let tree = repo.find_tree(builder.write().unwrap()).unwrap();
     let signature = git2::Signature::now("Fixture", "fixture@example.org").unwrap();
     let pinned = repo
@@ -505,6 +529,7 @@ fn git_worker_fetches_only_pinned_revisions_and_materializes_a_clean_repo() {
             let _ = stream.write_all(&output.stdout);
         }
     });
+    let mut full_download = 0;
     for (revision, expected, download_limit, expanded_limit) in [
         (
             "tag:v1.0".to_owned(),
@@ -526,9 +551,14 @@ fn git_worker_fetches_only_pinned_revisions_and_materializes_a_clean_repo() {
         ),
         ("tag:v1.0".to_owned(), "resource_limited", 1, 4_294_967_296),
         ("tag:v1.0".to_owned(), "resource_limited", 1_073_741_824, 1),
+        ("aggregate-download".to_owned(), "resource_limited", 0, 4_294_967_296),
+        ("aggregate-files".to_owned(), "resource_limited", 1_073_741_824, 4_294_967_296),
     ] {
         let directory = tempfile::tempdir().unwrap();
-        let job = serde_json::json!({"target": {"location": url, "revision": revision, "subdirectory": null, "checksum": null}, "limits": {"source_jobs": 4, "max_download_bytes": download_limit, "max_extracted_bytes": expanded_limit, "max_source_files": 250000, "source_timeout_seconds": 15}});
+        let selected_revision = if revision.starts_with("aggregate-") { "tag:v1.0" } else { &revision };
+        let download_limit = if download_limit == 0 { full_download * 3 / 4 } else { download_limit };
+        let file_limit = if revision == "aggregate-files" { 4 } else { 250000 };
+        let job = serde_json::json!({"target": {"location": url, "revision": selected_revision, "subdirectory": null, "checksum": null}, "limits": {"source_jobs": 4, "max_download_bytes": download_limit, "max_extracted_bytes": expanded_limit, "max_source_files": file_limit, "source_timeout_seconds": 15}});
         std::fs::write(
             directory.path().join("job.json"),
             serde_json::to_vec(&job).unwrap(),
@@ -550,8 +580,22 @@ fn git_worker_fetches_only_pinned_revisions_and_materializes_a_clean_repo() {
             serde_json::from_slice(&std::fs::read(directory.path().join("result.json")).unwrap())
                 .unwrap();
         assert_eq!(result["state"], expected, "{revision}: {result}");
+        if revision == "aggregate-download" {
+            assert_eq!(result["verified_revision"], pinned.to_string(), "budget should allow the parent: {result}");
+            assert_eq!(result["reason"], "source download byte limit exceeded");
+        }
         if expected == "acquired" {
+            full_download = result["downloaded_bytes"].as_u64().unwrap();
             assert_eq!(result["verified_revision"], pinned.to_string());
+            assert_eq!(result["submodules"].as_array().unwrap().len(), 2);
+            assert_eq!(result["submodules"][0]["path"], "vendor");
+            assert_eq!(result["submodules"][0]["verified_revision"], pins[1].to_string());
+            assert_eq!(result["submodules"][1]["path"], "vendor/nested");
+            assert_eq!(result["submodules"][1]["verified_revision"], pins[0].to_string());
+            for path in ["vendor/pinned.rs", "vendor/nested/pinned.rs"] {
+                assert_eq!(std::fs::read(directory.path().join("tree").join(path)).unwrap(), b"pinned child source\n");
+            }
+            assert!(!directory.path().join("tree/vendor/.git").exists());
             assert_eq!(
                 std::fs::read(directory.path().join("tree/main.rs")).unwrap(),
                 b"packaged source\n"
@@ -582,6 +626,31 @@ fn source_concurrency_stays_within_the_configured_cap() {
     assert!(output.status.success());
     assert_eq!(server.hits.load(Ordering::SeqCst), 4);
     assert_eq!(server.maximum.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn archive_verification_accepts_b2_checksums() {
+    let data = tempfile::tempdir().unwrap();
+    let bin = fixture_bin();
+    let bytes = tar();
+    let checksum = format!("b2:{:x}", blake2::Blake2b512::digest(&bytes));
+    let server = Server::new(bytes, Duration::ZERO);
+    seed(data.path(), bin.path(), &server.url, &checksum, false);
+    let output = command(data.path())
+        .args(["refresh", "--sources-only", "--format", "json"])
+        .env("PATH", bin.path())
+        .env("XDG_CACHE_HOME", data.path().join("cache"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{} {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let refresh_report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(refresh_report["source_acquisition"]["targets"], 1);
+    assert_eq!(refresh_report["source_acquisition"]["acquired"], 1);
 }
 
 #[test]
@@ -690,4 +759,166 @@ fn sources_refresh_upgrades_legacy_archive_evidence_before_downloading() {
         3
     );
     assert_eq!(server.hits.load(Ordering::SeqCst), 3);
+}
+
+#[test]
+fn verified_prebuilt_archive_retains_binary_hashes_before_cleanup() {
+    let data = tempfile::tempdir().unwrap();
+    let bin = fixture_bin();
+    let mut elf = vec![0u8; 64];
+    elf[..7].copy_from_slice(b"\x7fELF\x02\x01\x01");
+    elf[16] = 2;
+    let mut builder = tar::Builder::new(Vec::new());
+    let mut header = tar::Header::new_gnu();
+    header.set_size(elf.len() as u64);
+    header.set_mode(0o755);
+    header.set_cksum();
+    builder
+        .append_data(&mut header, "prebuilt/app", elf.as_slice())
+        .unwrap();
+    let archive = builder.into_inner().unwrap();
+    let checksum = format!("sha256:{:x}", Sha256::digest(&archive));
+    let server = Server::new(archive, Duration::ZERO);
+    seed(data.path(), bin.path(), &server.url, &checksum, false);
+    let db = Connection::open(data.path().join("paclang/paclang.db")).unwrap();
+    db.execute("UPDATE provider_attempts SET recipe_location='https://example.invalid/recipe', recipe_commit=?1", ["a".repeat(40)]).unwrap();
+    let linguist = bin.path().join("github-linguist");
+    write_executable(&linguist, "#!/bin/sh\nprintf '{}'\n");
+    let output = command(data.path())
+        .args([
+            "refresh",
+            "--sources-only",
+            "--format",
+            "json",
+            "--linguist-executable",
+        ])
+        .arg(&linguist)
+        .env("PATH", bin.path())
+        .env("XDG_CACHE_HOME", data.path().join("cache"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let manifest: String = db
+        .query_row(
+            "SELECT manifest_json FROM source_payload_evidence",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let manifest: serde_json::Value = serde_json::from_str(&manifest).unwrap();
+    assert_eq!(manifest["complete"], true);
+    assert_eq!(
+        manifest["binaries"][0]["sha256"],
+        format!("{:x}", Sha256::digest(&elf))
+    );
+    assert_eq!(manifest["binaries"][0]["bytes"], 64);
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM source_payload_evidence", [], |row| {
+            row.get::<_, u64>(0)
+        })
+        .unwrap(),
+        1
+    );
+    assert_eq!(
+        std::fs::read_dir(data.path().join("cache/paclang/sources"))
+            .unwrap()
+            .count(),
+        0
+    );
+    assert_eq!(server.hits.load(Ordering::SeqCst), 1);
+
+    let installed = data.path().join("installed-app");
+    std::fs::write(&installed, &elf).unwrap();
+    let pacman = std::fs::read_to_string(bin.path().join("pacman")).unwrap();
+    let wrapper = format!(
+        "#!/bin/sh\nif [ \"$1\" = '-Qql' ]; then printf '%s\\n' '{}'; exit 0; fi\n",
+        installed.display()
+    );
+    write_executable(
+        &bin.path().join("pacman"),
+        &pacman.replacen("#!/bin/sh\n", &wrapper, 1),
+    );
+    let output = command(data.path())
+        .args(["blobs", "--package", "alpha", "--format", "json"])
+        .env("PATH", bin.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["opaque_bytes"], 64);
+    assert_eq!(report["unknown_bytes"], 56);
+    assert_eq!(server.hits.load(Ordering::SeqCst), 1); // Reporting never downloads.
+}
+
+#[test]
+fn git_worker_uses_explicit_proxy_for_https_connect() {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let proxy = format!("http://{}", listener.local_addr().unwrap());
+    let server = std::thread::spawn(move || {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut stream = loop {
+            match listener.accept() {
+                Ok((stream, _)) => break stream,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(std::time::Instant::now() < deadline, "Git bypassed explicit proxy");
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Err(e) => panic!("{e}"),
+            }
+        };
+        stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+        let mut request = Vec::new();
+        while !request.ends_with(b"\r\n\r\n") {
+            let mut byte = [0];
+            stream.read_exact(&mut byte).unwrap();
+            request.push(byte[0]);
+            assert!(request.len() < 8192);
+        }
+        assert!(String::from_utf8_lossy(&request).starts_with("CONNECT source.invalid:443 HTTP/"));
+        stream.write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+    });
+    let directory = tempfile::tempdir().unwrap();
+    let job = serde_json::json!({
+        "target": {"location": "https://source.invalid/repo.git", "revision": "tag:v1", "subdirectory": null, "checksum": null},
+        "proxy": proxy,
+        "limits": {"source_jobs": 1, "max_download_bytes": 1024, "max_extracted_bytes": 1024, "max_source_files": 100, "source_timeout_seconds": 10}
+    });
+    std::fs::write(directory.path().join("job.json"), serde_json::to_vec(&job).unwrap()).unwrap();
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_paclang"))
+        .arg("--acquisition-worker").arg(directory.path()).env_clear()
+        .env("HOME", directory.path()).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    server.join().unwrap();
+    let result: serde_json::Value = serde_json::from_slice(&std::fs::read(directory.path().join("result.json")).unwrap()).unwrap();
+    assert_eq!(result["state"], "failed");
+}
+
+#[test]
+fn isolated_archive_worker_accepts_utf8_filenames() {
+    let mut bytes = tar();
+    let name = "source/日本語:тест.rs".as_bytes();
+    bytes[..100].fill(0);
+    bytes[..name.len()].copy_from_slice(name);
+    bytes[148..156].fill(b' ');
+    let sum: u32 = bytes[..512].iter().map(|b| u32::from(*b)).sum();
+    bytes[148..156].copy_from_slice(format!("{sum:06o}\0 ").as_bytes());
+    let checksum = format!("sha256:{:x}", Sha256::digest(&bytes));
+    let server = Server::new(bytes, Duration::ZERO);
+    let directory = tempfile::tempdir().unwrap();
+    let job = serde_json::json!({"target": {"location": server.url, "revision": null, "subdirectory": null, "checksum": checksum},
+        "limits": {"source_jobs": 1, "max_download_bytes": 4096, "max_extracted_bytes": 4096, "max_source_files": 100, "source_timeout_seconds": 10}});
+    std::fs::write(directory.path().join("job.json"), serde_json::to_vec(&job).unwrap()).unwrap();
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_paclang"))
+        .arg("--acquisition-worker").arg(directory.path()).env_clear()
+        .env("HOME", directory.path()).output().unwrap();
+    assert!(output.status.success());
+    let result: serde_json::Value = serde_json::from_slice(&std::fs::read(directory.path().join("result.json")).unwrap()).unwrap();
+    assert_eq!(result["state"], "acquired", "{result}");
+    assert!(directory.path().join("tree/日本語:тест.rs").is_file());
 }

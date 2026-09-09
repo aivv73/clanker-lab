@@ -262,7 +262,9 @@ impl Repository {
 
 /// Only an additional numeric pkgrel component is eligible, never pkgver or epoch.
 /// This is a hypothesis about a rebuild and always produces fallback evidence.
-fn rebuild_version(version: &str) -> Option<String> {
+/// Shared with the Arch provider, which skips fetching rebuild-suffixed tags
+/// (they cannot exist upstream) when this mode is enabled.
+pub(crate) fn rebuild_version(version: &str) -> Option<String> {
     let (version, release) = version.rsplit_once('-')?;
     let (release, rebuild) = release.split_once('.')?;
     let digits = |value: &str| !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit());

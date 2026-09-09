@@ -104,32 +104,50 @@ impl Recipe {
             && member.sources.is_empty()
             && document.sha256sums.is_empty()
             && document.sha512sums.is_empty()
+            && document.b2sums.is_empty()
             && member.sha256sums.is_empty()
             && member.sha512sums.is_empty()
+            && member.b2sums.is_empty()
         {
             return AttemptOutcome::SourceFree;
         }
         let mut targets = Vec::new();
-        for (sources, sha256, sha512) in [
+        let mut unpinned = Vec::new();
+        for (sources, sha256, sha512, b2) in [
             (
                 &document.sources,
                 &document.sha256sums,
                 &document.sha512sums,
+                &document.b2sums,
             ),
-            (&member.sources, &member.sha256sums, &member.sha512sums),
+            (
+                &member.sources,
+                &member.sha256sums,
+                &member.sha512sums,
+                &member.b2sums,
+            ),
         ] {
-            if [sha256, sha512]
+            if [sha256, sha512, b2]
                 .iter()
                 .any(|sums| !sums.is_empty() && sums.len() != sources.len())
             {
                 return unresolved("recipe checksum count does not match source count");
             }
             for (index, source) in sources.iter().enumerate() {
-                match source_target(source, &document.pkgver) {
+                // A positional digest in the matching, pinned recipe binds
+                // archive content even when upstream encodes versions oddly.
+                // Acquisition still verifies that digest before extraction.
+                let digest_bound = [(sha256, 64), (sha512, 128), (b2, 128)]
+                    .iter()
+                    .any(|(sums, length)| sums.get(index).is_some_and(|sum|
+                        sum.len() == *length && sum.bytes().all(|b| b.is_ascii_hexdigit())));
+                match source_target_with_evidence(source, &document.pkgver, digest_bound) {
                     Ok(Some(mut target)) => {
                         if target.revision.is_none() {
+                            // Strongest verification evidence wins: SHA-512 and
+                            // BLAKE2 (both 128 hex digits) outrank SHA-256.
                             for (kind, length, sums) in
-                                [("sha512", 128, sha512), ("sha256", 64, sha256)]
+                                [("sha512", 128, sha512), ("b2", 128, b2), ("sha256", 64, sha256)]
                             {
                                 if let Some(sum) =
                                     sums.get(index).filter(|sum| sum.as_str() != "SKIP")
@@ -151,12 +169,68 @@ impl Recipe {
                         }
                     }
                     Ok(None) => {}
+                    Err("unpinned Git source is unsupported") => {
+                        // Validate transport/query syntax using the normal parser,
+                        // but never turn this temporary selector into evidence.
+                        // Role classification requires the entire recipe, not
+                        // whichever source happened to occur first.
+                        match source_target_with_evidence(&format!("{source}#tag=paclang-role-validation"), &document.pkgver, false) {
+                            Ok(Some(mut target)) => {
+                                target.revision = None;
+                                unpinned.push(target);
+                            }
+                            Err(reason) => return unresolved(reason),
+                            _ => return unresolved("invalid unpinned Git input"),
+                        }
+                    }
                     Err(reason) => return unresolved(reason),
                 }
             }
         }
-        if targets.len() != 1 {
-            return unresolved("primary source is missing or ambiguous in recipe metadata");
+        if !unpinned.is_empty() {
+            let primary = targets.iter().filter(|target| known_primary(package.base, target)).collect::<Vec<_>>();
+            let Some(rule) = super::source_roles::rule(package.base).filter(|_| primary.len() == 1) else {
+                return unresolved("unpinned Git source is unsupported: no unique recognized primary tree");
+            };
+            for input in &unpinned {
+                if !rule.supplemental.iter().any(|url| super::source_roles::repository_matches(&input.location, url)) {
+                    let location: String = input.location.chars().take(700).collect();
+                    return unresolved(&format!("unclassified unpinned secondary Git source: {location}; full inputs in pinned recipe"));
+                }
+            }
+        }
+        if targets.is_empty() {
+            let sources: Vec<_> = document.sources.iter().chain(&member.sources).collect();
+            if !sources.is_empty() && sources.iter().all(|source| !source.contains("://")) {
+                for source in &sources {
+                    if source.contains(['$', '`']) || crate::acquisition::safe_path(source).is_err() {
+                        return unresolved("invalid recipe-local source path");
+                    }
+                }
+                match packaging_target(&self.provenance, package.base) {
+                    Some(target) => targets.push(target),
+                    None => return unresolved("recipe-local sources require a supported pinned packaging repository"),
+                }
+            } else {
+                return unresolved("no primary source candidate: only auxiliary source inputs");
+            }
+        }
+        if targets.len() > 1 {
+            let primary: Vec<_> = targets.iter().filter(|target| !known_auxiliary(package.base, target, &document.pkgver)).cloned().collect();
+            if primary.len() == 1 && known_primary(package.base, &primary[0]) {
+                targets = primary;
+            } else {
+                let mut candidates = targets.iter().map(|target| {
+                    format!("{}{}", target.location, target.revision.as_ref().map(|r| format!("#{r}")).unwrap_or_default())
+                }).collect::<Vec<_>>().join(", ");
+                if candidates.len() > 3800 {
+                    let mut boundary = 3800;
+                    while !candidates.is_char_boundary(boundary) { boundary -= 1; }
+                    candidates.truncate(boundary);
+                    candidates.push_str(" ...; full inputs in pinned recipe");
+                }
+                return unresolved(&format!("ambiguous primary source: {} candidates [{}]", targets.len(), candidates));
+            }
         }
         AttemptOutcome::Resolved {
             target: targets.remove(0),
@@ -167,7 +241,79 @@ impl Recipe {
     }
 }
 
+// Explicit source-role policy. A rule applies only when every other candidate
+// is recognized as auxiliary and the sole remaining target is the expected
+// upstream. Unknown additions keep the recipe ambiguous.
+fn known_primary(base: &str, target: &AnalysisTarget) -> bool {
+    if let Some(rule) = super::source_roles::rule(base)
+        && target.revision.is_some() && super::source_roles::repository_matches(&target.location, rule.primary) {
+        return true;
+    }
+    let Ok(url) = Url::parse(&target.location) else { return false; };
+    let host = url.host_str().unwrap_or("");
+    let path = url.path().trim_end_matches('/').trim_end_matches(".git");
+    match base {
+        "gstreamer" => host == "gitlab.freedesktop.org" && path == "/gstreamer/gstreamer",
+        "libxml2" | "lib32-libxml2" => host == "gitlab.gnome.org" && path == "/GNOME/libxml2",
+        "poppler" => host == "gitlab.freedesktop.org" && path == "/poppler/poppler",
+        "nlohmann-json" => host == "github.com" && path == "/nlohmann/json",
+        "dav1d" => host == "downloads.videolan.org" && path.starts_with("/pub/videolan/dav1d/"),
+        "mpdecimal" => host == "www.bytereef.org" && path.starts_with("/software/mpdecimal/releases/mpdecimal-"),
+        "sqlite" => host == "www.sqlite.org" && path.rsplit('/').next().is_some_and(|p| p.starts_with("sqlite-src-")),
+        _ => false,
+    }
+}
+
+fn known_auxiliary(base: &str, target: &AnalysisTarget, version: &str) -> bool {
+    if let Some(rule) = super::source_roles::rule(base)
+        && (target.revision.is_some() && rule.supplemental.iter().any(|url| super::source_roles::repository_matches(&target.location, url))
+            || target.revision.is_none() && super::source_roles::alternate_distribution(base, &target.location, version))
+    {
+        return true;
+    }
+    let Ok(url) = Url::parse(&target.location) else { return false; };
+    let host = url.host_str().unwrap_or("");
+    let path = url.path().trim_end_matches('/').trim_end_matches(".git");
+    match base {
+        "gstreamer" => host == "gstreamer.freedesktop.org" && path.starts_with("/src/gstreamer-docs/"),
+        "libxml2" | "lib32-libxml2" => host == "www.w3.org" && path.starts_with("/XML/Test/"),
+        "poppler" => host == "gitlab.freedesktop.org" && path == "/poppler/test",
+        "nlohmann-json" => host == "github.com" && path.starts_with("/nlohmann/json_test_data/archive/"),
+        "dav1d" => host == "code.videolan.org" && path.starts_with("/videolan/dav1d-test-data/-/archive/"),
+        "mpdecimal" => host == "speleotrove.com" && path == "/decimal/dectest.zip",
+        "sqlite" => host == "www.sqlite.org" && path.rsplit('/').next().is_some_and(|p| p.starts_with("sqlite-doc-")),
+        _ => false,
+    }
+}
+
+fn packaging_target(provenance: &RecipeProvenance, base: &str) -> Option<AnalysisTarget> {
+    let url = Url::parse(provenance.location()).ok()?;
+    let parts: Vec<_> = url.path_segments()?.collect();
+    let (location, subdirectory) = match url.host_str()? {
+        "gitlab.archlinux.org" if parts.len() == 7 && parts[..3] == ["api", "v4", "projects"]
+            && parts[4..] == ["repository", "files", ".SRCINFO"] => {
+            let encoded = format!("project={}", parts[3]);
+            let project = url::form_urlencoded::parse(encoded.as_bytes()).next()?.1.into_owned();
+            if project != format!("archlinux/packaging/packages/{}", project_path(base)) { return None; }
+            (format!("https://gitlab.archlinux.org/{project}.git"), None)
+        }
+        "github.com" if parts.len() >= 5 && parts[..3] == ["CachyOS", "CachyOS-PKGBUILDS", "blob"]
+            && parts[3] == provenance.commit() && parts.last() == Some(&".SRCINFO") => {
+            let directory = parts[4..parts.len()-1].join("/");
+            if directory.is_empty() || crate::acquisition::safe_path(&directory).is_err() { return None; }
+            ("https://github.com/CachyOS/CachyOS-PKGBUILDS.git".to_owned(), Some(directory))
+        }
+        _ => return None,
+    };
+    Some(AnalysisTarget { location, revision: Some(format!("commit:{}", provenance.commit())), subdirectory, checksum: None })
+}
+
+#[cfg(test)]
 fn source_target(source: &str, version: &str) -> Result<Option<AnalysisTarget>, &'static str> {
+    source_target_with_evidence(source, version, false)
+}
+
+fn source_target_with_evidence(source: &str, version: &str, digest_bound: bool) -> Result<Option<AnalysisTarget>, &'static str> {
     if source.contains(['$', '`']) {
         return Err("dynamic recipe source is unsupported");
     }
@@ -195,6 +341,14 @@ fn source_target(source: &str, version: &str) -> Result<Option<AnalysisTarget>, 
     }
     let revision = if is_git {
         let fragment = url.fragment().ok_or("unpinned Git source is unsupported")?;
+        // makepkg permits ?signed after the revision as well as before '#'.
+        // It is recipe signature policy, not part of a Git ref or fetch URL.
+        // The pinned recipe provenance retains that policy; resolving a tag
+        // does not assert that its signature has been verified.
+        let fragment = fragment.strip_suffix("?signed").unwrap_or(fragment);
+        if url.query().is_some_and(|query| query != "signed") {
+            return Err("unsupported Git source query");
+        }
         let (kind, value) = fragment
             .split_once('=')
             .ok_or("unsupported Git revision selector")?;
@@ -212,6 +366,7 @@ fn source_target(source: &str, version: &str) -> Result<Option<AnalysisTarget>, 
         }
         let revision = Some(format!("{kind}:{value}"));
         url.set_fragment(None);
+        url.set_query(None);
         revision
     } else {
         let filename = alias.unwrap_or_else(|| url.path().rsplit('/').next().unwrap_or(""));
@@ -243,7 +398,7 @@ fn source_target(source: &str, version: &str) -> Result<Option<AnalysisTarget>, 
                 || stem.ends_with(&format!("-{version}"))
                 || stem.ends_with(&format!("_{version}"))
         });
-        if !versioned {
+        if !versioned && !digest_bound {
             return Err("archive URL does not identify the packaged version");
         }
         // Archive URL is the recipe's packaged source; its bytes are not fetched
@@ -314,5 +469,35 @@ pub(crate) fn project_path(base: &str) -> String {
         "unix-tree".to_owned()
     } else {
         collapsed
+    }
+}
+
+
+#[cfg(test)]
+mod selector_tests {
+    use super::*;
+
+    #[test]
+    fn signed_metadata_does_not_change_pinned_revision_or_fetch_url() {
+        for (selector, expected) in [
+            ("tag=v1.2.0", "tag:v1.2.0".to_owned()),
+            ("tag=releases/1.2", "tag:releases/1.2".to_owned()),
+            ("commit=0123456789012345678901234567890123456789", "commit:0123456789012345678901234567890123456789".to_owned()),
+        ] {
+            for suffix in [format!("#{selector}?signed"), format!("?signed#{selector}"), format!("#{selector}")] {
+                let target = source_target(&format!("alias::git+https://example.org/repo.git{suffix}"), "1.2.0").unwrap().unwrap();
+                assert_eq!(target.location, "https://example.org/repo.git");
+                assert_eq!(target.revision.as_deref(), Some(expected.as_str()));
+            }
+        }
+    }
+
+    #[test]
+    fn signed_marker_does_not_relax_selector_validation() {
+        for suffix in ["#branch=main?signed", "#tag=?signed", "#commit=abcdef?signed",
+            "#tag=v1?unknown", "#tag=v1?signed&other", "#tag=v1?signed?signed",
+            "?unknown#tag=v1", "?signed", "#tag=v1&other?signed"] {
+            assert!(source_target(&format!("git+https://example.org/repo.git{suffix}"), "1").is_err(), "{suffix}");
+        }
     }
 }

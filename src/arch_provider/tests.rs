@@ -6,6 +6,123 @@ use crate::package::provider::{AttemptOutcome, EvidenceGrade};
 
 const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
 
+fn archive_recipe(text: &str) -> Recipe {
+    let indented = text.lines().map(|line| {
+        if line.starts_with("pkgbase =") || line.starts_with("pkgname =") {
+            line.to_owned()
+        } else { format!("\t{line}") }
+    }).collect::<Vec<_>>().join("\n");
+    recipe(&indented)
+}
+
+#[test]
+fn audited_supplemental_checkouts_require_the_expected_primary() {
+    for base in ["coreutils", "cpio", "diffutils", "findutils", "grep", "grub", "gzip", "inetutils", "libtool", "m4", "patch", "tar", "wget", "enchant", "glib2", "lib32-glib2", "glycin", "graphene", "libnghttp2", "lib32-libnghttp2", "libnghttp3", "lib32-libnghttp3", "libngtcp2", "lib32-libngtcp2", "p11-kit", "lib32-p11-kit", "pcre2", "lib32-pcre2", "libbluray", "libjxl", "libldac", "malcontent", "libshout", "libtorrent-rasterbar", "lutris", "mbedtls", "mbedtls3", "obs-studio", "ostree", "pahole", "python-lark-parser", "python-numpy", "python-rapidfuzz", "python-referencing", "qt6-tools", "qt6-webengine", "qtcreator", "gamescope"] {
+        let rule = super::source_roles::rule(base).unwrap();
+        let package = RecipePackage { name: base, base, version: "1.0-1" };
+        let secondary = rule.supplemental.iter().enumerate().map(|(i, url)| format!("\tsource = checkout-{i}::git+{url}.git?signed\n")).collect::<String>();
+        let primary = format!("\tsource = main::git+{}.git?signed#tag=v1.0\n", rule.primary);
+        let resolve = |sources: &str| recipe(&format!("pkgbase = {base}\n\tpkgver = 1.0\n\tpkgrel = 1\n{sources}pkgname = {base}\n")).resolve(package);
+        for sources in [format!("{primary}{secondary}"), format!("{secondary}{primary}")] {
+            assert!(matches!(resolve(&sources), AttemptOutcome::Resolved { target, .. } if target.location == format!("{}.git", rule.primary) && target.revision.as_deref() == Some("tag:v1.0")), "{base}");
+        }
+        assert!(matches!(resolve(&secondary), AttemptOutcome::Unresolved { .. }), "{base}: unpinned inputs alone");
+        assert!(matches!(resolve(&format!("{primary}{secondary}\tsource = git+https://example.org/new-component.git\n")), AttemptOutcome::Unresolved { reason } if reason.contains("unclassified unpinned secondary") && reason.contains("new-component")), "{base}: unknown input");
+        assert!(matches!(resolve(&format!("{primary}{secondary}\tsource = git+https://example.org/new-component.git#tag=v1\n")), AttemptOutcome::Unresolved { reason } if reason.contains("ambiguous primary source")), "{base}: pinned extra component");
+    }
+}
+
+#[test]
+fn secondary_roles_do_not_relax_selectors_origins_or_version_checks() {
+    let package = RecipePackage { name: "glib2", base: "glib2", version: "1.0-1" };
+    for secondary in [
+        "git+https://gitlab.gnome.org/GNOME/gvdb.git#branch=main",
+        "git+https://gitlab.gnome.org/GNOME/gvdb.git#commit=abcdef",
+        "git+https://gitlab.gnome.org/GNOME/gvdb.git?unexpected=1",
+        "git+https://gitlab.gnome.org:8443/GNOME/gvdb.git",
+        "git+https://gitlab.gnome.org.attacker.example/GNOME/gvdb.git",
+        "git+http://gitlab.gnome.org/GNOME/gvdb.git",
+        "git+https://user@gitlab.gnome.org/GNOME/gvdb.git",
+        "git+https://gitlab.gnome.org/GNOME/other.git",
+        "git+https://gitlab.gnome.org/GNOME/gvdb.git.git",
+    ] {
+        let doc = recipe(&format!("pkgbase = glib2\n\tpkgver = 1.0\n\tpkgrel = 1\n\tsource = git+https://gitlab.gnome.org/GNOME/glib.git#tag=1.0\n\tsource = {secondary}\npkgname = glib2\n"));
+        assert!(matches!(doc.resolve(package), AttemptOutcome::Unresolved { .. }), "{secondary}");
+    }
+    let doc = recipe("pkgbase = glib2\n\tpkgver = 1.0\n\tpkgrel = 1\n\tsource = git+https://gitlab.gnome.org/GNOME/glib.git#tag=1.0\n\tsource = git+https://gitlab.gnome.org/GNOME/gvdb.git\npkgname = glib2\n");
+    assert!(matches!(doc.resolve(RecipePackage { version: "2.0-1", ..package }), AttemptOutcome::Unresolved { reason } if reason.contains("version")));
+}
+
+#[test]
+fn gnu_alternate_distribution_is_not_a_second_primary() {
+    let resolve = |extra: &str| recipe(&format!("pkgbase = coreutils\n\tpkgver = 9.11\n\tpkgrel = 2\n\tsource = git+https://git.savannah.gnu.org/git/coreutils.git?signed#tag=v9.11\n\tsource = git+https://git.savannah.gnu.org/git/gnulib.git\n\tsource = https://ftp.gnu.org/gnu/coreutils/coreutils-9.11.tar.gz\n{extra}pkgname = coreutils\n")).resolve(RecipePackage { name: "coreutils", base: "coreutils", version: "9.11-2" });
+    assert!(matches!(resolve(""), AttemptOutcome::Resolved { target, .. } if target.revision.as_deref() == Some("tag:v9.11")));
+    assert!(matches!(resolve("\tsource = https://ftp.gnu.org/gnu/other/other-9.11.tar.gz\n"), AttemptOutcome::Unresolved { reason } if reason.contains("ambiguous")));
+    assert!(matches!(resolve("\tsource = https://ftp.gnu.org/gnu/coreutils/coreutils-extra-9.11.tar.gz\n"), AttemptOutcome::Unresolved { reason } if reason.contains("ambiguous")));
+    assert!(matches!(resolve("\tsource = git+https://git.savannah.gnu.org/git/coreutils.git#tag=v9.10\n"), AttemptOutcome::Unresolved { .. }));
+}
+
+#[test]
+fn primary_roles_ignore_known_docs_but_keep_unknown_code_ambiguous() {
+    let make = |extra: &str| recipe(&format!("pkgbase = gstreamer\n\tpkgver = 1.0\n\tpkgrel = 1\n\tsource = git+https://gitlab.freedesktop.org/gstreamer/gstreamer.git#tag=1.0\n\tsource = https://gstreamer.freedesktop.org/src/gstreamer-docs/gstreamer-docs-1.0.tar.xz\n{extra}pkgname = gstreamer\n"));
+    let package = RecipePackage { name: "gstreamer", base: "gstreamer", version: "1.0-1" };
+    assert!(matches!(make("").resolve(package), AttemptOutcome::Resolved { target, .. } if target.location.ends_with("/gstreamer/gstreamer.git")));
+    assert!(matches!(make("\tsource = https://example.org/extra-1.0.tar.gz\n").resolve(package), AttemptOutcome::Unresolved { reason } if reason.contains("3 candidates") && reason.contains("extra-1.0")));
+    assert!(matches!(make("\tsource = https://example.org/extra-1.0.tar.gz\n").resolve(RecipePackage { version: "2.0-1", ..package }), AttemptOutcome::Unresolved { reason } if reason.contains("version")));
+}
+
+#[test]
+fn local_sources_use_pinned_packaging_tree_and_directory() {
+    use crate::package::provider::RecipeProvenance;
+    let text = b"pkgbase = hwdetect\n\tpkgver = 1.0\n\tpkgrel = 1\n\tsource = hwdetect\npkgname = hwdetect\n";
+    for (location, directory) in [
+        (format!("https://gitlab.archlinux.org/api/v4/projects/archlinux%2Fpackaging%2Fpackages%2Fhwdetect/repository/files/.SRCINFO?ref={COMMIT}"), None),
+        (format!("https://github.com/CachyOS/CachyOS-PKGBUILDS/blob/{COMMIT}/hwdetect/.SRCINFO"), Some("hwdetect")),
+    ] {
+        let doc = Recipe::from_srcinfo(text, RecipeProvenance::new(&location, COMMIT).unwrap());
+        let AttemptOutcome::Resolved { target, .. } = doc.resolve(RecipePackage { name: "hwdetect", base: "hwdetect", version: "1.0-1" }) else { panic!("{location}"); };
+        assert_eq!(target.revision, Some(format!("commit:{COMMIT}")));
+        assert_eq!(target.subdirectory.as_deref(), directory);
+    }
+    let doc = Recipe::from_srcinfo(text, RecipeProvenance::new(&format!("https://github.com/unrelated/repo/blob/{COMMIT}/.SRCINFO"), COMMIT).unwrap());
+    assert!(matches!(doc.resolve(RecipePackage { name: "hwdetect", base: "hwdetect", version: "1.0-1" }), AttemptOutcome::Unresolved { reason } if reason.contains("recipe-local")));
+}
+
+#[test]
+fn archive_identity_can_come_from_matching_recipe_digest() {
+    for (version, url, kind, length) in [
+        ("26.03", "https://7-zip.org/a/7z2603-src.tar.xz", "sha512", 128),
+        ("3.53.4", "https://sqlite.org/2026/sqlite-src-3530400.zip", "sha256", 64),
+        ("1.0", "https://example.org/snapshot.tar.gz", "b2", 128),
+    ] {
+        let hash = "a".repeat(length);
+        let doc = archive_recipe(&format!("pkgbase = alpha\npkgver = {version}\npkgrel = 1\nsource = {url}\n{kind}sums = {hash}\npkgname = alpha\n"));
+        let packaged = format!("{version}-1");
+        let AttemptOutcome::Resolved { target, grade } = doc.resolve(RecipePackage {
+            name: "alpha", base: "alpha", version: &packaged,
+        }) else { panic!("{url}"); };
+        assert_eq!(target.location, url);
+        assert_eq!(target.checksum, Some(format!("{kind}:{hash}")));
+        assert_eq!(target.revision, None);
+        assert_eq!(grade, EvidenceGrade::Reconstructed);
+        assert!(matches!(doc.resolve(RecipePackage { name: "alpha", base: "alpha", version: "999-1" }), AttemptOutcome::Unresolved { .. }));
+    }
+}
+
+#[test]
+fn unversioned_archive_requires_its_own_valid_digest() {
+    for sums in [String::new(), "sha256sums = SKIP\n".into(), "sha256sums = invalid\n".into(),
+        format!("sha256sums = SKIP\nsha256sums = {}\n", "a".repeat(64))] {
+        let doc = archive_recipe(&format!("pkgbase = alpha\npkgver = 1.0\npkgrel = 1\nsource = https://example.org/snapshot.tar.gz\n{sums}pkgname = alpha\n"));
+        assert!(matches!(doc.resolve(RecipePackage { name: "alpha", base: "alpha", version: "1.0-1" }), AttemptOutcome::Unresolved { .. }));
+    }
+    let unrelated = archive_recipe(&format!("pkgbase = alpha\npkgver = 1.0\npkgrel = 1\nsource = https://example.org/snapshot.tar.gz\nsource = local.patch\nsha256sums = SKIP\nsha256sums = {}\npkgname = alpha\n", "a".repeat(64)));
+    assert!(matches!(unrelated.resolve(RecipePackage { name: "alpha", base: "alpha", version: "1.0-1" }), AttemptOutcome::Unresolved { reason } if reason.contains("archive URL")));
+    // Checksums do not authorize choosing one of multiple source archives.
+    let doc = archive_recipe(&format!("pkgbase = alpha\npkgver = 1.0\npkgrel = 1\nsource = https://example.org/a.tar.gz\nsource = https://example.org/b.tar.gz\nsha256sums = {}\nsha256sums = {}\npkgname = alpha\n", "a".repeat(64), "b".repeat(64)));
+    assert!(matches!(doc.resolve(RecipePackage { name: "alpha", base: "alpha", version: "1.0-1" }), AttemptOutcome::Unresolved { reason } if reason.contains("ambiguous")));
+}
+
 fn api_body(text: &[u8]) -> Vec<u8> {
     serde_json::to_vec(&serde_json::json!({
         "file_path": ".SRCINFO", "encoding": "base64", "commit_id": COMMIT,
@@ -38,6 +155,16 @@ fn resolve(source: &str) -> AttemptOutcome {
 #[test]
 fn pinned_git_and_versioned_archives_are_reconstructed_evidence() {
     for (source, location, revision) in [
+        (
+            "git+https://example.org/alpha.git#tag=v1.0?signed",
+            "https://example.org/alpha.git",
+            Some("tag:v1.0"),
+        ),
+        (
+            "git+https://example.org/alpha.git?signed#tag=v1.0",
+            "https://example.org/alpha.git",
+            Some("tag:v1.0"),
+        ),
         (
             "git+https://example.org/alpha.git#tag=v1.0",
             "https://example.org/alpha.git",
@@ -102,7 +229,7 @@ fn remote_patches_do_not_veto_a_primary_tree_or_supply_one() {
         assert_eq!(
             resolve(auxiliary),
             AttemptOutcome::Unresolved {
-                reason: "primary source is missing or ambiguous in recipe metadata".to_owned(),
+                reason: "no primary source candidate: only auxiliary source inputs".to_owned(),
             },
             "{auxiliary}"
         );
@@ -291,6 +418,44 @@ fn archive_checksums_follow_source_positions_and_survive_auxiliary_inputs() {
         target.checksum,
         Some(format!("sha512:{}", digest.to_ascii_lowercase()))
     );
+    let digest = "C".repeat(128);
+    let AttemptOutcome::Resolved { target, .. } = resolve(&format!(
+        "https://example.org/alpha-1.0.tar\n\tb2sums = {digest}"
+    )) else {
+        panic!("BLAKE2 did not resolve");
+    };
+    assert_eq!(
+        target.checksum,
+        Some(format!("b2:{}", digest.to_ascii_lowercase()))
+    );
+    // Strongest verification evidence wins: SHA-512, then BLAKE2, then SHA-256.
+    let AttemptOutcome::Resolved { target, .. } = resolve(&format!(
+        "https://example.org/alpha-1.0.tar\n\tsha256sums = {}\n\tsha512sums = {}\n\tb2sums = {}",
+        "d".repeat(64),
+        "e".repeat(128),
+        "f".repeat(128),
+    )) else {
+        panic!("checksum precedence did not resolve");
+    };
+    assert_eq!(target.checksum, Some(format!("sha512:{}", "e".repeat(128))));
+    let AttemptOutcome::Resolved { target, .. } = resolve(&format!(
+        "https://example.org/alpha-1.0.tar\n\tsha256sums = {}\n\tb2sums = {}",
+        "d".repeat(64),
+        "f".repeat(128),
+    )) else {
+        panic!("BLAKE2-over-SHA-256 precedence did not resolve");
+    };
+    assert_eq!(target.checksum, Some(format!("b2:{}", "f".repeat(128))));
+    for sums in [
+        "\tb2sums = invalid",
+        "\tb2sums = SKIP\n\tb2sums = SKIP",
+        "\tb2sums = short",
+    ] {
+        assert!(matches!(
+            resolve(&format!("https://example.org/alpha-1.0.tar\n{sums}")),
+            AttemptOutcome::Unresolved { .. }
+        ));
+    }
     for sums in [
         "\tsha256sums = invalid",
         "\tsha256sums = SKIP\n\tsha256sums = SKIP",

@@ -48,6 +48,9 @@ pub struct ParsedSrcinfo {
     pub sources: Vec<String>,
     pub sha256sums: Vec<String>,
     pub sha512sums: Vec<String>,
+    /// Base-level BLAKE2 (`b2sums`) entries in document order. Like the SHA
+    /// families, these are positional against `source`.
+    pub b2sums: Vec<String>,
     /// Architecture-specific source arrays require a later architecture-aware
     /// resolver; their presence must not silently disappear from evidence.
     pub has_arch_specific_sources: bool,
@@ -64,6 +67,7 @@ pub struct ParsedSrcinfoPackage {
     pub sources: Vec<String>,
     pub sha256sums: Vec<String>,
     pub sha512sums: Vec<String>,
+    pub b2sums: Vec<String>,
 }
 
 /// Typed parse failure. Every variant carries enough context to diagnose the
@@ -169,6 +173,7 @@ struct DocumentBuilder {
     sources: Vec<String>,
     sha256sums: Vec<String>,
     sha512sums: Vec<String>,
+    b2sums: Vec<String>,
     has_arch_specific_sources: bool,
     packages: Vec<ParsedSrcinfoPackage>,
 }
@@ -209,6 +214,7 @@ impl DocumentBuilder {
             sources: self.sources,
             sha256sums: self.sha256sums,
             sha512sums: self.sha512sums,
+            b2sums: self.b2sums,
             has_arch_specific_sources: self.has_arch_specific_sources,
             packages: self.packages,
         })
@@ -283,6 +289,7 @@ fn parse_section_line(
                 sources: Vec::new(),
                 sha256sums: Vec::new(),
                 sha512sums: Vec::new(),
+                b2sums: Vec::new(),
             });
             Ok(())
         }
@@ -314,12 +321,14 @@ fn parse_indented_line(
         document.has_arch_specific_sources = true;
         return Ok(());
     }
-    if matches!(key, "sha256sums" | "sha512sums") {
+    if matches!(key, "sha256sums" | "sha512sums" | "b2sums") {
         let checksums = match (current, key) {
             (Some(index), "sha256sums") => &mut document.packages[index].sha256sums,
-            (Some(index), _) => &mut document.packages[index].sha512sums,
+            (Some(index), "sha512sums") => &mut document.packages[index].sha512sums,
+            (Some(index), _) => &mut document.packages[index].b2sums,
             (None, "sha256sums") => &mut document.sha256sums,
-            (None, _) => &mut document.sha512sums,
+            (None, "sha512sums") => &mut document.sha512sums,
+            (None, _) => &mut document.b2sums,
         };
         checksums.push(parse_source_value(value, line_number)?);
         return Ok(());
@@ -372,7 +381,10 @@ fn parse_indented_line(
 }
 
 /// Split a line at the first `=` and trim both sides. Surrounding whitespace
-/// is insignificant in `makepkg --printsrcinfo` output.
+/// is insignificant in `makepkg --printsrcinfo` output. Empty values are
+/// allowed here: `makepkg` emits bare `depends = ` lines for empty arrays,
+/// and every meaningful consumer (names, versions, sources, checksums)
+/// validates non-emptiness itself, so empties only ever reach ignored keys.
 fn split_key_value(line: &str, line_number: usize) -> Result<(&str, &str), SrcinfoError> {
     let (raw_key, raw_value) = line
         .split_once('=')
@@ -381,9 +393,6 @@ fn split_key_value(line: &str, line_number: usize) -> Result<(&str, &str), Srcin
     let value = raw_value.trim();
     if key.is_empty() || key.chars().any(char::is_whitespace) || key.chars().any(char::is_control) {
         return Err(invalid(line_number, "the key is empty or invalid"));
-    }
-    if value.is_empty() {
-        return Err(invalid(line_number, "the value is empty"));
     }
     Ok((key, value))
 }
@@ -583,6 +592,51 @@ mod tests {
         let parsed = parse_srcinfo_bytes(input.as_bytes()).unwrap();
         assert_eq!(parsed.pkgbase, "future");
         assert_eq!(parsed.packages.len(), 1);
+    }
+
+    #[test]
+    fn tolerates_empty_values_on_ignored_keys() {
+        // `makepkg --printsrcinfo` emits bare `depends = ` lines for empty
+        // arrays (seen on aom 3.15.0-1); those must not invalidate the whole
+        // document. Meaningful keys still validate non-emptiness themselves.
+        let input = "pkgbase = aom\n\
+             \tpkgver = 3.15.0\n\
+             \tpkgrel = 1\n\
+             \tarch = x86_64\n\
+             \tlicense = BSD-3-Clause\n\
+             \tsource = https://example.invalid/libaom-3.15.0.tar.gz\n\
+             \tb2sums = f6952a94bb9d503af790723dad1166f2ae3252a9eb3daa882aa3111009fb3110b101b854d1a420fdd8aa02e4e14da16c833835337d2cca5a2dd2b336a3fbd3d3\n\
+             \tvalidpgpkeys = B002F08B74A148DAA01F7123A48E86DB0B830498\n\
+             \n\
+             pkgname = aom\n\
+             \tdepends = glibc\n\
+             \tb2sums = 0133456789abcdef0133456789abcdef0133456789abcdef0133456789abcdef0133456789abcdef0133456789abcdef0133456789abcdef0133456789abcdef\n\
+             \n\
+             pkgname = aom-docs\n\
+             \tdepends = \n";
+        let parsed = parse_srcinfo_bytes(input.as_bytes()).unwrap();
+        assert_eq!(parsed.pkgbase, "aom");
+        assert_eq!(parsed.pkgver, "3.15.0");
+        assert_eq!(parsed.pkgrel, "1");
+        assert_eq!(parsed.packages.len(), 2);
+        assert!(parsed.sha256sums.is_empty() && parsed.sha512sums.is_empty());
+        assert_eq!(parsed.b2sums.len(), 1);
+        assert_eq!(parsed.packages[0].b2sums.len(), 1);
+        assert!(parsed.packages[1].b2sums.is_empty());
+    }
+
+    #[test]
+    fn rejects_empty_values_on_meaningful_keys() {
+        for input in [
+            "pkgbase = \n\tpkgver = 1.0\n\tpkgrel = 1\n\npkgname = empty-base\n",
+            "pkgbase = empty-ver\n\tpkgver = \n\tpkgrel = 1\n\npkgname = empty-ver\n",
+            "pkgbase = empty-rel\n\tpkgver = 1.0\n\tpkgrel = \n\npkgname = empty-rel\n",
+            "pkgbase = empty-src\n\tpkgver = 1.0\n\tpkgrel = 1\n\tsource = \n\npkgname = empty-src\n",
+            "pkgbase = empty-sum\n\tpkgver = 1.0\n\tpkgrel = 1\n\tsource = https://example.invalid/x.tar.gz\n\tsha256sums = \n\npkgname = empty-sum\n",
+            "pkgbase = empty-name\n\tpkgver = 1.0\n\tpkgrel = 1\n\npkgname = \n",
+        ] {
+            parse_srcinfo_bytes(input.as_bytes()).unwrap_err();
+        }
     }
 
     #[test]

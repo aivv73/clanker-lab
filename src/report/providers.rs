@@ -254,6 +254,9 @@ impl ProviderReport {
                     if let Some(digest) = &acquisition.content_sha256 {
                         text.push_str(&format!("\n- Content SHA-256: {}", quote(digest)));
                     }
+                    for submodule in &acquisition.submodules {
+                        text.push_str(&format!("\n- Verified submodule: {} at {} ({})", quote(&submodule.path), quote(&submodule.verified_revision), quote(&submodule.url)));
+                    }
                 } else if attempt.outcome == "source_free" {
                     text.push_str("\n- Acquisition: not required (recipe declares no sources)");
                 } else {
