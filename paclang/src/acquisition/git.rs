@@ -37,13 +37,13 @@ pub(super) fn fetch(
         expanded: 0,
         repositories: 0,
     };
-    let (repo, id) = fetch_repository(target, &mut context)?;
+    let (repo, id, location) = fetch_repository(target, &mut context)?;
     context.record.verified_revision = Some(id.to_string());
     let mut links = Vec::new();
     materialize_repository(
         &repo,
         id,
-        &target.location,
+        &location,
         tree,
         Path::new(""),
         &mut context,
@@ -57,7 +57,7 @@ pub(super) fn fetch(
 fn fetch_repository(
     target: &AnalysisTarget,
     context: &mut Context<'_>,
-) -> Result<(Repository, Oid), Error> {
+) -> Result<(Repository, Oid, String), Error> {
     let limits = context.limits;
     let proxy = context.proxy;
     if context.repositories >= 129 {
@@ -100,49 +100,19 @@ fn fetch_repository(
     // variables, and user/system git configs are neutralized at startup.
     config.set_str("http.proxy", proxy.unwrap_or(""))?;
     config.set_bool("http.sslVerify", true)?;
-    let limited = Cell::new(false);
-    let downloaded = Cell::new(0u64);
-    let mut callbacks = RemoteCallbacks::new();
-    callbacks.transfer_progress(|stats| {
-        downloaded.set(stats.received_bytes() as u64);
-        if downloaded.get()
-            > limits
-                .max_download_bytes
-                .saturating_sub(context.record.downloaded_bytes)
-        {
-            limited.set(true);
-            return false;
+    let mut location = target.location.clone();
+    if let Err(error) = fetch_once(&repo, &reference, &location, context) {
+        // Retry discovery only for libgit2 redirect refusals.
+        if !matches!(&error, Error::Detail(reason) if reason.contains("redirect")) {
+            return Err(error);
         }
-        true
-    });
-    // libgit2 defaults to GIT_PROXY_NONE, which ignores http.proxy config.
-    // Pass the explicit URL in fetch options; retain NONE without --proxy-url.
-    let mut proxy_options = ProxyOptions::new();
-    if let Some(url) = proxy {
-        proxy_options.url(url);
+        let redirected = super::git_redirects::resolve(&location, proxy, limits)?;
+        if redirected == location {
+            return Err(error);
+        }
+        location = redirected;
+        fetch_once(&repo, &reference, &location, context)?;
     }
-    let mut options = FetchOptions::new();
-    options
-        .proxy_options(proxy_options)
-        .remote_callbacks(callbacks)
-        .depth(1)
-        .download_tags(AutotagOption::None)
-        .follow_redirects(RemoteRedirect::None);
-    let mut remote = repo.remote_anonymous(&target.location)?;
-    let result = remote.fetch(
-        &[format!("+{reference}:refs/paclang/source")],
-        Some(&mut options),
-        None,
-    );
-    drop(options);
-    context.record.downloaded_bytes = context
-        .record
-        .downloaded_bytes
-        .saturating_add(downloaded.get());
-    if limited.get() {
-        return Err(Error::Limited("source download byte limit exceeded"));
-    }
-    result?;
     let commit = repo
         .find_reference("refs/paclang/source")?
         .peel_to_commit()?;
@@ -184,8 +154,97 @@ fn fetch_repository(
     let id = commit.id();
     drop(commit);
     drop(odb);
-    drop(remote);
-    Ok((repo, id))
+    Ok((repo, id, location))
+}
+
+fn fetch_once(
+    repo: &Repository,
+    reference: &str,
+    location: &str,
+    context: &mut Context<'_>,
+) -> Result<(), Error> {
+    let result = fetch_refspecs(
+        repo, &[format!("+{reference}:refs/paclang/source")], 1, location, context,
+    );
+    if reference.len() == 40
+        && reference.bytes().all(|b| b.is_ascii_hexdigit())
+        && matches!(&result, Err(Error::Detail(reason)) if reason.contains("cannot fetch a specific object from the remote repository"))
+    {
+        // Some servers refuse SHA wants even for reachable commits. Fetch a
+        // bounded window of advertised history, never substitute a ref's tip.
+        fetch_refspecs(
+            repo,
+            &[
+                "+refs/heads/*:refs/paclang/heads/*".to_owned(),
+                "+refs/tags/*:refs/paclang/tags/*".to_owned(),
+            ],
+            256,
+            location,
+            context,
+        )?;
+        let id = Oid::from_str(reference)?;
+        repo.find_commit(id).map_err(|_| Error::Failed(
+            "pinned Git commit absent from bounded advertised history (depth 256)",
+        ))?;
+        repo.reference("refs/paclang/source", id, true, "verified pinned commit")?;
+        return Ok(());
+    }
+    result
+}
+
+fn fetch_refspecs(
+    repo: &Repository,
+    refspecs: &[String],
+    depth: i32,
+    location: &str,
+    context: &mut Context<'_>,
+) -> Result<(), Error> {
+    let limits = context.limits;
+    let proxy = context.proxy;
+    let limited = Cell::new(false);
+    let downloaded = Cell::new(0u64);
+    let mut callbacks = RemoteCallbacks::new();
+    callbacks.transfer_progress(|stats| {
+        downloaded.set(stats.received_bytes() as u64);
+        if downloaded.get()
+            > limits
+                .max_download_bytes
+                .saturating_sub(context.record.downloaded_bytes)
+        {
+            limited.set(true);
+            return false;
+        }
+        true
+    });
+    // libgit2 defaults to GIT_PROXY_NONE, which ignores http.proxy config.
+    // Pass the explicit URL in fetch options; retain NONE without --proxy-url.
+    let mut proxy_options = ProxyOptions::new();
+    if let Some(url) = proxy {
+        proxy_options.url(url);
+    }
+    let mut options = FetchOptions::new();
+    options
+        .proxy_options(proxy_options)
+        .remote_callbacks(callbacks)
+        .depth(depth)
+        .download_tags(AutotagOption::None)
+        .follow_redirects(RemoteRedirect::None);
+    let mut remote = repo.remote_anonymous(location)?;
+    let result = remote.fetch(
+        refspecs,
+        Some(&mut options),
+        None,
+    );
+    drop(options);
+    context.record.downloaded_bytes = context
+        .record
+        .downloaded_bytes
+        .saturating_add(downloaded.get());
+    if limited.get() {
+        return Err(Error::Limited("source download byte limit exceeded"));
+    }
+    result?;
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -302,7 +361,7 @@ fn write_tree(
                     subdirectory: None,
                     checksum: None,
                 };
-                let (child, id) = fetch_repository(&target, context)?;
+                let (child, id, location) = fetch_repository(&target, context)?;
                 account(context.record, context.limits, 0)?;
                 fs::create_dir(&output)?;
                 context.record.submodules.push(super::SubmoduleRecord {
@@ -331,6 +390,19 @@ fn resolve_submodule_url(parent: &str, child: &str) -> Result<String, Error> {
     if child.len() > 4096 || child.contains('\\') || child.chars().any(char::is_control) {
         return Err(Error::Failed("invalid Git submodule URL"));
     }
+    // Savannah documents these git:// aliases and the /git/ HTTPS endpoint:
+    // https://savannah.gnu.org/maintenance/UsingGit
+    // Restrict this transport substitution to the two audited repositories.
+    // The caller still fetches and verifies the original gitlink commit.
+    let child = match child {
+        "git://git.sv.gnu.org/gnulib.git" | "git://git.sv.gnu.org/gnulib"
+        | "git://git.savannah.gnu.org/gnulib.git" | "git://git.savannah.gnu.org/gnulib" =>
+            "https://git.savannah.gnu.org/git/gnulib.git",
+        "git://git.sv.gnu.org/paxutils.git" | "git://git.sv.gnu.org/paxutils"
+        | "git://git.savannah.gnu.org/paxutils.git" | "git://git.savannah.gnu.org/paxutils" =>
+            "https://git.savannah.gnu.org/git/paxutils.git",
+        _ => child,
+    };
     let resolved = if child.starts_with("../") || child.starts_with("./") {
         let mut base = super::http::validate_url(parent)?;
         base.set_query(None);
@@ -542,6 +614,32 @@ pub(super) fn initialize(tree: &Path) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn audited_savannah_submodule_aliases_use_https_only() {
+        let parent = "https://git.savannah.gnu.org/git/tar.git";
+        for host in ["git.sv.gnu.org", "git.savannah.gnu.org"] {
+            for repo in ["gnulib", "paxutils"] {
+                for suffix in ["", ".git"] {
+                    assert_eq!(resolve_submodule_url(parent, &format!("git://{host}/{repo}{suffix}")).unwrap(), format!("https://git.savannah.gnu.org/git/{repo}.git"));
+                }
+            }
+        }
+        for input in [
+            "git://example.org/gnulib.git",
+            "git://git.sv.gnu.org.attacker.example/gnulib.git",
+            "git://git.sv.gnu.org/unknown.git",
+            "git://git.sv.gnu.org/gnulib.git?branch=main",
+            "git://git.sv.gnu.org/gnulib.git#main",
+            "git://user@git.sv.gnu.org/gnulib.git",
+            "git://git.sv.gnu.org:9418/gnulib.git",
+            "git://git.sv.gnu.org/%67nulib.git",
+            "git://git.sv.gnu.org/../gnulib.git",
+            "http://git.sv.gnu.org/gnulib.git",
+        ] {
+            assert!(resolve_submodule_url(parent, input).is_err(), "{input}");
+        }
+    }
 
     #[test]
     fn submodule_urls_follow_repository_relative_semantics_and_reject_other_transports() {

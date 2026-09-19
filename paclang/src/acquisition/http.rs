@@ -24,6 +24,23 @@ pub(super) fn validate_url(value: &str) -> Result<Url, Error> {
     Ok(url)
 }
 
+pub(super) fn archive_redirect(current: &Url, location: &str) -> Result<Url, Error> {
+    if location.chars().any(char::is_whitespace) {
+        return Err(Error::Failed("invalid source redirect"));
+    }
+    let mut next = current
+        .join(location)
+        .map_err(|_| Error::Failed("invalid source redirect"))?;
+    // Some archive hosts advertise an HTTP Location even though the same
+    // destination supports TLS. Try only its HTTPS counterpart, never HTTP.
+    // Certificate verification and the recipe's archive checksum still apply.
+    if current.scheme() == "https" && next.scheme() == "http" {
+        next.set_scheme("https")
+            .map_err(|_| Error::Failed("invalid source redirect"))?;
+    }
+    validate_url(next.as_str())
+}
+
 pub(super) fn download(
     location: &str,
     destination: &Path,
@@ -112,15 +129,7 @@ pub(super) fn download(
                 .redirect_url()
                 .map_err(config)?
                 .ok_or(Error::Failed("source redirect has no location"))?;
-            let next = validate_url(
-                url.join(redirect)
-                    .map_err(|_| Error::Failed("invalid source redirect"))?
-                    .as_str(),
-            )?;
-            if url.scheme() == "https" && next.scheme() != "https" {
-                return Err(Error::Failed("source redirect downgrades HTTPS"));
-            }
-            url = next;
+            url = archive_redirect(&url, redirect)?;
         } else {
             return Err(Error::Detail(format!(
                 "source server returned HTTP {status}"

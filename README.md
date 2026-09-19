@@ -7,6 +7,7 @@
 | Пакет | Описание | Стек |
 | --- | --- | --- |
 | [paclang](paclang/README.md) | Анализ языков программирования, на которых написаны установленные пакеты Arch Linux и других ALPM-систем. | Rust |
+| [Psi](psi/README.md) | Самостоятельный Rust runtime агента; первый разговор через T3 с fixture-моделью. | Rust, T3; Bend в плане MVP |
 
 ## paclang
 

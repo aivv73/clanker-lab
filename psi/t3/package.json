@@ -1,0 +1,8 @@
+{
+  "name": "psi-t3-integration",
+  "private": true,
+  "type": "module",
+  "scripts": { "test:e2e": "node --test e2e.test.mjs" },
+  "devDependencies": { "playwright-core": "1.60.0" },
+  "engines": { "node": "^24.13.1" }
+}

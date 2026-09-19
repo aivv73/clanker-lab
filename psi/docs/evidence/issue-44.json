@@ -1,0 +1,33 @@
+{
+  "passed": true,
+  "t3": "dfbb11bdd7c3f1a5575cb55d3e3abb12be025727",
+  "node": "v24.13.1",
+  "chromium": "Google Chrome 152.0.7977.82",
+  "normal_websocket": true,
+  "visible_response": true,
+  "stable_origin_command_id": true,
+  "one_runtime": true,
+  "viewer_detach_preserves_runtime": true,
+  "controller_close_reaps_runtime": true,
+  "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+  "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+  "os": "Linux 7.2.2-1-cachyos x86_64 GNU/Linux",
+  "source_revision": "40ef305fe3b5ea70c53b42378b4113026661c1fc",
+  "implementation_sha256": {
+    "../Cargo.toml": "58ca8ec542d8aac1bc7bbcb037a3f8f98519fbe2cadabcbfd088bb35399c1245",
+    "../Cargo.lock": "a3ec3cad52957821be4c4be7ee66ff927836a80044bbddbb727739b8b95d5840",
+    "../src/core.rs": "52478adaf79b28b88525dc2d0ea3b79ffb88d90c7fe46dabcedf73cb3a0c4b4e",
+    "../src/plugins.rs": "5389ffcfa9ea8c1bbfd114329d9f3e08935db6158c505200cd6d77e545fdc58d",
+    "../src/protocol.rs": "738eb649acbac9ccba902a74bb5508db4d5c7403f83e9e79d96524bf5f18104f",
+    "../src/main.rs": "601c685ed66b6a7ebe41f10cc42f415b2123b6f2007bcc33e8b6875ce5283cfd",
+    "../src/lib.rs": "d321adf009bee96e4701b740d64f6276986e7313bae6b71b439fd23850e256cf",
+    "PsiDriver.ts": "a31e4a89562d50dfcaba2edf4788ba30d2e0cc83f4b6f061428d3cb90fde48d2",
+    "PsiBridge.ts": "0719f6227d08a6e34ca69b4f05ce1a95eb922cf60302bd39015e4d3f455deb0b",
+    "t3.patch": "19a50f781c976d649d1b672a8644e893ab65522ee4591244cf1cbbdcd39534f6",
+    "prepare.py": "982aafa11a62bc911fc05e64c5ec119b73d658c49afea7ec3f6025f57f557dd0",
+    "run.py": "76b79f66f771a11e6349af5f172013907e169cf1a928d48153ae4efcb4854cfe",
+    "e2e.test.mjs": "536c5df782f0a0b3a4e49aa65bd5f9f54ee5ff1306ad8a1b2ba98b303aa5806f",
+    "package-lock.json": "5b6889a9e0aebc60cca078c1956acc9ee23a7d8e69844ab85aa09cec83177a94"
+  },
+  "t3_lock_sha256": "cdf7f23158631e7cb34b279a9792ef28eb3418c453ec58508e3d91919a4b5a12"
+}

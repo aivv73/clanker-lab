@@ -131,6 +131,64 @@ fn checksums_and_url_boundaries_are_explicit() {
 }
 
 #[test]
+fn archive_redirects_use_https_without_relaxing_url_boundaries() {
+    let current = url::Url::parse("https://old.example/releases/source.tar").unwrap();
+    for (location, expected) in [
+        (
+            "http://new.example/archive.tar?download=1",
+            "https://new.example/archive.tar?download=1",
+        ),
+        (
+            "http://new.example:80/archive.tar",
+            "https://new.example/archive.tar",
+        ),
+        (
+            "http://new.example:8443/archive.tar",
+            "https://new.example:8443/archive.tar",
+        ),
+        (
+            "http://127.0.0.1/archive.tar",
+            "https://127.0.0.1/archive.tar",
+        ),
+        (
+            "https://new.example/archive.tar",
+            "https://new.example/archive.tar",
+        ),
+        (
+            "//new.example/archive.tar",
+            "https://new.example/archive.tar",
+        ),
+        ("../archive.tar", "https://old.example/archive.tar"),
+    ] {
+        assert_eq!(
+            http::archive_redirect(&current, location).unwrap().as_str(),
+            expected
+        );
+    }
+    for location in [
+        "http://user:password@new.example/archive.tar",
+        "http://new.example/archive.tar#fragment",
+        "ftp://new.example/archive.tar",
+        "file:///tmp/archive.tar",
+        "http://new.example/unsafe path",
+        "http://new.example/unsafe\npath",
+    ] {
+        assert!(
+            http::archive_redirect(&current, location).is_err(),
+            "{location}"
+        );
+    }
+    let loopback = url::Url::parse("http://127.0.0.1:1234/source.tar").unwrap();
+    assert_eq!(
+        http::archive_redirect(&loopback, "/next.tar")
+            .unwrap()
+            .as_str(),
+        "http://127.0.0.1:1234/next.tar"
+    );
+    assert!(http::archive_redirect(&loopback, "http://example.org/source.tar").is_err());
+}
+
+#[test]
 fn compressed_tar_and_zip_expand_with_the_same_limits() {
     for bytes in [
         include_bytes!("../../tests/fixtures/source.tar.gz").as_slice(),
