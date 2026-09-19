@@ -19,12 +19,15 @@ const Reply = Schema.Struct({
 export type PsiReply = typeof Reply.Type;
 const capabilities = ["fixture-model", "sessions", "origin-command-id"];
 
+export type PsiOptions = { agentLoop?: string | undefined; fixtureGate?: string | undefined; startupFault?: string | undefined };
+
 /** One controller process per provider instance, shared by every session. */
 export class PsiBridge {
   readonly child: ChildProcessWithoutNullStreams;
   readonly exited: Promise<void>;
   runtimeId?: string;
   private buffer = "";
+  private diagnostics = "";
   private failure?: Error;
   private closing = false;
   private pending: {
@@ -34,10 +37,16 @@ export class PsiBridge {
     timer: ReturnType<typeof setTimeout>;
   }[] = [];
 
-  constructor(binary: string) {
-    this.child = spawn(binary, [], { stdio: "pipe" });
+  constructor(binary: string, options: PsiOptions = {}) {
+    const args = ["--agent-loop", options.agentLoop ?? "single-response"];
+    if (options.fixtureGate) args.push("--fixture-gate", options.fixtureGate);
+    if (options.startupFault) args.push("--startup-fault", options.startupFault);
+    this.child = spawn(binary, args, { stdio: "pipe" });
     // Never treat stderr as JSONL. Forward diagnostics without buffering them.
-    this.child.stderr.on("data", (data: Buffer) => process.stderr.write(data));
+    this.child.stderr.on("data", (data: Buffer) => {
+      this.diagnostics = (this.diagnostics + data.toString()).slice(-8192);
+      process.stderr.write(data);
+    });
     this.child.stdout.setEncoding("utf8");
     this.child.stdout.on("data", (data: string) => {
       this.buffer += data;
@@ -52,12 +61,13 @@ export class PsiBridge {
         this.buffer = this.buffer.slice(end + 1);
         try {
           const reply = Schema.decodeUnknownSync(Reply)(JSON.parse(line));
-          const next = this.pending[0];
+          const index = this.pending.findIndex((pending) => pending.requestId === reply.request_id);
+          const next = this.pending[index];
           if (!next || reply.version !== 1 || (this.runtimeId && reply.runtime_id !== this.runtimeId)) {
             throw new Error("Psi incompatible or unsolicited reply");
           }
-          if (!reply.error && next.requestId !== reply.request_id) throw new Error("Psi request identity mismatch");
-          this.pending.shift();
+          if (next.requestId !== reply.request_id) throw new Error("Psi request identity mismatch");
+          this.pending.splice(index, 1);
           clearTimeout(next.timer);
           if (reply.error) next.reject(new Error(`Psi: ${reply.error}`));
           else next.resolve(reply);
@@ -91,7 +101,7 @@ export class PsiBridge {
       return reply;
     } catch (error) {
       await this.close();
-      throw error;
+      throw new Error(`Psi startup failed: ${String(error)}${this.diagnostics ? `; ${this.diagnostics.trim()}` : ""}`);
     }
   }
 
@@ -99,6 +109,11 @@ export class PsiBridge {
     if (this.failure || this.closing) return Promise.reject(this.failure ?? new Error("Psi is closing"));
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => this.fail(new Error("Psi response timeout")), 10_000);
+      if (this.pending.some((pending) => pending.requestId === command.request_id)) {
+        clearTimeout(timer);
+        reject(new Error("Psi: request_in_progress"));
+        return;
+      }
       this.pending.push({ requestId: command.request_id, resolve, reject, timer });
       this.child.stdin.write(JSON.stringify({ ...command, version: 1 }) + "\n");
     });

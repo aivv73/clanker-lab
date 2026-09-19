@@ -13,7 +13,7 @@ import type { ProviderAdapterShape, ProviderThreadSnapshot } from "../provider/S
 import { PsiBridge, lifecycleId } from "./PsiBridge.ts";
 
 const kind = ProviderDriverKind.make("psi");
-const Config = Schema.Struct({ binary: Schema.String });
+const Config = Schema.Struct({ binary: Schema.String, agentLoop: Schema.optional(Schema.String), fixtureGate: Schema.optional(Schema.String), startupFault: Schema.optional(Schema.String) });
 
 export const PsiDriver: ProviderDriver<typeof Config.Type> = {
   driverKind: kind,
@@ -23,16 +23,18 @@ export const PsiDriver: ProviderDriver<typeof Config.Type> = {
   create: ({ instanceId, displayName, enabled, config }) => Effect.gen(function*() {
     const events = yield* PubSub.unbounded<ProviderRuntimeEvent>();
     const sessions = new Map<ThreadId, ProviderSession>();
+    const sessionStarts = new Map<ThreadId, Promise<ProviderSession>>();
+    let stopped = false;
     const history = new Map<ThreadId, ProviderThreadSnapshot["turns"]>();
     let bridge: PsiBridge | undefined;
     let starting: Promise<PsiBridge> | undefined;
-    let active = false;
+
     const fail = (operation: string, issue: string) => new ProviderAdapterValidationError({ provider: kind, operation, issue });
     const wrap = <A>(operation: string, run: () => Promise<A>) => Effect.tryPromise({ try: run, catch: (e) => fail(operation, String(e)) });
     const runtime = async () => {
       if (bridge) return bridge;
       starting ??= (async () => {
-        const next = new PsiBridge(config.binary);
+        const next = new PsiBridge(config.binary, config);
         await next.hello();
         bridge = next;
         return next;
@@ -40,7 +42,9 @@ export const PsiDriver: ProviderDriver<typeof Config.Type> = {
       try { return await starting; } finally { starting = undefined; }
     };
     const stopAll = async () => {
-      const current = bridge ?? await starting;
+      stopped = true;
+      await Promise.allSettled(sessionStarts.values());
+      const current = bridge ?? await starting?.catch(() => undefined);
       if (current) await current.close();
       bridge = undefined;
       sessions.clear();
@@ -52,49 +56,54 @@ export const PsiDriver: ProviderDriver<typeof Config.Type> = {
       provider: kind,
       capabilities: { sessionModelSwitch: "unsupported", supportsConversationRollback: false },
       startSession: (input) => wrap("startSession", async () => {
+        if (stopped) throw new Error("runtime_closed");
         if (sessions.has(input.threadId)) return sessions.get(input.threadId)!;
-        if (!input.cwd) throw new Error("workspace_required");
-        const current = await runtime();
-        await current.send({ op: "open", request_id: lifecycleId(), session_id: input.threadId });
-        const now = new Date().toISOString();
-        const session: ProviderSession = { provider: kind, providerInstanceId: instanceId, threadId: input.threadId, cwd: input.cwd, runtimeMode: input.runtimeMode, status: "ready", createdAt: now, updatedAt: now };
-        sessions.set(input.threadId, session);
-        history.set(input.threadId, []);
-        return session;
+        const pending = sessionStarts.get(input.threadId);
+        if (pending) return pending;
+        const start = (async () => {
+          if (!input.cwd) throw new Error("workspace_required");
+          const current = await runtime();
+          await current.send({ op: "open", request_id: lifecycleId(), session_id: input.threadId });
+          const now = new Date().toISOString();
+          const session: ProviderSession = { provider: kind, providerInstanceId: instanceId, threadId: input.threadId, cwd: input.cwd, runtimeMode: input.runtimeMode, status: "ready", createdAt: now, updatedAt: now };
+          sessions.set(input.threadId, session);
+          history.set(input.threadId, []);
+          return session;
+        })();
+        sessionStarts.set(input.threadId, start);
+        try { return await start; } finally { sessionStarts.delete(input.threadId); }
       }),
       sendTurn: (input) => wrap("sendTurn", async () => {
         if (!input.requestId) throw new Error("originating_command_id_required");
         if (!sessions.has(input.threadId) || !bridge) throw new Error("session_not_started");
-        if (active) throw new Error("busy");
         if (input.attachments?.length) throw new Error("attachments_unsupported");
         if (input.modelSelection && input.modelSelection.model !== "fixture") throw new Error("model_unsupported");
         const current = bridge;
         const turnId = TurnId.make(`psi-turn:${input.requestId}`);
-        active = true;
-        try {
-          const reply = await current.send({ op: "turn", request_id: input.requestId, session_id: input.threadId, turn_id: turnId, input: input.input ?? "" });
-          if (reply.turn_id !== turnId || reply.session_id !== input.threadId || reply.status !== "completed" || typeof reply.output !== "string") throw new Error("invalid_turn_reply");
-          if (!reply.duplicate) {
-            const itemId = `${turnId}:assistant`;
-            const emit = async (ordinal: number, type: string, payload: unknown) => {
-              const event = Schema.decodeUnknownSync(ProviderRuntimeEvent)({ eventId: `psi:${instanceId}:${input.threadId}:${input.requestId}:${ordinal}`, provider: kind, providerInstanceId: instanceId, threadId: input.threadId, turnId, itemId, createdAt: new Date().toISOString(), type, payload });
-              await Effect.runPromise(PubSub.publish(events, event));
-            };
-            await emit(0, "turn.started", { model: "fixture" });
-            await emit(1, "item.started", { itemType: "assistant_message", status: "inProgress" });
-            await emit(2, "content.delta", { streamKind: "assistant_text", delta: reply.output });
-            await emit(3, "item.completed", { itemType: "assistant_message", status: "completed" });
-            await emit(4, "turn.completed", { state: "completed" });
-            history.set(input.threadId, [...(history.get(input.threadId) ?? []), { id: turnId, items: [{ type: "user", text: input.input ?? "" }, { type: "assistant", text: reply.output }] }]);
-          }
-          return { threadId: input.threadId, turnId };
-        } finally { active = false; }
+        const reply = await current.send({ op: "turn", request_id: input.requestId, session_id: input.threadId, turn_id: turnId, input: input.input ?? "" });
+        if (reply.turn_id !== turnId || reply.session_id !== input.threadId || reply.status !== "completed" || typeof reply.output !== "string") throw new Error("invalid_turn_reply");
+        if (!sessions.has(input.threadId)) throw new Error("session_closed");
+        if (!reply.duplicate) {
+          const itemId = `${turnId}:assistant`;
+          const emit = async (ordinal: number, type: string, payload: unknown) => {
+            const event = Schema.decodeUnknownSync(ProviderRuntimeEvent)({ eventId: `psi:${instanceId}:${input.threadId}:${input.requestId}:${ordinal}`, provider: kind, providerInstanceId: instanceId, threadId: input.threadId, turnId, itemId, createdAt: new Date().toISOString(), type, payload });
+            await Effect.runPromise(PubSub.publish(events, event));
+          };
+          await emit(0, "turn.started", { model: "fixture" });
+          await emit(1, "item.started", { itemType: "assistant_message", status: "inProgress" });
+          await emit(2, "content.delta", { streamKind: "assistant_text", delta: reply.output });
+          await emit(3, "item.completed", { itemType: "assistant_message", status: "completed" });
+          await emit(4, "turn.completed", { state: "completed" });
+          history.set(input.threadId, [...(history.get(input.threadId) ?? []), { id: turnId, items: [{ type: "user", text: input.input ?? "" }, { type: "assistant", text: reply.output }] }]);
+        }
+        return { threadId: input.threadId, turnId };
       }),
       interruptTurn: () => unsupported("interruptTurn"),
       stopSession: (id) => wrap("stopSession", async () => {
-        if (bridge && sessions.has(id)) await bridge.send({ op: "close", request_id: lifecycleId(), session_id: id });
-        sessions.delete(id);
+        await sessionStarts.get(id)?.catch(() => undefined);
+        const existed = sessions.delete(id);
         history.delete(id);
+        if (bridge && existed) await bridge.send({ op: "close", request_id: lifecycleId(), session_id: id });
       }),
       stopAll: () => wrap("stopAll", stopAll),
       listSessions: () => Effect.sync(() => [...sessions.values()]),

@@ -1,0 +1,315 @@
+{
+  "issue": 45,
+  "validation_date": "2026-09-20",
+  "scope": "Local cooperative fixture lifecycle; not full MVP acceptance",
+  "checks": {
+    "cargo_fmt": "passed",
+    "cargo_check_locked": "passed",
+    "cargo_test_locked": {
+      "passed": 10
+    },
+    "targeted_t3_typescript": "passed",
+    "t3_adapter_real_process": {
+      "passed": 15
+    },
+    "full_t3_browser": {
+      "passed": 6
+    },
+    "python_compile": "passed"
+  },
+  "browser_scenarios": [
+    {
+      "scenario": "missing",
+      "temporary_evidence_root": "/tmp/psi-t3-qkf2iaft",
+      "result": {
+        "passed": true,
+        "startup_fault": "missing",
+        "readiness": false,
+        "node": "v24.13.1",
+        "agent_loop": "single-response",
+        "t3": "dfbb11bdd7c3f1a5575cb55d3e3abb12be025727",
+        "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+        "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+        "os": "Linux 7.2.2-1-cachyos x86_64 GNU/Linux",
+        "source_revision": "6cc95fe428387fdc517c3ae171d5aa2ed2b9bcef",
+        "implementation_sha256": {
+          "../Cargo.toml": "d2c1392c2d14adfd3cb62fee49276ec91bf3f01954e120663d6b7e46e61b118e",
+          "../Cargo.lock": "a92f5b257d338dc21163ff270982a2d73d9887184cb56dd19a97350da85e69f8",
+          "../src/admission.rs": "749c2ff58f9f6364e83c3b6526845cce8faa537b32fddd43eaadc6563a8a200b",
+          "../src/work.rs": "e84583b1e5a522f036986ad72955aef7f98f7aec8a0641f78102de4cdb1f0214",
+          "../src/core.rs": "7d78950ea9ab461b42fb409509338db351c27eead01d98622a1f89a9b6548746",
+          "../src/plugins.rs": "3aed4348765449a754c67d8bfb6b92ffc82b95a56a29dfe0bc4cf2a2daa19bdf",
+          "../src/protocol.rs": "b4ed4932acf776519fe1f2a18e51cdd500ba6fc43ea38cc881fb5010080bdfa5",
+          "../src/main.rs": "18be0c89cab51d9303636aa80562c3f38cd3340b8f121940f17127d7f4c87149",
+          "../src/lib.rs": "96deab19dc20e44b89a3d960b88054c94ae44a03ab0ce7c217a5c26941ea0075",
+          "../tests/lifecycle.rs": "c16855a76c34746de5b0ef57ca863e9bb456fd4ceb3d91f54c0fc11d92358832",
+          "../tests/protocol.rs": "8ca04bc9709fe0b469513774b9dbc840fa9389e6343bbf6ae8e138c615743ed3",
+          "PsiDriver.ts": "817edd7a86fc08165ab5c81aee8bac6e26305a1e7075d1f423b0bf08467b0cfd",
+          "PsiBridge.ts": "4140dda51dc36bdf4f41177bc93a692b04baa167401385fe9db4a1918f83c94e",
+          "adapter.test.ts": "f491b00e4b7b60af2ba77971eb9086aaec31e11a5b47cc39e6b0af2f6f34d984",
+          "t3.patch": "19a50f781c976d649d1b672a8644e893ab65522ee4591244cf1cbbdcd39534f6",
+          "prepare.py": "982aafa11a62bc911fc05e64c5ec119b73d658c49afea7ec3f6025f57f557dd0",
+          "run.py": "0d2c599122974c4b7a72af1fea275c3264cd0b693e4c55821aea30a9c80368ba",
+          "e2e.test.mjs": "18d95fa9e6ae4837257388dccd0811b149e5e4d1c51479d93231733cb4378f7f",
+          "package-lock.json": "5b6889a9e0aebc60cca078c1956acc9ee23a7d8e69844ab85aa09cec83177a94"
+        },
+        "t3_lock_sha256": "cdf7f23158631e7cb34b279a9792ef28eb3418c453ec58508e3d91919a4b5a12"
+      },
+      "lifecycle_diagnostics": [
+        "Psi startup failed: missing dependency: absent required by startup-probe"
+      ]
+    },
+    {
+      "scenario": "cycle",
+      "temporary_evidence_root": "/tmp/psi-t3-tejr942s",
+      "result": {
+        "passed": true,
+        "startup_fault": "cycle",
+        "readiness": false,
+        "node": "v24.13.1",
+        "agent_loop": "single-response",
+        "t3": "dfbb11bdd7c3f1a5575cb55d3e3abb12be025727",
+        "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+        "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+        "os": "Linux 7.2.2-1-cachyos x86_64 GNU/Linux",
+        "source_revision": "6cc95fe428387fdc517c3ae171d5aa2ed2b9bcef",
+        "implementation_sha256": {
+          "../Cargo.toml": "d2c1392c2d14adfd3cb62fee49276ec91bf3f01954e120663d6b7e46e61b118e",
+          "../Cargo.lock": "a92f5b257d338dc21163ff270982a2d73d9887184cb56dd19a97350da85e69f8",
+          "../src/admission.rs": "749c2ff58f9f6364e83c3b6526845cce8faa537b32fddd43eaadc6563a8a200b",
+          "../src/work.rs": "e84583b1e5a522f036986ad72955aef7f98f7aec8a0641f78102de4cdb1f0214",
+          "../src/core.rs": "7d78950ea9ab461b42fb409509338db351c27eead01d98622a1f89a9b6548746",
+          "../src/plugins.rs": "3aed4348765449a754c67d8bfb6b92ffc82b95a56a29dfe0bc4cf2a2daa19bdf",
+          "../src/protocol.rs": "b4ed4932acf776519fe1f2a18e51cdd500ba6fc43ea38cc881fb5010080bdfa5",
+          "../src/main.rs": "18be0c89cab51d9303636aa80562c3f38cd3340b8f121940f17127d7f4c87149",
+          "../src/lib.rs": "96deab19dc20e44b89a3d960b88054c94ae44a03ab0ce7c217a5c26941ea0075",
+          "../tests/lifecycle.rs": "c16855a76c34746de5b0ef57ca863e9bb456fd4ceb3d91f54c0fc11d92358832",
+          "../tests/protocol.rs": "8ca04bc9709fe0b469513774b9dbc840fa9389e6343bbf6ae8e138c615743ed3",
+          "PsiDriver.ts": "817edd7a86fc08165ab5c81aee8bac6e26305a1e7075d1f423b0bf08467b0cfd",
+          "PsiBridge.ts": "4140dda51dc36bdf4f41177bc93a692b04baa167401385fe9db4a1918f83c94e",
+          "adapter.test.ts": "f491b00e4b7b60af2ba77971eb9086aaec31e11a5b47cc39e6b0af2f6f34d984",
+          "t3.patch": "19a50f781c976d649d1b672a8644e893ab65522ee4591244cf1cbbdcd39534f6",
+          "prepare.py": "982aafa11a62bc911fc05e64c5ec119b73d658c49afea7ec3f6025f57f557dd0",
+          "run.py": "0d2c599122974c4b7a72af1fea275c3264cd0b693e4c55821aea30a9c80368ba",
+          "e2e.test.mjs": "18d95fa9e6ae4837257388dccd0811b149e5e4d1c51479d93231733cb4378f7f",
+          "package-lock.json": "5b6889a9e0aebc60cca078c1956acc9ee23a7d8e69844ab85aa09cec83177a94"
+        },
+        "t3_lock_sha256": "cdf7f23158631e7cb34b279a9792ef28eb3418c453ec58508e3d91919a4b5a12"
+      },
+      "lifecycle_diagnostics": [
+        "Psi startup failed: dependency cycle"
+      ]
+    },
+    {
+      "scenario": "duplicate",
+      "temporary_evidence_root": "/tmp/psi-t3-shtnelv1",
+      "result": {
+        "passed": true,
+        "startup_fault": "duplicate",
+        "readiness": false,
+        "node": "v24.13.1",
+        "agent_loop": "single-response",
+        "t3": "dfbb11bdd7c3f1a5575cb55d3e3abb12be025727",
+        "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+        "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+        "os": "Linux 7.2.2-1-cachyos x86_64 GNU/Linux",
+        "source_revision": "6cc95fe428387fdc517c3ae171d5aa2ed2b9bcef",
+        "implementation_sha256": {
+          "../Cargo.toml": "d2c1392c2d14adfd3cb62fee49276ec91bf3f01954e120663d6b7e46e61b118e",
+          "../Cargo.lock": "a92f5b257d338dc21163ff270982a2d73d9887184cb56dd19a97350da85e69f8",
+          "../src/admission.rs": "749c2ff58f9f6364e83c3b6526845cce8faa537b32fddd43eaadc6563a8a200b",
+          "../src/work.rs": "e84583b1e5a522f036986ad72955aef7f98f7aec8a0641f78102de4cdb1f0214",
+          "../src/core.rs": "7d78950ea9ab461b42fb409509338db351c27eead01d98622a1f89a9b6548746",
+          "../src/plugins.rs": "3aed4348765449a754c67d8bfb6b92ffc82b95a56a29dfe0bc4cf2a2daa19bdf",
+          "../src/protocol.rs": "b4ed4932acf776519fe1f2a18e51cdd500ba6fc43ea38cc881fb5010080bdfa5",
+          "../src/main.rs": "18be0c89cab51d9303636aa80562c3f38cd3340b8f121940f17127d7f4c87149",
+          "../src/lib.rs": "96deab19dc20e44b89a3d960b88054c94ae44a03ab0ce7c217a5c26941ea0075",
+          "../tests/lifecycle.rs": "c16855a76c34746de5b0ef57ca863e9bb456fd4ceb3d91f54c0fc11d92358832",
+          "../tests/protocol.rs": "8ca04bc9709fe0b469513774b9dbc840fa9389e6343bbf6ae8e138c615743ed3",
+          "PsiDriver.ts": "817edd7a86fc08165ab5c81aee8bac6e26305a1e7075d1f423b0bf08467b0cfd",
+          "PsiBridge.ts": "4140dda51dc36bdf4f41177bc93a692b04baa167401385fe9db4a1918f83c94e",
+          "adapter.test.ts": "f491b00e4b7b60af2ba77971eb9086aaec31e11a5b47cc39e6b0af2f6f34d984",
+          "t3.patch": "19a50f781c976d649d1b672a8644e893ab65522ee4591244cf1cbbdcd39534f6",
+          "prepare.py": "982aafa11a62bc911fc05e64c5ec119b73d658c49afea7ec3f6025f57f557dd0",
+          "run.py": "0d2c599122974c4b7a72af1fea275c3264cd0b693e4c55821aea30a9c80368ba",
+          "e2e.test.mjs": "18d95fa9e6ae4837257388dccd0811b149e5e4d1c51479d93231733cb4378f7f",
+          "package-lock.json": "5b6889a9e0aebc60cca078c1956acc9ee23a7d8e69844ab85aa09cec83177a94"
+        },
+        "t3_lock_sha256": "cdf7f23158631e7cb34b279a9792ef28eb3418c453ec58508e3d91919a4b5a12"
+      },
+      "lifecycle_diagnostics": [
+        "Psi startup failed: duplicate service: model"
+      ]
+    },
+    {
+      "scenario": "partial",
+      "temporary_evidence_root": "/tmp/psi-t3-gf852fxt",
+      "result": {
+        "passed": true,
+        "startup_fault": "partial",
+        "readiness": false,
+        "node": "v24.13.1",
+        "agent_loop": "single-response",
+        "t3": "dfbb11bdd7c3f1a5575cb55d3e3abb12be025727",
+        "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+        "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+        "os": "Linux 7.2.2-1-cachyos x86_64 GNU/Linux",
+        "source_revision": "6cc95fe428387fdc517c3ae171d5aa2ed2b9bcef",
+        "implementation_sha256": {
+          "../Cargo.toml": "d2c1392c2d14adfd3cb62fee49276ec91bf3f01954e120663d6b7e46e61b118e",
+          "../Cargo.lock": "a92f5b257d338dc21163ff270982a2d73d9887184cb56dd19a97350da85e69f8",
+          "../src/admission.rs": "749c2ff58f9f6364e83c3b6526845cce8faa537b32fddd43eaadc6563a8a200b",
+          "../src/work.rs": "e84583b1e5a522f036986ad72955aef7f98f7aec8a0641f78102de4cdb1f0214",
+          "../src/core.rs": "7d78950ea9ab461b42fb409509338db351c27eead01d98622a1f89a9b6548746",
+          "../src/plugins.rs": "3aed4348765449a754c67d8bfb6b92ffc82b95a56a29dfe0bc4cf2a2daa19bdf",
+          "../src/protocol.rs": "b4ed4932acf776519fe1f2a18e51cdd500ba6fc43ea38cc881fb5010080bdfa5",
+          "../src/main.rs": "18be0c89cab51d9303636aa80562c3f38cd3340b8f121940f17127d7f4c87149",
+          "../src/lib.rs": "96deab19dc20e44b89a3d960b88054c94ae44a03ab0ce7c217a5c26941ea0075",
+          "../tests/lifecycle.rs": "c16855a76c34746de5b0ef57ca863e9bb456fd4ceb3d91f54c0fc11d92358832",
+          "../tests/protocol.rs": "8ca04bc9709fe0b469513774b9dbc840fa9389e6343bbf6ae8e138c615743ed3",
+          "PsiDriver.ts": "817edd7a86fc08165ab5c81aee8bac6e26305a1e7075d1f423b0bf08467b0cfd",
+          "PsiBridge.ts": "4140dda51dc36bdf4f41177bc93a692b04baa167401385fe9db4a1918f83c94e",
+          "adapter.test.ts": "f491b00e4b7b60af2ba77971eb9086aaec31e11a5b47cc39e6b0af2f6f34d984",
+          "t3.patch": "19a50f781c976d649d1b672a8644e893ab65522ee4591244cf1cbbdcd39534f6",
+          "prepare.py": "982aafa11a62bc911fc05e64c5ec119b73d658c49afea7ec3f6025f57f557dd0",
+          "run.py": "0d2c599122974c4b7a72af1fea275c3264cd0b693e4c55821aea30a9c80368ba",
+          "e2e.test.mjs": "18d95fa9e6ae4837257388dccd0811b149e5e4d1c51479d93231733cb4378f7f",
+          "package-lock.json": "5b6889a9e0aebc60cca078c1956acc9ee23a7d8e69844ab85aa09cec83177a94"
+        },
+        "t3_lock_sha256": "cdf7f23158631e7cb34b279a9792ef28eb3418c453ec58508e3d91919a4b5a12"
+      },
+      "lifecycle_diagnostics": [
+        "Psi plugin starting: fixture-model",
+        "Psi plugin starting: single-response-loop",
+        "Psi plugin starting: startup-probe",
+        "Psi probe resource dropped",
+        "Psi work stopped: plugin=startup-probe owner=Runtime",
+        "Psi probe closed",
+        "Psi plugin closed: startup-probe registrations=2 tasks=0",
+        "Psi plugin closed: single-response-loop registrations=1 tasks=0",
+        "Psi plugin closed: fixture-model registrations=0 tasks=0",
+        "Psi startup failed: injected startup failure"
+      ]
+    },
+    {
+      "scenario": "buffered-response-conversation",
+      "temporary_evidence_root": "/tmp/psi-t3-vptjz62h",
+      "result": {
+        "passed": true,
+        "agent_loop": "buffered-response",
+        "lifecycle": false,
+        "t3": "dfbb11bdd7c3f1a5575cb55d3e3abb12be025727",
+        "node": "v24.13.1",
+        "chromium": "Google Chrome 152.0.7977.82",
+        "normal_websocket": true,
+        "visible_response": true,
+        "stable_origin_command_id": true,
+        "one_runtime": true,
+        "viewer_detach_preserves_runtime": true,
+        "controller_close_reaps_runtime": true,
+        "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+        "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+        "os": "Linux 7.2.2-1-cachyos x86_64 GNU/Linux",
+        "source_revision": "6cc95fe428387fdc517c3ae171d5aa2ed2b9bcef",
+        "implementation_sha256": {
+          "../Cargo.toml": "d2c1392c2d14adfd3cb62fee49276ec91bf3f01954e120663d6b7e46e61b118e",
+          "../Cargo.lock": "a92f5b257d338dc21163ff270982a2d73d9887184cb56dd19a97350da85e69f8",
+          "../src/admission.rs": "749c2ff58f9f6364e83c3b6526845cce8faa537b32fddd43eaadc6563a8a200b",
+          "../src/work.rs": "e84583b1e5a522f036986ad72955aef7f98f7aec8a0641f78102de4cdb1f0214",
+          "../src/core.rs": "7d78950ea9ab461b42fb409509338db351c27eead01d98622a1f89a9b6548746",
+          "../src/plugins.rs": "3aed4348765449a754c67d8bfb6b92ffc82b95a56a29dfe0bc4cf2a2daa19bdf",
+          "../src/protocol.rs": "b4ed4932acf776519fe1f2a18e51cdd500ba6fc43ea38cc881fb5010080bdfa5",
+          "../src/main.rs": "18be0c89cab51d9303636aa80562c3f38cd3340b8f121940f17127d7f4c87149",
+          "../src/lib.rs": "96deab19dc20e44b89a3d960b88054c94ae44a03ab0ce7c217a5c26941ea0075",
+          "../tests/lifecycle.rs": "c16855a76c34746de5b0ef57ca863e9bb456fd4ceb3d91f54c0fc11d92358832",
+          "../tests/protocol.rs": "8ca04bc9709fe0b469513774b9dbc840fa9389e6343bbf6ae8e138c615743ed3",
+          "PsiDriver.ts": "817edd7a86fc08165ab5c81aee8bac6e26305a1e7075d1f423b0bf08467b0cfd",
+          "PsiBridge.ts": "4140dda51dc36bdf4f41177bc93a692b04baa167401385fe9db4a1918f83c94e",
+          "adapter.test.ts": "f491b00e4b7b60af2ba77971eb9086aaec31e11a5b47cc39e6b0af2f6f34d984",
+          "t3.patch": "19a50f781c976d649d1b672a8644e893ab65522ee4591244cf1cbbdcd39534f6",
+          "prepare.py": "982aafa11a62bc911fc05e64c5ec119b73d658c49afea7ec3f6025f57f557dd0",
+          "run.py": "0d2c599122974c4b7a72af1fea275c3264cd0b693e4c55821aea30a9c80368ba",
+          "e2e.test.mjs": "18d95fa9e6ae4837257388dccd0811b149e5e4d1c51479d93231733cb4378f7f",
+          "package-lock.json": "5b6889a9e0aebc60cca078c1956acc9ee23a7d8e69844ab85aa09cec83177a94"
+        },
+        "t3_lock_sha256": "cdf7f23158631e7cb34b279a9792ef28eb3418c453ec58508e3d91919a4b5a12"
+      },
+      "lifecycle_diagnostics": [
+        "Psi plugin starting: fixture-model",
+        "Psi plugin starting: buffered-response-loop",
+        "Psi turn admitted: session=54021693-6d81-4547-bada-cc7d7ec5dbe5 turn=psi-turn:42c50593-e57a-4a24-a9a7-f34bfb49016a",
+        "Psi work stopped: plugin=buffered-response-loop owner=Turn { session: \"54021693-6d81-4547-bada-cc7d7ec5dbe5\", turn: \"psi-turn:42c50593-e57a-4a24-a9a7-f34bfb49016a\" }",
+        "Psi turn cleaned: tasks=0",
+        "Psi plugin closed: buffered-response-loop registrations=1 tasks=0",
+        "Psi plugin closed: fixture-model registrations=0 tasks=0",
+        "Psi runtime stopped"
+      ]
+    },
+    {
+      "scenario": "session-ownership",
+      "temporary_evidence_root": "/tmp/psi-t3-y_753b9w",
+      "result": {
+        "passed": true,
+        "agent_loop": "single-response",
+        "lifecycle": true,
+        "t3": "dfbb11bdd7c3f1a5575cb55d3e3abb12be025727",
+        "node": "v24.13.1",
+        "chromium": "Google Chrome 152.0.7977.82",
+        "normal_websocket": true,
+        "visible_response": true,
+        "stable_origin_command_id": true,
+        "one_runtime": true,
+        "viewer_detach_preserves_runtime": true,
+        "controller_close_reaps_runtime": true,
+        "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+        "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+        "os": "Linux 7.2.2-1-cachyos x86_64 GNU/Linux",
+        "source_revision": "6cc95fe428387fdc517c3ae171d5aa2ed2b9bcef",
+        "implementation_sha256": {
+          "../Cargo.toml": "d2c1392c2d14adfd3cb62fee49276ec91bf3f01954e120663d6b7e46e61b118e",
+          "../Cargo.lock": "a92f5b257d338dc21163ff270982a2d73d9887184cb56dd19a97350da85e69f8",
+          "../src/admission.rs": "749c2ff58f9f6364e83c3b6526845cce8faa537b32fddd43eaadc6563a8a200b",
+          "../src/work.rs": "e84583b1e5a522f036986ad72955aef7f98f7aec8a0641f78102de4cdb1f0214",
+          "../src/core.rs": "7d78950ea9ab461b42fb409509338db351c27eead01d98622a1f89a9b6548746",
+          "../src/plugins.rs": "3aed4348765449a754c67d8bfb6b92ffc82b95a56a29dfe0bc4cf2a2daa19bdf",
+          "../src/protocol.rs": "b4ed4932acf776519fe1f2a18e51cdd500ba6fc43ea38cc881fb5010080bdfa5",
+          "../src/main.rs": "18be0c89cab51d9303636aa80562c3f38cd3340b8f121940f17127d7f4c87149",
+          "../src/lib.rs": "96deab19dc20e44b89a3d960b88054c94ae44a03ab0ce7c217a5c26941ea0075",
+          "../tests/lifecycle.rs": "c16855a76c34746de5b0ef57ca863e9bb456fd4ceb3d91f54c0fc11d92358832",
+          "../tests/protocol.rs": "8ca04bc9709fe0b469513774b9dbc840fa9389e6343bbf6ae8e138c615743ed3",
+          "PsiDriver.ts": "817edd7a86fc08165ab5c81aee8bac6e26305a1e7075d1f423b0bf08467b0cfd",
+          "PsiBridge.ts": "4140dda51dc36bdf4f41177bc93a692b04baa167401385fe9db4a1918f83c94e",
+          "adapter.test.ts": "f491b00e4b7b60af2ba77971eb9086aaec31e11a5b47cc39e6b0af2f6f34d984",
+          "t3.patch": "19a50f781c976d649d1b672a8644e893ab65522ee4591244cf1cbbdcd39534f6",
+          "prepare.py": "982aafa11a62bc911fc05e64c5ec119b73d658c49afea7ec3f6025f57f557dd0",
+          "run.py": "0d2c599122974c4b7a72af1fea275c3264cd0b693e4c55821aea30a9c80368ba",
+          "e2e.test.mjs": "18d95fa9e6ae4837257388dccd0811b149e5e4d1c51479d93231733cb4378f7f",
+          "package-lock.json": "5b6889a9e0aebc60cca078c1956acc9ee23a7d8e69844ab85aa09cec83177a94"
+        },
+        "t3_lock_sha256": "cdf7f23158631e7cb34b279a9792ef28eb3418c453ec58508e3d91919a4b5a12"
+      },
+      "lifecycle_diagnostics": [
+        "Psi plugin starting: fixture-model",
+        "Psi plugin starting: single-response-loop",
+        "Psi turn admitted: session=b3b04501-43b5-4fdb-9c44-bad96e9d9225 turn=psi-turn:473572c1-90d8-48bb-bda7-d8c9336cb8a5",
+        "Psi work stopped: plugin=single-response-loop owner=Turn { session: \"b3b04501-43b5-4fdb-9c44-bad96e9d9225\", turn: \"psi-turn:473572c1-90d8-48bb-bda7-d8c9336cb8a5\" }",
+        "Psi turn cleaned: tasks=0",
+        "Psi turn admitted: session=cbca0910-30dd-456e-bc52-36c5a096930d turn=psi-turn:ea58378c-0b93-4e8a-9509-08194d85e481",
+        "Psi work stopped: plugin=single-response-loop owner=Turn { session: \"cbca0910-30dd-456e-bc52-36c5a096930d\", turn: \"psi-turn:ea58378c-0b93-4e8a-9509-08194d85e481\" }",
+        "Psi turn cleaned: tasks=0",
+        "Psi plugin closed: single-response-loop registrations=1 tasks=0",
+        "Psi plugin closed: fixture-model registrations=0 tasks=0",
+        "Psi runtime stopped"
+      ]
+    }
+  ],
+  "not_run": [
+    "live account",
+    "real tools and external process-tree cleanup",
+    "Bend",
+    "sandbox/cgroups/seccomp",
+    "full upstream T3 build/test suite",
+    "desktop/mobile/remote",
+    "durable Psi recovery"
+  ]
+}

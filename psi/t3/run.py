@@ -11,6 +11,9 @@ from prepare import HERE, prepare
 
 parser = argparse.ArgumentParser()
 parser.add_argument("checkout")
+parser.add_argument("--agent-loop", choices=["single-response", "buffered-response"], default="single-response")
+parser.add_argument("--startup-fault", choices=["missing", "cycle", "duplicate", "partial"])
+parser.add_argument("--hold-fixture", action="store_true")
 parser.add_argument("--port", type=int, default=8844)
 parser.add_argument("--web-port", type=int, default=8845)
 args = parser.parse_args()
@@ -26,6 +29,11 @@ subprocess.run(["git", "add", "."], cwd=workspace, check=True)
 subprocess.run(["git", "-c", "user.name=Psi", "-c", "user.email=psi@localhost", "commit", "-qm", "fixture"], cwd=workspace, check=True)
 instances = {name: {"driver": name, "enabled": False, "config": {}} for name in ["codex", "claudeAgent", "cursor", "grok", "opencode", "antigravity"]}
 instances["psi"] = {"driver": "psi", "displayName": "Psi", "enabled": True, "environment": [], "config": {"binary": str(HERE.parent / "target/debug/psi")}}
+instances["psi"]["config"]["agentLoop"] = args.agent_loop
+if args.startup_fault:
+    instances["psi"]["config"]["startupFault"] = args.startup_fault
+if args.hold_fixture:
+    instances["psi"]["config"]["fixtureGate"] = str(root / "release-fixture")
 (root / "userdata/settings.json").write_text(json.dumps({"providerInstances": instances}))
 # Avoid inheriting an ambient live T3 home or baked browser origin.
 env = {k: v for k, v in os.environ.items() if k not in {"T3CODE_HOME", "VITE_HTTP_URL", "VITE_WS_URL", "T3CODE_DEV_AUTH_TOKEN"}}

@@ -2,6 +2,8 @@ use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
+static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 struct Process {
     child: Child,
     input: Option<ChildStdin>,
@@ -41,6 +43,7 @@ impl Drop for Process {
 
 #[test]
 fn real_process_conversation_identity_and_eof() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let mut p = Process::new();
     let hello = p.hello();
     assert_eq!(hello["pid"], p.child.id());
@@ -66,6 +69,7 @@ fn real_process_conversation_identity_and_eof() {
 
 #[test]
 fn rejects_before_handshake_and_incompatible_peers() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let mut p = Process::new();
     assert_eq!(p.send(json!({"op":"turn","version":1,"request_id":"1","session_id":"s","turn_id":"t","input":"hi"}))["error"], "handshake_required");
     assert_eq!(
@@ -83,6 +87,7 @@ fn rejects_before_handshake_and_incompatible_peers() {
 
 #[test]
 fn malformed_command_and_turn_identity_are_explicit() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let mut p = Process::new();
     p.hello();
     assert_eq!(

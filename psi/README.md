@@ -3,10 +3,12 @@
 A standalone Rust agent runtime, separate from `paclang`. The first implemented
 slice ([#44](https://github.com/aivv73/clanker-lab/issues/44)) lets you send an ordinary
 message in the real T3 Web application and see `Psi fixture: <message>` in response.
-The model is deterministic; no account or tools are required.
+The model is deterministic; no account or tools are required. The
+[#45](https://github.com/aivv73/clanker-lab/issues/45) slice adds runtime-owned turn
+admission, execution scopes, tracked plugin work, and startup loop selection.
 
 This is **not the full MVP**: tools, Bend, Codex sign-in, durable Psi history,
-recovery, cancellation of long-running work, and sandboxing are not implemented yet.
+recovery, process-tree cancellation, and sandboxing are not implemented yet.
 The full contract is in the [specification](docs/mvp-spec.md) and [glossary](CONTEXT.md).
 
 ## Build and checks
@@ -89,9 +91,15 @@ of implementation files.
   dependency graph before startup, starts providers first, and closes plugins in
   reverse order, including a partially started plugin. Orchestration belongs to
   `SingleResponsePlugin`; the model belongs to `FixtureModelPlugin`. Both expose
-  replaceable trait contracts. This slice has no background plugin tasks or tools.
-- One process per ProviderInstance serves all of its sessions. The driver rejects
-  overlapping turns with `busy`. Closing one session does not close the shared process.
+  replaceable trait contracts. `Context::spawner()` associates tracked tasks with
+  the supplying plugin and a runtime/session/turn/invocation owner. Closing a scope
+  aborts and joins its cooperative futures before releasing admission. Plugin close
+  errors are reported after remaining reverse-order cleanup; no hot restart is offered.
+- One process per ProviderInstance serves all of its sessions. Rust rejects
+  overlapping turns with `busy`, without accepting or queuing them. A fixed per-user
+  kernel lock also protects against independent adapters/processes (including other
+  workspaces). Closing a session cleans its work but preserves other sessions and
+  shared plugins. Repeated close is safe; an explicit open can reopen the conversation.
 - Both sides validate the handshake before accepting work. Frames are limited to
   1 MiB; the bridge times out a stalled response after 10 seconds and allows 2 seconds
   for process shutdown before forcing termination if needed. These limits apply to
@@ -103,3 +111,53 @@ of implementation files.
 - Model support, attachments, rollback, and auxiliary generation are not silently
   broadened: only `fixture` is supported; attachments and unsupported operations are
   rejected. Full verification of disabled rollback and checkpoints belongs to later slices.
+
+## Session ownership and lifecycle checks (#45)
+
+Choose `--agent-loop single-response` (default) or `--agent-loop buffered-response`
+when launching Rust. Both plugins implement `AgentLoop` and use the same model
+service; the latter buffers its response before returning it. T3 provider configuration
+uses `agentLoop`, and the test launcher accepts the same `--agent-loop` option.
+No core or model changes are needed to select an implementation.
+
+The admission lock is `/tmp/psi-active-turn-<effective uid>.lock`, opened without
+following symlinks and with owner/mode validation. Do not delete it while Psi is
+running: the kernel lock belongs to its open inode. There is deliberately no
+per-adapter, per-workspace, or environment override. Admission fails closed if the
+lock cannot be opened safely. The file may remain after shutdown; the kernel releases
+the lock when its handle closes. This is coordination between trusted local runtimes,
+not isolation from malicious code running as the same user.
+
+`--fixture-gate /absolute/path` holds deterministic model work until that file exists.
+`--startup-fault missing|cycle|duplicate|partial` enables explicit lifecycle fixtures.
+T3 configuration exposes these as `fixtureGate` and `startupFault`; they are startup
+settings, never prompt instructions. `run.py --hold-fixture` uses the printed scratch
+root's `release-fixture` file. The partial-start fixture registers a service and owns
+a tracked pending task whose resource drop is visible on stderr before plugin close.
+
+After preparing T3 and building Rust, run the adapter tests above. Full browser
+scenarios use the same `PSI_T3_CHECKOUT` and `PSI_CHROMIUM` environment variables:
+
+```sh
+PSI_TEST_LOOP=buffered-response node --test t3/e2e.test.mjs
+PSI_TEST_LIFECYCLE=1 node --test t3/e2e.test.mjs
+for fault in missing cycle duplicate partial; do
+  PSI_TEST_STARTUP_FAULT="$fault" node --test t3/e2e.test.mjs
+done
+```
+
+Run turn-producing test suites sequentially: they intentionally share the per-user
+admission lock. The lifecycle browser scenario uses the ordinary composer in two
+threads, observes busy, sends repeated standard `thread.session.stop` WebSocket
+commands, and verifies a new response in the surviving conversation. Adapter tests
+also exercise independent instances/processes and controller EOF during held work.
+Core tests verify provider protection and separate invocation ownership, without
+adding a plugin-specific test protocol.
+
+Safe forced termination of arbitrary blocking or hung in-process plugin code is
+**not guaranteed**. Cooperative future cleanup is verified; external tool children,
+Bend admission, process-tree cancellation, unhealthy-runtime recovery, and durable
+records remain subsequent slices. Killing the process is not proof of external
+resource cleanup. No conflicts with the existing MVP specification were identified.
+
+[Issue #45 validation](docs/issue-45-validation.md).
