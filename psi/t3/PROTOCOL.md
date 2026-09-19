@@ -1,8 +1,8 @@
-# Psi JSONL v1 — first conversation
+# Psi JSONL v1 — conversations and ownership
 
 One UTF-8 JSON object per line. Each command and reply carries `version: 1`.
 Stdout is exclusively protocol traffic; stderr is diagnostics. The controller
-owns stdin. EOF closes plugins and exits; there are no external tool children.
+owns stdin. EOF closes admission, joins active cooperative work, closes plugins and exits; there are no external tool children.
 Maximum frame size is 1 MiB. Unknown operations/fields and invalid JSON are errors.
 
 First command:
@@ -43,20 +43,40 @@ Open returns `status: ready`, close `closed`, shutdown `shutdown`. A turn return
 `status: completed`, the session/turn/request/runtime IDs and
 `output: "Psi fixture: hello"`. This is a completed fixture result, **not a durable
 acceptance receipt**. The adapter emits the normal T3 turn/item/content events.
-One FIFO response corresponds to each request. No unsolicited frames are allowed.
+One response corresponds to each request, correlated by `request_id`; replies may
+arrive out of order. A busy response can precede the held turn's result. No
+unsolicited frames are allowed. The initial hello has no request ID.
 
 A repeated request with the same payload returns the prior reply plus
 `duplicate: true`, without another model call or duplicate visible events.
 Different content with that ID yields `request_id_conflict`; reuse of a turn ID
 under a different command yields `turn_id_conflict`. Error replies contain `error`
-and runtime/version. Additional errors include `handshake_required`,
+and runtime/version, plus the originating request ID for parsed commands. Additional errors include `handshake_required`,
 `invalid_command`, `invalid_request_id`, `invalid_session_id`, `session_not_open`,
 `incompatible_version`, and `incompatible_capabilities`.
 
-All sessions, receipts and results in Psi are in memory. Closing a session removes
-its conversation; request receipts remain until process exit to prevent duplicate
-execution in that runtime. The fixture model returns immediately and creates no
-background work. The driver rejects overlapping sendTurn calls with `busy` rather
-than queuing them. Long-running turn scheduling/cancellation, resource quotas,
-durable receipt/event sequencing and replay are not established by this protocol
-slice and require subsequent implementation before real tools are enabled.
+All sessions, receipts and results in Psi are in memory. Closing a session first
+joins its active work, returns that turn with `status: cancelled` and
+`error: session_closed`, then returns the close acknowledgement. Other sessions and
+shared plugins remain available. Repeated close is safe. An explicit open may reopen
+a closed conversation; old turn IDs and request receipts remain reserved until exit.
+Closing a session does not erase T3's durable conversation.
+
+The runtime owns the active-turn slot. A second turn returns `busy` immediately and
+is neither remembered as accepted nor queued; a later explicit retry may succeed.
+The same rule holds across independent Psi processes via a fixed per-user kernel
+lock. The slot remains held until tracked turn work has been joined. A repeated
+request still in flight returns `request_in_progress`; different content with the
+same pending ID returns `request_id_conflict`. Completed receipt replay remains
+in-memory only. Model errors produce `status: failed`, `error: model_failed`.
+
+`shutdown` cancels and joins active cooperative work before acknowledging; EOF does
+the same without a reply. Plugin teardown follows in reverse dependency order.
+Startup failure never reaches hello readiness. Stderr records plugin start/close,
+registration/task counts, turn admission, and cleanup, but not model input.
+
+`Runtime → Session → Turn → Invocation` ownership is represented separately from
+plugin ownership. No tool invocation is fabricated for a model call. Only the loop
+and model fixtures run; there are still no real tools, Bend checks, external child
+cleanup, resource quotas, durable acceptance, or replay. Forced safe termination of
+arbitrary in-process plugin code is not promised.
