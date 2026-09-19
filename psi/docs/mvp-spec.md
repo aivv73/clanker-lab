@@ -1,260 +1,260 @@
-# Спецификация MVP Psi
+# Psi MVP specification
 
-Название продукта — **Psi** (с заглавной первой буквой); «harness» обозначает тип системы.
+The product name is **Psi** (with an initial capital letter); “harness” describes the type of system.
 
-Статус: **принята пользователем, готова к реализации**, 2026-09-19. Реализация продукта ещё не принята.
+Status: **accepted by the user, ready for implementation**, 2026-09-19. The product implementation has not yet been accepted.
 
-Назначение — передать в реализацию согласованные границы, контракты и проверяемые результаты. Источники решений — комментарии вопросов [карты](https://github.com/aivv73/clanker-lab/issues/29); этот документ сводит их в спецификацию, не меняя принятых решений. Последующие изменения контрактов требуют явного согласования. Термины — в [словаре Psi](../CONTEXT.md).
+The purpose of this document is to hand off the agreed boundaries, contracts, and verifiable outcomes for implementation. The decisions come from comments on the [decision map's](https://github.com/aivv73/clanker-lab/issues/29) issues; this document consolidates them into a specification without changing the accepted decisions. Subsequent contract changes require explicit agreement. Terms are defined in the [Psi glossary](../CONTEXT.md).
 
-Все выявленные продуктовые решения согласованы, включая хранение OAuth credentials только в памяти runtime. Пользователь подтвердил достаточность этого документа для начала реализации. Формы API ниже задают обязательную семантику, а не готовые объявления Rust-типов.
+All identified product decisions have been agreed, including storing OAuth credentials only in runtime memory. The user confirmed that this document is sufficient to begin implementation. The API shapes below define mandatory semantics, not ready-made Rust type declarations.
 
-## 1. Результат и границы
+## 1. Outcome and scope
 
-MVP позволяет одному локальному пользователю запросить изменение файла в T3. Самостоятельный Rust harness обращается к модели через Codex/ChatGPT-вход, выполняет чтение и патч, возвращает ответ; T3 показывает историю и diff. Отдельный сценарий проверяет отмену зависшего инструмента и его потомков.
+The MVP lets one local user request a file change in T3. A standalone Rust harness accesses the model through Codex/ChatGPT sign-in, performs reads and patches, and returns a response; T3 displays history and the diff. A separate scenario verifies cancellation of a hung tool and its descendants.
 
-Обязательные части: T3, самостоятельный Rust harness, один провайдер с Codex-входом, заменяемый agent loop, инструменты, контекст/история и реально исполняемое правило Bend. Замена обязательной части другим продуктом не считается реализацией спецификации.
+Required components: T3, a standalone Rust harness, one provider with Codex sign-in, a replaceable agent loop, tools, context/history, and a Bend rule that is actually executed. Replacing a required component with another product does not count as implementing this specification.
 
-Целевая среда — Linux с обязательными механизмами изоляции ниже. Несколько сохранённых сессий допустимы. Во всём runtime одновременно активен не более одного хода; скрытой очереди нет. Внутри хода инструменты последовательны. Один workspace закреплён за сессией до начала работы.
+The target environment is Linux with the mandatory isolation mechanisms below. Multiple saved sessions are allowed. At most one turn is active across the entire runtime; there is no hidden queue. Tools run sequentially within a turn. One workspace is assigned to a session before work begins.
 
-Карта заканчивается спецификацией, достаточной для начала реализации. Принятие документа не является приёмкой MVP и не переносит результаты одноразовых прототипов на будущий продукт.
+The decision map ends with a specification sufficient to begin implementation. Accepting the document is not MVP acceptance and does not transfer results from throwaway prototypes to the future product.
 
-## 2. Компоненты и интерфейсы
+## 2. Components and interfaces
 
-| Компонент | Ответственность | Граница |
+| Component | Responsibility | Boundary |
 | --- | --- | --- |
-| Ядро Rust | Области жизни, регистрации, зависимости, учёт задач, порядок запуска/закрытия | Не выбирает следующий инструмент и не реализует предметное правило допуска |
-| Agent loop | Последовательность запросов модели и инструментов | Выбирается при запуске через общий контракт; другая реализация подключается без правок ядра и остальных плагинов |
-| Плагин модели | OAuth/refresh, запросы и поток ответов провайдера | Сетевой доступ отделён от инструментов; официальный Codex CLI не является обязательным посредником |
-| Плагин инструментов | exec_command, write_stdin, apply_patch, supervisor | Проверяет аргументы, занятость, лимиты, изоляцию; выполняет лишь допущенное действие |
-| Плагины истории/контекста | Точная история модели, построение следующего запроса | Источником контекста служат записи harness, не отображаемый текст T3 |
-| Адаптер T3 на TypeScript | ProviderDriver/Instance/Adapter, JSONL, durable ingestion | Связывает идентичность команд и событий с сохранёнными операциями T3 |
-| T3 | Разговор пользователя, журнал, Git-checkpoints и diff | Откат истории/файлов в MVP отключён |
-| Плагин правила Bend | Чистый переход и решение о допуске | Единственная реализация выбранного правила; не отвечает за остановку процессов |
+| Rust core | Lifetime scopes, registrations, dependencies, task tracking, startup/shutdown order | Does not choose the next tool or implement the domain admission rule |
+| Agent loop | Sequence of model requests and tool invocations | Selected at startup through a common contract; another implementation can be connected without changing the core or other plugins |
+| Model plugin | OAuth/refresh, provider requests and response streaming | Network access is separate from tools; the official Codex CLI is not a required intermediary |
+| Tool plugin | exec_command, write_stdin, apply_patch, supervisor | Validates arguments, occupancy, limits, and isolation; executes only admitted actions |
+| History/context plugins | Exact model history and construction of the next request | Context comes from harness records, not the text displayed by T3 |
+| TypeScript T3 adapter | ProviderDriver/Instance/Adapter, JSONL, durable ingestion | Connects command and event identities to persisted T3 operations |
+| T3 | User conversation, log, Git checkpoints, and diff | History/file rollback is disabled in the MVP |
+| Bend rule plugin | Pure transition and admission decision | The sole implementation of the selected rule; not responsible for stopping processes |
 
-Плагины — Rust-модули/crates в одном бинарнике. Один настроенный экземпляр плагина живёт весь runtime. Контракт содержит идентификатор, предоставляемые сервисы, обязательные зависимости, асинхронные `start(context)` и повторно вызываемый `close()`. Контекст предоставляет зависимости, регистрацию сервисов и запуск учитываемых ядром задач. Регистрации принадлежат области плагина.
+Plugins are Rust modules/crates in one binary. One configured instance of each plugin lives for the lifetime of the runtime. The contract includes an identifier, provided services, required dependencies, asynchronous `start(context)`, and a repeatable `close()`. The context provides dependencies, service registration, and spawning of tasks tracked by the core. Registrations belong to the plugin scope.
 
-До работы проверяются отсутствующие зависимости, циклы и конфликтующие поставщики: у сервиса один поставщик. Поставщики запускаются раньше потребителей, закрываются позже. При ошибке запуска очищается частично запущенный плагин, затем предыдущие в обратном порядке; регистрации снимаются. Частично рабочий режим запрещён. Отдельная остановка поставщика отклоняется, пока работают зависимые плагины.
+Missing dependencies, cycles, and conflicting providers are checked before work begins: each service has one provider. Providers start before consumers and close after them. A startup error triggers cleanup of the partially started plugin, then previously started plugins in reverse order; registrations are removed. A partially operational mode is forbidden. Stopping a provider separately is rejected while dependent plugins are running.
 
-Иерархия выполнения: `Runtime → Session → Turn → Tool invocation`; области плагинов существуют отдельно. Работа принадлежит области выполнения и связана с предоставившим возможность плагином. Закрытие сессии очищает её работу, сохраняя общие плагины и другие сессии.
+Execution hierarchy: `Runtime → Session → Turn → Tool invocation`; plugin scopes are separate. Work belongs to an execution scope and is associated with the plugin that provided the capability. Closing a session cleans up its work while preserving shared plugins and other sessions.
 
-Источник: [ядро и плагины](https://github.com/aivv73/clanker-lab/issues/33#issuecomment-5742783758).
+Source: [core and plugins](https://github.com/aivv73/clanker-lab/issues/33#issuecomment-5742783758).
 
-## 3. Состояния и завершение работы
+## 3. States and shutdown
 
-Состояния в таблице — семантические состояния контракта; их кодирование не обязано совпадать с названиями статусов T3.
+The states in this table describe contract semantics; their encoding does not have to match T3 status names.
 
-| Ситуация | Обязательное поведение |
+| Situation | Required behavior |
 | --- | --- |
-| Runtime запускается | Ходы не принимаются до успешного запуска всех плагинов |
-| Runtime готов, сессия не заблокирована | Можно принять один ход |
-| Ход активен или его очистка не закончена | Другой запрос получает явный busy; очередь не создаётся |
-| Отмена принята | Новый допуск закрывается немедленно; активная работа получает сигнал отмены |
-| Результат сохранён и очистка подтверждена | Формируется завершение хода; слот освобождается |
-| Очистка не подтверждена | Runtime неисправен, новые ходы запрещены; показаны причина и оставшиеся ресурсы |
-| Неизвестный исход действия | Новые ходы этой сессии запрещены до явной проверки последствий пользователем |
-| Подтверждены последствия неизвестного исхода | Блокировка сессии снимается; исход не становится успехом, действие не повторяется |
-| Runtime перезапущен | Восстанавливаются записи, но старый ход не продолжается автоматически, старые допуски недействительны |
+| Runtime is starting | Turns are not accepted until all plugins have started successfully |
+| Runtime is ready and the session is not blocked | One turn may be accepted |
+| A turn is active or its cleanup is incomplete | Another request receives an explicit busy response; no queue is created |
+| Cancellation is accepted | Admission of new work closes immediately; active work receives a cancellation signal |
+| The result is persisted and cleanup is confirmed | Turn completion is produced; the slot is released |
+| Cleanup is unconfirmed | The runtime is unhealthy and rejects new turns; the reason and remaining resources are displayed |
+| Unknown action outcome | New turns in that session are forbidden until the user explicitly checks the consequences |
+| Consequences of the unknown outcome are acknowledged | The session is unblocked; the outcome does not become success, and the action is not repeated |
+| Runtime is restarted | Records are recovered, but the old turn does not resume automatically; old permits are invalid |
 
-Подтверждение неизвестного исхода не снимает неисправность runtime и не заменяет очистку. Перезапуск сам по себе не доказывает отсутствие оставшегося внешнего процесса. Для произвольной зависшей работы плагина внутри общего процесса безопасное принудительное завершение не гарантируется.
+Acknowledging an unknown outcome does not clear an unhealthy runtime state or replace cleanup. A restart alone does not prove that no external process remains. Safe forced termination of arbitrary hung plugin work inside a shared process is not guaranteed.
 
-Поздний результат не возобновляет отменённый ход. Отмена не откатывает уже выполненные изменения. UI может показать, что отмена началась, но завершённую отмену показывает только после подтверждённой очистки; её сбой отображается отдельно.
+A late result does not revive a cancelled turn. Cancellation does not roll back changes already made. The UI may indicate that cancellation has begun, but it displays completed cancellation only after confirmed cleanup; cleanup failure is shown separately.
 
-## 4. Инструменты и изоляция
+## 4. Tools and isolation
 
-### 4.1. Набор и совместимость
+### 4.1. Tool set and compatibility
 
-Поддерживаются `exec_command`, `write_stdin`, `apply_patch`; чтение и поиск выполняются через shell. Сохраняются имена, семантика поддержанных аргументов, формат патча и основные результаты Codex. Полная совместимость не заявляется. Реализация публикует точную схему поддержанных параметров; неподдержанные параметры не рекламируются и явно отклоняются.
+The supported tools are `exec_command`, `write_stdin`, and `apply_patch`; reading and searching use the shell. Names, semantics of supported arguments, patch format, and primary Codex results are preserved. Full compatibility is not claimed. The implementation publishes the exact supported parameter schema; unsupported parameters are not advertised and are explicitly rejected.
 
-Используются обычные stdin/stdout/stderr, без PTY. Профили shell пользователя не загружаются; окружение задаётся явно. Возврат идентификатора работающего процесса из exec_command не освобождает слот: пока он работает, разрешён write_stdin для этого процесса, а новый exec_command и apply_patch получают busy. Слот занят и во время очистки оставшихся потомков.
+Use ordinary stdin/stdout/stderr, without a PTY. User shell profiles are not loaded; the environment is set explicitly. Returning a running process identifier from exec_command does not release the slot: while it runs, write_stdin is allowed for that process, while a new exec_command or apply_patch receives busy. The slot remains occupied during cleanup of surviving descendants.
 
-### 4.2. Доступ
+### 4.2. Access
 
-Разрешена запись в workspace сессии и отдельную временную область. Необходимые системные программы и библиотеки доступны только на чтение. Домашний каталог целиком, SSH-ключи, credentials harness, host sockets и управление cgroups не предоставляются. Сеть инструментов отключена. Разрешённые действия выполняются автоматически; расширение доступа, сеть и повышение прав во время хода отклоняются.
+Writes are allowed in the session workspace and a separate temporary area. Required system programs and libraries are available read-only. The full home directory, SSH keys, harness credentials, host sockets, and cgroup management are not exposed. Tool networking is disabled. Allowed actions run automatically; requests to expand access, enable networking, or elevate privileges during a turn are rejected.
 
-Все три инструмента, включая apply_patch и переходы по symlink, подчиняются одной границе. До запуска пользовательского кода должны быть установлены все обязательные ограничения. Невозможность установить изоляцию означает отказ; обычного shell-fallback нет.
+All three tools, including apply_patch and symlink traversal, obey the same boundary. All mandatory restrictions must be established before user code starts. Failure to establish isolation means rejection; there is no ordinary-shell fallback.
 
-Профиль: bubblewrap, отдельная cgroup v2 каждой команды, делегирование через user systemd service/scope, seccomp-запрет Unix sockets, включая обход через io_uring. Унаследованные host socket descriptors не передаются. Программы, требующие Unix IPC, сети или скрытых home-кешей, не получают доступа автоматически.
+Profile: bubblewrap, a separate cgroup v2 for each command, delegation through a user systemd service/scope, and a seccomp ban on Unix sockets, including bypasses through io_uring. Inherited host socket descriptors are not passed through. Programs requiring Unix IPC, networking, or hidden home caches do not receive access automatically.
 
-Обязательные предпосылки: user namespaces, bubblewrap, unified cgroup v2 с cgroup.kill, user systemd manager и фактически делегированные memory/pids controllers. Supervisor остаётся вне cgroup команды; код запускается только после включения в нужную cgroup.
+Mandatory prerequisites: user namespaces, bubblewrap, unified cgroup v2 with cgroup.kill, a user systemd manager, and effectively delegated memory/pids controllers. The supervisor stays outside the command's cgroup; code starts only after placement in the correct cgroup.
 
-### 4.3. Лимиты и очистка
+### 4.3. Limits and cleanup
 
-| Параметр | Контракт MVP |
+| Parameter | MVP contract |
 | --- | --- |
-| Срок команды | По умолчанию 120 с, запрашиваемое увеличение максимум до 10 мин; чтение вывода срок не продлевает |
-| Мягкое завершение | До 2 с после отмены/таймаута |
-| Принудительное завершение | Затем всё поддерево cgroup; ещё через 2 с неподтверждённая очистка делает runtime неисправным |
-| Ответ одного вызова | Не более 16000 токенов, усечение явно отмечено |
-| Общий stdout/stderr команды | Не более 10 МиБ суммарно со всеми write_stdin; превышение прекращает команду с output_limit |
-| Память | 2 ГиБ на команду, swap запрещён |
-| Процессы и потоки | Суммарно максимум 128 на команду |
-| Временная область | До 256 МиБ |
-| Размер workspace | Отдельной квоты MVP нет; лимит вывода не ограничивает файловые записи |
+| Command deadline | 120 seconds by default; requested increases are capped at 10 minutes; reading output does not extend the deadline |
+| Graceful termination | Up to 2 seconds after cancellation/timeout |
+| Forced termination | Then the entire cgroup subtree; after another 2 seconds, unconfirmed cleanup makes the runtime unhealthy |
+| Response to one invocation | At most 16000 tokens, with explicit truncation reporting |
+| Total command stdout/stderr | At most 10 MiB including all write_stdin calls; exceeding the limit stops the command with output_limit |
+| Memory | 2 GiB per command; swap is forbidden |
+| Processes and threads | At most 128 combined per command |
+| Temporary area | Up to 256 MiB |
+| Workspace size | No separate MVP quota; the output limit does not constrain file writes |
 
-Память, число задач и временную область пользователь настраивает до запуска, не модель. Превышения ресурсов имеют явную причину. Подтверждение очистки требует `populated=0`, завершения supervisor cleanup, обработки pipes и ожидания процессов. Одной отправки сигнала или записи cgroup.kill недостаточно. После обычного выхода основной команды оставшиеся потомки также очищаются.
+The user configures memory, task count, and temporary storage before startup; the model does not. Resource-limit violations have an explicit reason. Confirming cleanup requires `populated=0`, completed supervisor cleanup, handled pipes, and waiting for processes to exit. Sending a signal or writing to cgroup.kill alone is insufficient. Surviving descendants are also cleaned up after the main command exits normally.
 
-### 4.4. Патчи и результаты
+### 4.4. Patches and results
 
-До первой записи проверяются весь патч, пути и применимость. Транзакция нескольких файлов не обещается. При ошибке/отмене после частичного применения возвращается точный список применённых и неприменённых изменений; автоматического отката нет. Отмена проверяется между изменениями файлов. При аварийном сбое процесса, когда точный результат сохранить не удалось, применяется правило неизвестного исхода из раздела 6.
+The entire patch, its paths, and its applicability are validated before the first write. A transaction across multiple files is not promised. If an error or cancellation occurs after partial application, return an exact list of applied and unapplied changes; there is no automatic rollback. Cancellation is checked between file changes. If the process crashes before an exact result can be saved, the unknown-outcome rule in section 6 applies.
 
-Различаются exit code, ошибка запуска, таймаут, отмена, лимит вывода/ресурсов, нарушение изоляции и сбой очистки. Ненулевой exit code — результат запущенной команды; ошибка запуска означает, что команда не началась.
+Distinguish exit code, launch failure, timeout, cancellation, output/resource limits, isolation violation, and cleanup failure. A nonzero exit code is the result of a command that ran; launch failure means the command did not start.
 
-Источники: [инструменты](https://github.com/aivv73/clanker-lab/issues/34#issuecomment-5743006862), [профиль Linux](https://github.com/aivv73/clanker-lab/issues/40#issuecomment-5743592209).
+Sources: [tools](https://github.com/aivv73/clanker-lab/issues/34#issuecomment-5743006862), [Linux profile](https://github.com/aivv73/clanker-lab/issues/40#issuecomment-5743592209).
 
-## 5. Правило Bend
+## 5. Bend rule
 
-Правило: после принятой отмены никакая последующая последовательность событий данного хода не выдаёт новый допуск на запуск или продолжение инструмента. Очистка ресурсов не является новым действием по запросу модели.
+Rule: after cancellation is accepted, no subsequent sequence of events for that turn grants a new permit to start or continue a tool. Resource cleanup is not a new model-requested action.
 
-Чистый переход: `state + event → next_state + Permit/Deny`. Состояния: Active, Cancelled, Finished; события: Request, Cancel, Finish, Late. Только Request в Active может дать Permit. Терминальные состояния не возвращаются в Active. Новый ход имеет отдельное состояние.
+Pure transition: `state + event → next_state + Permit/Deny`. States: Active, Cancelled, Finished; events: Request, Cancel, Finish, Late. Only Request in Active can yield Permit. Terminal states cannot return to Active. A new turn has its own state.
 
-Допуск обязателен для exec_command, apply_patch и каждого write_stdin, включая чтение очередной порции вывода. Он привязан к конкретному ходу и неизменяемому действию, одноразовый, не может быть отложен для последующего применения. Rust отдельно проверяет аргументы, занятость и изоляцию: Permit необходим, но недостаточен.
+Admission is mandatory for exec_command, apply_patch, and every write_stdin, including reading another chunk of output. It is bound to a specific turn and immutable action, is single-use, and cannot be deferred for later application. Rust separately checks arguments, occupancy, and isolation: Permit is necessary but not sufficient.
 
-Один короткоживущий CPU-процесс Bend обслуживает переход. Состояние принадлежит Rust. Протокол B1 содержит request_id, turn_id, action_id, epoch, состояние/событие и ответ next_state + Permit/Deny. Начальный таймаут — 250 мс. Параллельной реализации правила или разрешающего fallback на Rust нет.
+One short-lived CPU Bend process handles a transition. Rust owns the state. Protocol B1 carries request_id, turn_id, action_id, epoch, state/event, and the response next_state + Permit/Deny. The initial timeout is 250 ms. There is no parallel implementation of the rule or permissive fallback in Rust.
 
-Отмена, получение решения и передача исполнителю упорядочены. Если отмена принята первой, действие не запускается. Если действие уже передано, начинается очистка. Ожидание Bend не задерживает отмену: Rust закрывает допуск новой работы, начинает очистку и отвергает поздний ответ. Неверные идентификаторы, устаревшее поколение, некорректный ответ, недоступность или таймаут Bend запрещают действие и дают ошибку хода. Очистка не зависит от исправности Bend.
+Cancellation, receipt of the decision, and handoff to the executor are ordered. If cancellation is accepted first, the action does not start. If the action has already been handed off, cleanup begins. Waiting for Bend does not delay cancellation: Rust closes admission of new work, begins cleanup, and rejects a late response. Incorrect identifiers, a stale epoch, an invalid response, unavailability, or a Bend timeout deny the action and fail the turn. Cleanup does not depend on Bend being healthy.
 
-Проверяется и исполняется один и тот же модуль переходов. Обязательное свойство охватывает любую конечную последовательность событий после отмены; unsafe и непроверенные предположения в доказательстве/зависимостях запрещены. Одного успешного exit code checker недостаточно. Мутация, разрешающая действие после отмены, должна отвергаться из-за нарушения свойства. Версия модуля фиксируется с компилятором.
+The same transition module is checked and executed. The mandatory property covers every finite sequence of events after cancellation; unsafe constructs and unchecked assumptions in the proof or its dependencies are forbidden. A successful checker exit code alone is insufficient. A mutation that permits an action after cancellation must be rejected because it violates the property. The module version is pinned together with the compiler.
 
-Доказательство не распространяется на компилятор, сериализацию, IO, Rust и ОС. Привязка допуска, одноразовость, сборка, гонки и фактическая очистка проверяются отдельно.
+The proof does not cover the compiler, serialization, IO, Rust, or the OS. Permit binding, single use, the build, races, and actual cleanup are checked separately.
 
-Источники: [правило](https://github.com/aivv73/clanker-lab/issues/36#issuecomment-5743220695), [принятая процессная граница](https://github.com/aivv73/clanker-lab/issues/37#issuecomment-5743335407).
+Sources: [rule](https://github.com/aivv73/clanker-lab/issues/36#issuecomment-5743220695), [accepted process boundary](https://github.com/aivv73/clanker-lab/issues/37#issuecomment-5743335407).
 
-## 6. История, JSONL и восстановление
+## 6. History, JSONL, and recovery
 
-Harness хранит точную историю модели, вызовы и результаты инструментов, команды, события и состояния действий в SQLite вне workspace инструментов. Намерение записывается до действия, результат — после. SQLite не делает файловую запись атомарной с фиксацией результата. Контекст модели формируется из этих записей с сохранением необходимых provider output items и связей вызов/результат.
+The harness stores exact model history, tool calls and results, commands, events, and action states in SQLite outside the tool workspace. Intent is recorded before an action and its result afterward. SQLite does not make a file write atomic with committing the result. Model context is built from these records, preserving required provider output items and call/result relationships.
 
-Адаптер T3 запускает самостоятельный Rust-процесс и обменивается версионируемым JSONL через stdin/stdout. Stdout — только протокол, stderr — диагностика. Handshake проверяет версию и возможности до приёма ходов. Адаптер не должен создавать независимые активные runtime в обход общего ограничения одного активного хода.
+The T3 adapter launches a standalone Rust process and exchanges versioned JSONL over stdin/stdout. Stdout is reserved for protocol traffic; stderr carries diagnostics. The handshake checks version and capabilities before accepting turns. The adapter must not create independent active runtimes that bypass the global single-active-turn constraint.
 
-| Элемент контракта | Семантика |
+| Contract element | Semantics |
 | --- | --- |
-| request_id команды | Постоянная идентичность исходной сохранённой команды; не новый UUID на каждую попытку и не хеш одного текста запроса |
-| session_id / turn_id / invocation_id | Разные идентификаторы соответствующих областей работы |
-| Повтор ID с тем же содержимым | Прежний статус приёма, без повторного запуска |
-| Повтор ID с другим содержимым | Явная ошибка конфликта |
-| Подтверждение приёма | Команда сохранена, но работа не обязательно закончена |
-| seq события | Возрастает внутри сессии; событие сохраняется до отправки |
-| Доставка | Чтение после последнего принятого номера; пропуск не замалчивается, конфликт содержимого того же события не принимается |
-| Cursor | Сохраняется после надёжного принятия события стороной T3 |
-| Terminal | После сохранения результата и окончания очистки; сбой очистки не маскируется под успешное завершение |
+| Command request_id | Stable identity of the original persisted command; not a new UUID for every attempt or a hash of prompt text alone |
+| session_id / turn_id / invocation_id | Distinct identifiers for the corresponding execution scopes |
+| Repeated ID with the same content | Previous acceptance status, without another execution |
+| Repeated ID with different content | Explicit conflict error |
+| Acceptance acknowledgement | The command is persisted, but work is not necessarily complete |
+| Event seq | Increases within a session; the event is persisted before sending |
+| Delivery | Read after the last accepted sequence number; gaps are not hidden, and conflicting content for the same event is rejected |
+| Cursor | Persisted after T3 durably accepts the event |
+| Terminal | Produced after the result is persisted and cleanup finishes; cleanup failure is not disguised as successful completion |
 
-Durable inbox на стороне T3 отвечает за доведение принятого события до проекций. Производные команды имеют устойчивую идентичность; повторная доставка не создаёт повтор сообщения. Идентичность события должна учитывать сессию и provider instance, чтобы разные журналы не сталкивались. Подтверждение долговечного принятия не означает, что браузер уже отрисовал событие.
+A durable inbox on the T3 side ensures accepted events reach projections. Derived commands have stable identities; redelivery does not create duplicate messages. Event identity must include the session and provider instance to prevent collisions between logs. Acknowledgement of durable acceptance does not mean the browser has already rendered the event.
 
-При отключении браузера работа продолжается. Потеря управляющего соединения T3–Rust запускает отмену и очистку. После падения Rust восстанавливаются записи; прерванный ход не запускается заново автоматически.
+Work continues when the browser disconnects. Loss of the controlling T3–Rust connection triggers cancellation and cleanup. After a Rust crash, records are recovered; the interrupted turn is not restarted automatically.
 
-Если действие могло произойти, но надёжного результата нет, исход остаётся неизвестным. Пользователь видит действие, аргументы и известные факты. Его явное подтверждение проверки последствий снимает блокировку сессии без повтора действия и без выдуманного успеха. История модели получает явно неизвестный результат с сохранением корректной связи вызов/результат; подтверждение не обходится через новый обычный запрос.
+If an action may have occurred but no durable result exists, its outcome remains unknown. The user sees the action, arguments, and known facts. Their explicit acknowledgement that they checked the consequences unblocks the session without repeating the action or inventing success. Model history receives an explicitly unknown result with a valid call/result relationship; a new ordinary request cannot bypass acknowledgement.
 
-Автоматической compaction и скрытого удаления сообщений нет. Перед запросом модели проверяется бюджет контекста. Если история не помещается, ход останавливается с понятной причиной; пользователь может начать новую сессию.
+There is no automatic compaction or silent message removal. The context budget is checked before a model request. If the history does not fit, the turn stops with a clear reason; the user may start a new session.
 
-Источник: [контракт истории](https://github.com/aivv73/clanker-lab/issues/35#issuecomment-5743088901).
+Source: [history contract](https://github.com/aivv73/clanker-lab/issues/35#issuecomment-5743088901).
 
-## 7. T3 и Git-checkpoints
+## 7. T3 and Git checkpoints
 
-T3 владеет разговором, журналом и Git-checkpoints. Просмотр истории и diff остаётся доступным. Откат истории и файлов отключён в UI и отвергается сервером до изменения файлов, сообщений или refs. Проверка только отсутствия кнопки недостаточна.
+T3 owns the conversation, log, and Git checkpoints. History and diff viewing remain available. History and file rollback is disabled in the UI and rejected by the server before any files, messages, or refs change. Checking only that a button is absent is insufficient.
 
-**Перед допуском действия, способного изменить файлы, нужно дождаться исходного Git-снимка T3.** Уведомление о старте без ожидания не обеспечивает правильный первый diff.
+**Before admitting an action that can change files, wait for T3's initial Git snapshot.** A start notification without waiting does not ensure a correct first diff.
 
-**Восстановление terminal-события охватывает checkpoint-обработку.** После сохранения сообщения checkpoint не должен теряться из-за продвижения cursor или падения сервера. В принятом прототипе inbox становится обработанным после штатного checkpoint handler, повтор идемпотентен. Производственная реализация должна сохранить эту гарантию; глобальная инъекция callbacks из прототипа не является утверждённым API.
+**Recovery of a terminal event includes checkpoint processing.** Once the message is saved, the checkpoint must not be lost because the cursor advances or the server crashes. In the accepted prototype, an inbox entry becomes processed after the standard checkpoint handler, and replay is idempotent. The production implementation must preserve this guarantee; the prototype's global callback injection is not an approved API.
 
-Адаптер сопоставляет возможности, модель, состояния, ошибки и запрос проверки неизвестного исхода со штатными контрактами T3. При несовместимости закреплённой ревизии контракт пересматривается явно, а не молча ослабляется.
+The adapter maps capabilities, the model, states, errors, and requests to check an unknown outcome onto standard T3 contracts. If the pinned revision is incompatible, the contract must be explicitly reconsidered rather than silently weakened.
 
-Источник: [принятая полная интеграция](https://github.com/aivv73/clanker-lab/issues/41#issuecomment-5744176238).
+Source: [accepted full integration](https://github.com/aivv73/clanker-lab/issues/41#issuecomment-5744176238).
 
-## 8. Провайдер, вход и credentials
+## 8. Provider, sign-in, and credentials
 
-Выбран самостоятельный Rust-клиент Codex/ChatGPT-входа. Требуются корректные OAuth/PKCE и проверка callback state, refresh, обработка SSE, сохранение output items, включая необходимые элементы reasoning, и корректная передача результатов инструментов в следующий запрос.
+A standalone Rust client for Codex/ChatGPT sign-in was selected. It requires correct OAuth/PKCE and callback-state validation, refresh, SSE handling, preservation of output items including required reasoning items, and correct forwarding of tool results into the next request.
 
-Оборванный или incomplete-поток не выдаётся за завершённый ответ. Фрагментация UTF-8/SSE, отсутствие Content-Type и несовместимый MIME проверяются отдельно. HTTP 401 и ошибки refresh различаются с отказом модели и ошибками локальных инструментов. Локальное закрытие потока не объявляется доказательством прекращения вычислений или тарификации на стороне сервера.
+An interrupted or incomplete stream must not be presented as a completed response. UTF-8/SSE fragmentation, missing Content-Type, and incompatible MIME types are checked separately. HTTP 401 and refresh errors are distinguished from model refusal and local tool errors. Closing the stream locally is not claimed as proof that server-side computation or billing has stopped.
 
-**Принятая политика MVP:** access/refresh tokens хранятся только в памяти runtime. Вход выполняется после запуска процесса, refresh — в пределах его жизни; после перезапуска требуется повторный вход. Harness не читает credentials установленного Codex и не создаёт собственного постоянного хранилища токенов. История сессий сохраняется независимо от credentials. Хранение в памяти не означает гарантии криптографического стирания памяти или отсутствия OS swap. Постоянное сохранение входа отложено за пределы MVP.
+**Accepted MVP policy:** access/refresh tokens are stored only in runtime memory. Sign-in occurs after process startup, and refresh operates within that process lifetime; a restart requires signing in again. The harness does not read credentials from an installed Codex or create its own persistent token store. Session history is retained independently of credentials. In-memory storage does not guarantee cryptographic memory erasure or the absence of OS swap. Persistent sign-in is deferred beyond the MVP.
 
-Credentials недоступны инструментам и не включаются в JSONL-диагностику, историю модели и отчёты приёмки. Проверка с реальным аккаунтом требует участия пользователя; локальные тесты используют синтетические токены.
+Credentials are inaccessible to tools and excluded from JSONL diagnostics, model history, and acceptance reports. Testing with a real account requires user participation; local tests use synthetic tokens.
 
-Источники: [принятый самостоятельный клиент и ограничения](https://github.com/aivv73/clanker-lab/issues/39#issuecomment-5743495723), [политика хранения credentials](https://github.com/aivv73/clanker-lab/issues/42#issuecomment-5744283395).
+Sources: [accepted standalone client and limitations](https://github.com/aivv73/clanker-lab/issues/39#issuecomment-5743495723), [credential storage policy](https://github.com/aivv73/clanker-lab/issues/42#issuecomment-5744283395).
 
-## 9. Окружение, версии и границы доказательств
+## 9. Environment, versions, and evidence boundaries
 
-Это закреплённые снимки экспериментов, не обещание поддержки любых будущих версий.
+These are pinned experiment snapshots, not a promise to support arbitrary future versions.
 
-| Часть | Зафиксированная база | Что известно и что остаётся проверить |
+| Component | Pinned base | Known results and remaining checks |
 | --- | --- | --- |
-| T3 | dfbb11bdd7c3f1a5575cb55d3e3abb12be025727 | Полный локальный web-путь проверен с fixture; desktop/mobile и remote не проверены |
-| Node для T3 | В прогоне 26.8.1; upstream требует ^24.13.1 | Продуктовый прогон должен фиксировать фактическую поддерживаемую среду; прежний прогон не доказывает совместимость с Node 24 |
-| Bend | 2.0.16, 15ae0c86f3193b8f645b4bedbc438655b648d0da | Тот же модуль проверен и исполнен; производительность прототипа не SLA |
-| Linux-профиль | Linux 7.2.2-1-cachyos x86_64, bubblewrap 0.12.0 | Проверен один хост; перенос требует preflight и повторения проверок |
-| OAuth/SSE reference | Pi 36b60d2e8985899743c4cf5bd5f8929832a3f05d | Протокольный ориентир, не гарантия стабильности стороннего backend |
-| Live-модель прототипа | gpt-5.6-luna на использованном аккаунте | Не гарантия доступности на другом аккаунте или совместимости всех моделей |
+| T3 | dfbb11bdd7c3f1a5575cb55d3e3abb12be025727 | The full local web path was tested with a fixture; desktop/mobile and remote were not tested |
+| Node for T3 | 26.8.1 in the run; upstream requires ^24.13.1 | The product run must record the actual supported environment; the earlier run does not prove Node 24 compatibility |
+| Bend | 2.0.16, 15ae0c86f3193b8f645b4bedbc438655b648d0da | The same module was checked and executed; prototype performance is not an SLA |
+| Linux profile | Linux 7.2.2-1-cachyos x86_64, bubblewrap 0.12.0 | One host was tested; moving to another requires preflight and repeated checks |
+| OAuth/SSE reference | Pi 36b60d2e8985899743c4cf5bd5f8929832a3f05d | Protocol reference, not a guarantee of third-party backend stability |
+| Prototype live model | gpt-5.6-luna on the account used | No guarantee of availability on another account or compatibility with all models |
 
-Каждый отчёт реализации фиксирует revision исходников, lockfiles, Rust/compiler/tool versions, хеш проверенного и исполняемого Bend-модуля, T3/Node, ОС и параметры cgroup/seccomp. Новый pin требует повторения затронутых проверок; им нельзя молча заменить обязательный компонент.
+Each implementation report records the source revision, lockfiles, Rust/compiler/tool versions, the hash of the checked and executed Bend module, T3/Node, the OS, and cgroup/seccomp settings. A new pin requires rerunning the affected checks; it cannot silently replace a required component.
 
-Артефакты осуществимости:
+Feasibility artifacts:
 
-- [Rust–Bend, 5de2322](https://github.com/aivv73/clanker-lab/blob/5de232209e7f805853fee9e76d48f8a3898d106a/harness/prototypes/rust-bend/README.md): чистое свойство, CPU-процесс и контролируемые гонки; без реальных инструментов и общей SQLite/T3-интеграции.
-- [Codex-вход, 62144a3](https://github.com/aivv73/clanker-lab/tree/62144a3/harness/prototypes/codex-auth): live OAuth/refresh и SSE tool roundtrip; не долговременное хранение/восстановление токенов и не сквозное изменение файла через T3.
-- [Linux-изоляция, 3bc6c5d](https://github.com/aivv73/clanker-lab/tree/3bc6c5d/harness/prototypes/linux-isolation): границы, потомки и ресурсы; не полная реализация apply_patch, общего мягкого завершения, лимитов вывода и всех гонок.
-- [T3–harness, 960bb65](https://github.com/aivv73/clanker-lab/blob/960bb65/harness/prototypes/t3-recovery/native/FULL-APP.md): настоящий web, checkpoints и crash/replay с синтетической моделью; история модели проверена структурно. Fixture Rust не создавал детей; Ctrl-C процесса и восстановление unknown не являются отдельным доказательством graceful EOF.
+- [Rust–Bend, 5de2322](https://github.com/aivv73/clanker-lab/blob/5de232209e7f805853fee9e76d48f8a3898d106a/harness/prototypes/rust-bend/README.md): pure property, CPU process, and controlled races; no real tools or shared SQLite/T3 integration.
+- [Codex sign-in, 62144a3](https://github.com/aivv73/clanker-lab/tree/62144a3/harness/prototypes/codex-auth): live OAuth/refresh and an SSE tool roundtrip; not durable token storage/recovery or an end-to-end file change through T3.
+- [Linux isolation, 3bc6c5d](https://github.com/aivv73/clanker-lab/tree/3bc6c5d/harness/prototypes/linux-isolation): boundaries, descendants, and resources; not a full implementation of apply_patch, general graceful termination, output limits, or all races.
+- [T3–harness, 960bb65](https://github.com/aivv73/clanker-lab/blob/960bb65/harness/prototypes/t3-recovery/native/FULL-APP.md): real web, checkpoints, and crash/replay with a synthetic model; model history was checked structurally. The Rust fixture did not spawn children; process Ctrl-C and unknown-outcome recovery are not separate proof of graceful EOF.
 
-В T3-прототипе строгая проверка адаптера прошла. Расширенная целевая TS-проверка дала ошибки в неизменённых upstream HostPowerMonitor.ts:69 и NativeTelemetryClient.ts:509; более ранняя frontend-проверка — в openPullRequestLink.ts:242. Эти ограничения не считаются чистой проверкой будущей реализации и должны учитываться при её сборке/приёмке.
+The T3 prototype passed strict adapter checking. A broader targeted TypeScript check reported errors in unchanged upstream HostPowerMonitor.ts:69 and NativeTelemetryClient.ts:509; an earlier frontend check reported an error in openPullRequestLink.ts:242. These limitations do not constitute a clean check of the future implementation and must be accounted for during its build and acceptance.
 
-## 10. Матрица приёмки реализации
+## 10. Implementation acceptance matrix
 
-Все строки обязательны в своей заявленной области. `Локально` означает воспроизводимую фикстуру без аккаунта; реальные ОС, Rust, Bend и T3 используются там, где они предмет проверки. Тест с фиктивной моделью не доказывает прохождение live-сценария.
+Every row is mandatory within its stated scope. `Local` means a reproducible fixture without an account; the real OS, Rust, Bend, and T3 are used wherever they are the subject of the check. A fixture-model test does not prove that a live scenario passes.
 
-| ID / область | Условия и сценарий | Ожидаемый результат | Проверяемые свидетельства |
+| ID / scope | Setup and scenario | Expected result | Verifiable evidence |
 | --- | --- | --- | --- |
-| A01 / live | Малый Git-проект: target.txt содержит `value=old\n`, контрольный файл неизменен; запрос в T3 заменить old на new | Реальная модель вызывает чтение и apply_patch через Rust; target.txt точно `value=new\n`; прочие рабочие файлы неизменны; ответ и правильный diff в T3 | Идентификаторы запросов/инструментов без credentials, байты/хеши файлов, diff, история UI и БД |
-| A02 / локально + продолжение A01 | Перезапуск после завершённого хода | История и diff сохранены, действие не повторяется | Сравнение сообщений, refs, файлов и числа исполнений до/после |
-| A03 / локально | Две реализации agent loop через один контракт | Замена при запуске без правок ядра и остальных плагинов | Конфигурации и результаты одинакового контрактного сценария |
-| A04 / локально | Отсутствующая зависимость, цикл, два поставщика, сбой посреди start | До готовности нет ходов; ошибки явные; частичный запуск очищен в обратном порядке, регистрации сняты | Журнал порядка, реестр ресурсов, отсутствие оставшихся задач |
-| A05 / локально | Несколько сессий, второй ход при активном первом; закрытие одной сессии; close дважды; остановка используемого поставщика | Busy без очереди; чужая сессия/общие плагины сохранены; повтор close безопасен; поставщик защищён | Состояния областей, вызовы start/close и счётчики исполнения |
-| A06 / локально | exec_command вернул process ID, далее write_stdin и попытки других инструментов | Продолжение того же процесса возможно; новый exec/patch получает busy до выхода и очистки | События процесса, слота и вызовов; отсутствие второго эффекта |
-| A07 / локально | Зависший инструмент с fork/setsid, отмена из T3; поздний результат | Bend закрывает допуск; новой работы нет; дерево остановлено по лимиту 2+2 с; поздний результат не оживляет ход | Реальные вызовы Bend, cgroup populated=0, pipes/reap, время и terminal/UI |
-| A08 / локально | Неподтверждённая очистка; обычный выход родителя с живым потомком | Сбой очистки блокирует весь runtime; обычный выход также очищает потомков, слот до этого занят | Инъекция сбоя наблюдения/очистки, список ресурсов, отказ нового хода |
-| A09 / локально | Таймаут команды; повторное чтение вывода | 120 с по умолчанию, максимум запроса 10 мин, чтение не продлевает срок; очистка обязательна | Контролируемое время плюс интеграционный запуск supervisor, причины остановки |
-| A10 / локально | Вывод порциями через exec/write_stdin, длинный один ответ | Общий предел 10 МиБ вызывает output_limit; ответ ≤16000 токенов с явным усечением | Суммарный счётчик байтов, измерение ответа, причина и очистка |
-| A11 / локально | Попытки чтения home/credentials, записи в системные пути, выхода через symlink; все три инструмента | Граница не нарушена, apply_patch не обходится отдельным путём | Внешние контрольные файлы неизменны; отказ операций и закрытые FD |
-| A12 / локально | TCP/сеть; host socket в workspace; socketpair и альтернативный io_uring-путь | Сеть и запрещённый Unix IPC недоступны, fallback/расширения нет | Независимый host listener не получил соединения, результаты syscalls |
-| A13 / локально | Поочерёдно недоступны namespace/bwrap/systemd/controller/cgroup.kill/seccomp | Код инструмента не стартует, ошибка preflight явная | Маркер запуска отсутствует, причина указывает механизм |
-| A14 / локально | Лимиты памяти, swap, pids/threads и tmp | Реальные значения 2 ГиБ/0/128/256 МиБ; превышения явно диагностируются | Read-back настроек; OOM с меньшим тестовым пределом, pids и ENOSPC; ограничения workspace не выдумываются |
-| A15 / локально | Невалидный патч; сбой/отмена после первого из нескольких файлов | Невалидный патч не пишет; частичный результат точно перечислен; отката нет | Байты каждого файла и сопоставление со списком применённых/неприменённых |
-| A16 / локально | Ненулевой exit, ошибка запуска, timeout/cancel/limit/isolation | Причины различимы, ошибка запуска не изображает исполненную команду | Типизированные результаты и фактические побочные эффекты |
-| A17 / локально | Proof checker, dependency audit, исполнение модуля; намеренная мутация Permit после Cancel | Свойство для любой последовательности проверено без unsafe/предположений; мутация отвергнута по существу; исполняется тот же модуль | Вывод checker, проверка зависимостей, хеши module/compiler/binary, отрицательный результат |
-| A18 / локально | Все состояния/события Bend; двойное использование, чужой ID, старая epoch; отмена до/после передачи исполнителю | Только допустимый однократный Permit в Active; после Cancel/Finish допуска нет; порядок гонки соблюдён | Контролируемые порядки, реальные ответы Bend и счётчик передачи инструменту |
-| A19 / локально | Bend отсутствует, завис, дал неверный ответ/ID или завершился ошибкой; отмена в ожидании | Через 250 мс timeout либо явная ошибка; действия нет, разрешающей подмены нет; отмена и очистка не ждут исправления Bend | Отсутствие маркера действия, отклонённые поздние ответы, cleanup |
-| A20 / локально | Несовместимый handshake; повтор request_id с тем же/иным содержимым | Несовместимость до ходов; прежнее принятие без повторного действия; конфликт отклонён | JSONL и сохранённые команды, число эффектов |
-| A21 / локально | Падение после inbox commit до cursor; после dispatch до done; после checkpoint до подтверждения | Replay восстанавливает проекции/checkpoint без дубликатов; seq/cursor согласованы, пропуск не скрывается | Реальные перезапуски, строки inbox/receipts, сообщения и refs до/после |
-| A22 / локально | Файл изменён, результат не сохранён; перезапуск; обычная попытка продолжить; явное подтверждение | Unknown блокирует сессию, автоповтора нет; показаны аргументы/факты; подтверждение сохраняет unknown и парность call/result | Файл, история модели, записи действий, запрос подтверждения в T3 и счётчики исполнения |
-| A23 / локально | Реальное отключение вкладки; отдельно EOF управляющего канала и падение Rust | Вкладка не отменяет; EOF запускает отмену/очистку; перезапуск не продолжает прерванное действие | Файлы, состояние процессов/cgroups, журнал и UI после подключения |
-| A24 / локально | Быстрое первое изменение; rollback из UI и прямая серверная команда | Baseline до записи, первый diff верен; rollback недоступен/отвергнут до изменений | Порядок baseline/exec, diff, неизменность файлов/messages/refs при откате |
-| A25 / локально | Контекст не помещается; история содержит tool output и unknown | Явная остановка до запроса, нет скрытого сжатия; контекст построен из harness с корректными связями | Сериализованный запрос без секретов, сравнение с историей, отсутствие сетевого запроса при переполнении |
-| A26 / локально | PKCE/state, refresh rotation, UTF-8/SSE по фрагментам, output items, incomplete/обрыв, MIME, 401 | Неверное состояние отклонено; токены обновляются по контракту; незавершённость не скрыта; необходимые items сохранены | HTTP/SSE-фикстуры и классификация результатов без credentials |
-| A27 / live | Вход и refresh, реальный tool roundtrip в A01, локальная отмена потока | Самостоятельный клиент работает с выбранным аккаунтом/моделью; локальная отмена не выдаётся за серверную | Обезличенный отчёт с моделью, временем, статусами и связями вызовов |
-| A28 / локально | Вход и refresh с синтетическими токенами; завершение и новый процесс; отказ входа/refresh | Токены не записаны в постоянное хранилище; новый процесс требует входа, история сохранена; отказ явный; инструменты/логи не получают секреты | Инспекция файловых записей, FD, запросов и вывода; сравнение истории; отсутствие чтения credentials установленного Codex |
+| A01 / live | Small Git project: target.txt contains `value=old\n`, a control file is unchanged; ask T3 to replace old with new | The real model invokes reading and apply_patch through Rust; target.txt is exactly `value=new\n`; other working files are unchanged; T3 shows the response and correct diff | Request/tool identifiers without credentials, file bytes/hashes, diff, UI history, and database |
+| A02 / local + continuation of A01 | Restart after a completed turn | History and diff are preserved; the action is not repeated | Compare messages, refs, files, and execution counts before/after |
+| A03 / local | Two agent-loop implementations through one contract | Replacement at startup without changing the core or other plugins | Configurations and results from the same contract scenario |
+| A04 / local | Missing dependency, cycle, two providers, failure partway through start | No turns before readiness; explicit errors; partial startup cleaned up in reverse order, registrations removed | Ordering log, resource registry, absence of leftover tasks |
+| A05 / local | Multiple sessions, second turn while the first is active; close one session; close twice; stop a provider in use | Busy without queuing; other sessions/shared plugins preserved; repeated close is safe; provider is protected | Scope states, start/close calls, and execution counters |
+| A06 / local | exec_command returns a process ID, followed by write_stdin and attempts to use other tools | The same process can continue; a new exec/patch receives busy until exit and cleanup | Process, slot, and invocation events; absence of a second effect |
+| A07 / local | Hung tool with fork/setsid, cancellation from T3; late result | Bend closes admission; no new work; the tree stops within the 2+2 second bound; a late result does not revive the turn | Real Bend calls, cgroup populated=0, pipes/reaping, timing, and terminal/UI |
+| A08 / local | Unconfirmed cleanup; normal parent exit with a live descendant | Cleanup failure blocks the entire runtime; normal exit also cleans up descendants and holds the slot until then | Injected observation/cleanup failure, resource list, rejection of a new turn |
+| A09 / local | Command timeout; repeated output reads | 120 seconds by default, requested maximum 10 minutes; reading does not extend the deadline; cleanup is mandatory | Controlled time plus an integration run of the supervisor, stop reasons |
+| A10 / local | Output chunks through exec/write_stdin, one long response | A total of 10 MiB triggers output_limit; response ≤16000 tokens with explicit truncation | Total byte counter, response measurement, reason, and cleanup |
+| A11 / local | Attempts to read home/credentials, write system paths, or escape through symlinks; all three tools | The boundary holds; apply_patch cannot bypass it through a separate path | External control files unchanged; rejected operations and closed FDs |
+| A12 / local | TCP/networking; host socket in the workspace; socketpair and an alternative io_uring path | Networking and forbidden Unix IPC are unavailable; no fallback or access expansion | An independent host listener receives no connection, syscall results |
+| A13 / local | Make namespace/bwrap/systemd/controller/cgroup.kill/seccomp unavailable one at a time | Tool code does not start; explicit preflight error | No startup marker; the reason identifies the mechanism |
+| A14 / local | Memory, swap, pids/threads, and tmp limits | Actual values of 2 GiB/0/128/256 MiB; violations explicitly diagnosed | Read back settings; OOM with a smaller test limit, pids, and ENOSPC; no invented workspace restrictions |
+| A15 / local | Invalid patch; failure/cancellation after the first of multiple files | Invalid patch makes no writes; partial result lists changes exactly; no rollback | Each file's bytes compared with the applied/unapplied lists |
+| A16 / local | Nonzero exit, launch failure, timeout/cancellation/limit/isolation | Reasons are distinguishable; launch failure is not presented as an executed command | Typed results and actual side effects |
+| A17 / local | Proof checker, dependency audit, module execution; deliberate mutation permitting Permit after Cancel | Property checked for every sequence without unsafe/assumptions; mutation rejected for violating the property; the same module is executed | Checker output, dependency audit, module/compiler/binary hashes, negative result |
+| A18 / local | All Bend states/events; double use, wrong ID, old epoch; cancellation before/after handoff to the executor | Only a valid single-use Permit in Active; no admission after Cancel/Finish; race ordering respected | Controlled ordering, real Bend responses, and tool-handoff counter |
+| A19 / local | Bend missing, hung, returning an invalid response/ID, or failing; cancellation while waiting | Timeout after 250 ms or explicit error; no action or permissive substitute; cancellation and cleanup do not wait for Bend to recover | No action marker, rejected late responses, cleanup |
+| A20 / local | Incompatible handshake; repeated request_id with the same/different content | Incompatibility detected before turns; prior acceptance without repeating the action; conflict rejected | JSONL and persisted commands, effect count |
+| A21 / local | Crash after inbox commit but before cursor advancement; after dispatch but before done; after checkpoint but before acknowledgement | Replay restores projections/checkpoints without duplicates; seq/cursor agree; gaps are not hidden | Real restarts, inbox/receipt rows, messages and refs before/after |
+| A22 / local | File changed, result not saved; restart; ordinary continuation attempt; explicit acknowledgement | Unknown blocks the session; no automatic retry; arguments/facts displayed; acknowledgement preserves unknown and call/result pairing | File, model history, action records, T3 acknowledgement request, and execution counters |
+| A23 / local | Actual tab disconnection; separately, controlling-channel EOF and Rust crash | Tab disconnection does not cancel; EOF triggers cancellation/cleanup; restart does not resume the interrupted action | Files, process/cgroup state, log, and UI after reconnection |
+| A24 / local | Fast first change; rollback from the UI and a direct server command | Baseline before writing, correct first diff; rollback unavailable/rejected before changes | Baseline/exec order, diff, unchanged files/messages/refs on rollback attempt |
+| A25 / local | Context does not fit; history contains tool output and unknown outcomes | Explicit stop before the request, no hidden compression; context built from harness records with correct relationships | Serialized request without secrets, comparison with history, no network request on overflow |
+| A26 / local | PKCE/state, refresh rotation, fragmented UTF-8/SSE, output items, incomplete/interrupted stream, MIME, 401 | Invalid state rejected; tokens refreshed according to contract; incompleteness not hidden; required items preserved | HTTP/SSE fixtures and result classification without credentials |
+| A27 / live | Sign-in and refresh, real tool roundtrip in A01, local stream cancellation | Standalone client works with the selected account/model; local cancellation is not presented as server-side cancellation | Anonymized report with model, timing, statuses, and call relationships |
+| A28 / local | Sign-in and refresh with synthetic tokens; shutdown and a new process; sign-in/refresh failure | Tokens not written to persistent storage; new process requires sign-in while history is retained; explicit failure; tools/logs receive no secrets | Inspect file writes, FDs, requests, and output; compare history; no reading of installed Codex credentials |
 
-Эталон A01 — конкретизация согласованной замены строки. Фикстура создаётся до прогона; после отправки запроса ручные правки и подмена ответа модели не засчитываются. Изменения служебных данных T3/harness не смешиваются с изменениями рабочих файлов; их хранилища находятся вне workspace инструмента.
+The A01 reference case concretizes the agreed line replacement. The fixture is created before the run; manual edits or substituted model responses after sending the request do not count. Changes to T3/harness service data are kept separate from changes to working files; their stores are outside the tool workspace.
 
-Для crash/cleanup-проверок важны реальные файлы, durable-записи и процессы, не только надпись UI. Тестовые часы могут ускорять проверку расчёта дедлайнов, но не заменяют измерение фактической очистки дерева процессов. Отсутствие аккаунта не заменяется fixture-успехом.
+Crash/cleanup checks require real files, durable records, and processes, not just UI text. Test clocks may accelerate deadline-calculation checks, but do not replace measuring actual process-tree cleanup. A missing account cannot be substituted with fixture success.
 
-Источники критериев: [два уровня](https://github.com/aivv73/clanker-lab/issues/38#issuecomment-5744195271), [эталон файла](https://github.com/aivv73/clanker-lab/issues/38#issuecomment-5744201485), [отмена/Bend](https://github.com/aivv73/clanker-lab/issues/38#issuecomment-5744212588), [восстановление](https://github.com/aivv73/clanker-lab/issues/38#issuecomment-5744218533). Остальные строки операционализируют обязательные требования ранее принятых контрактов, не заявляют уже пройденные проверки реализации.
+Criteria sources: [two levels](https://github.com/aivv73/clanker-lab/issues/38#issuecomment-5744195271), [reference file](https://github.com/aivv73/clanker-lab/issues/38#issuecomment-5744201485), [cancellation/Bend](https://github.com/aivv73/clanker-lab/issues/38#issuecomment-5744212588), [recovery](https://github.com/aivv73/clanker-lab/issues/38#issuecomment-5744218533). The other rows operationalize mandatory requirements of previously accepted contracts; they do not claim that implementation checks have already passed.
 
-## 11. Отчёт и критерий готовности
+## 11. Reporting and readiness criteria
 
-Для каждой строки матрицы отчёт указывает окружение/версии, входную фикстуру, команду запуска, ожидаемое и наблюдаемое поведение, ссылки на свидетельства и итог: пройдено, дефект реализации, внешний отказ/недоступность либо не выполнено. Секреты в отчёт не входят.
+For each matrix row, the report records the environment/versions, input fixture, run command, expected and observed behavior, evidence links, and outcome: passed, implementation defect, external failure/unavailability, or not run. Reports exclude secrets.
 
-Отказ модели или недоступность сервиса не доказывает сам по себе дефект harness, но прогон не считается пройденным. Обрыв транспорта нельзя выдавать за отказ модели, а сообщение об успехе — за доказательство изменения файла. Пропущенная обязательная проверка не становится успешной.
+A model refusal or unavailable service does not by itself prove a harness defect, but the run does not count as passed. A transport interruption must not be presented as a model refusal, nor a success message as proof of a file change. A skipped mandatory check does not become a success.
 
-**Готовность спецификации:** все выявленные решения согласованы, критерии однозначны, пользователь принял документ; ссылки на решения и ограничения сохранены. Окончательная приёмка получена 2026-09-19; вопрос критериев и карта закрываются с указателем на этот документ.
+**Specification readiness:** all identified decisions are agreed, criteria are unambiguous, and the user has accepted the document; decision references and limitations are preserved. Final acceptance was received on 2026-09-19; the criteria issue and decision map are closed with a reference to this document.
 
-**Готовность реализации MVP:** обязательные локальные и live-проверки пройдены на зафиксированном снимке реализации, свидетельства доступны. Результаты прототипов не заменяют повторную проверку продукта. Не требуется реализация вне согласованных границ.
+**MVP implementation readiness:** mandatory local and live checks pass against a pinned implementation snapshot, and evidence is available. Prototype results do not replace repeated product verification. Implementation beyond the agreed scope is not required.
 
-## 12. Вне MVP
+## 12. Outside the MVP
 
-- Реализация/выпуск продукта в рамках этой карты планирования.
-- MCP, мультиагентность, горячая загрузка плагинов, динамические библиотеки/WASM; pause/restart/reload как операции контракта плагина.
-- Несколько провайдеров, многопользовательский сервис, параллельные активные ходы или инструменты.
-- PTY, сеть инструментов, повышение прав и расширение sandbox во время хода.
-- Постоянное хранилище OAuth credentials и сохранение входа между перезапусками runtime.
-- Автоматическая compaction, скрытое усечение истории, откат истории и файлов через T3.
-- Поддерживаемый форк Codex, GPU-ускорение Bend как цель, доказательство безопасности всего harness.
-- WebSocket на границе T3–Rust: там JSONL. Штатный WebSocket браузер–T3 остаётся частью T3 и используется проверками.
+- Product implementation/release within this planning map.
+- MCP, multiple agents, hot plugin loading, dynamic libraries/WASM; pause/restart/reload as plugin-contract operations.
+- Multiple providers, a multi-user service, parallel active turns or tools.
+- PTY, tool networking, privilege elevation, and sandbox expansion during a turn.
+- Persistent OAuth credential storage and retaining sign-in across runtime restarts.
+- Automatic compaction, silent history truncation, and history/file rollback through T3.
+- A supported Codex fork, GPU acceleration of Bend as a goal, or a proof of safety for the entire harness.
+- WebSocket on the T3–Rust boundary: it uses JSONL. The standard browser–T3 WebSocket remains part of T3 and is used by the checks.
 
-Desktop/mobile и remote не проверены прототипом; это ограничение доказательств, а не утверждение об их работоспособности. Приёмка здесь задаёт локальный сценарий T3; расширение проверяемой поверхности требует отдельного решения.
+Desktop/mobile and remote were not tested by the prototype; this limits the evidence and does not claim that those surfaces work. Acceptance here defines a local T3 scenario; expanding the tested surface requires a separate decision.

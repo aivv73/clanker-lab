@@ -1,37 +1,37 @@
 # Psi
 
-Самостоятельная среда выполнения агента, соединяющая пользовательский интерфейс,
-модель и инструменты. Этот словарь относится к эксперименту Psi, отдельно от paclang.
+A standalone agent runtime connecting the user interface, model, and tools.
+This glossary belongs to the Psi experiment, separate from paclang.
 
 ## Language
 
 **Psi**:
-Имя самостоятельной среды выполнения агента (agentic harness), соединяющей пользовательский интерфейс, модель и инструменты. Пишется с заглавной первой буквой.
+The name of the standalone agent runtime (agentic harness) connecting the user interface, model, and tools. Written with an initial capital letter.
 
-**Сессия (Session)**:
-Отдельный разговор пользователя с агентом, объединяющий его ходы.
-_Avoid_: Ход как синоним всего разговора.
+**Session**:
+A distinct conversation between a user and an agent, containing its turns.
+_Avoid_: Turn as a synonym for the entire conversation.
 
-**Ход (Turn)**:
-Одна принятая в выполнение работа агента по запросу пользователя внутри сессии,
-включающая обращения к модели и вызовы инструментов до завершения или отмены.
-_Avoid_: Отдельный запрос к модели как синоним хода.
+**Turn**:
+One unit of agent work accepted for execution in response to a user request within a session,
+including model requests and tool invocations until completion or cancellation.
+_Avoid_: An individual model request as a synonym for a turn.
 
-**Вызов инструмента (Tool invocation)**:
-Одно выполнение выбранного инструмента с конкретными аргументами в рамках хода.
-_Avoid_: Инструмент как синоним отдельного его вызова.
+**Tool invocation**:
+One execution of a selected tool with specific arguments within a turn.
+_Avoid_: Tool as a synonym for an individual invocation.
 
-**Отмена хода**:
-Прекращение дальнейшей работы по ходу с завершением принадлежащей ему активной работы.
-Отмена не означает отката уже выполненных внешних действий.
-_Avoid_: Откат как синоним отмены.
+**Turn cancellation**:
+Stopping further work on a turn and terminating the active work it owns.
+Cancellation does not roll back external actions already performed.
+_Avoid_: Rollback as a synonym for cancellation.
 
-**Неизвестный исход действия**:
-Состояние, при котором действие могло произойти, но сохранённых сведений
-недостаточно, чтобы установить его результат или отсутствие внешних изменений.
-_Avoid_: Ошибка или невыполнение как синоним неизвестного исхода.
+**Unknown action outcome**:
+A state in which an action may have occurred, but the retained information
+is insufficient to determine its result or establish that no external changes occurred.
+_Avoid_: Failure or non-execution as a synonym for an unknown outcome.
 
-**Допуск действия**:
-Одноразовое разрешение выбранного правила на конкретное действие в конкретном ходе.
-Допуск необходим, но не заменяет остальные условия выполнения действия.
-_Avoid_: Успех выполнения или безусловное разрешение как синоним допуска.
+**Action admission**:
+One-time authorization from the selected rule for a specific action in a specific turn.
+Admission is necessary but does not replace the other conditions for executing the action.
+_Avoid_: Success or unconditional execution authorization as a synonym for admission.

@@ -1,11 +1,11 @@
 # Triage labels
 
-| Роль | Метка в GitHub | Значение |
+| Role | GitHub label | Meaning |
 | --- | --- | --- |
-| needs-triage | needs-triage | Требуется оценка сопровождающего |
-| needs-info | needs-info | Ожидаются дополнительные сведения |
-| ready-for-agent | ready-for-agent | Задача подготовлена для автономного агента |
-| ready-for-human | ready-for-human | Требуется реализация человеком |
-| wontfix | wontfix | Задача не будет выполнена |
+| needs-triage | needs-triage | Maintainer assessment required |
+| needs-info | needs-info | Awaiting additional information |
+| ready-for-agent | ready-for-agent | Ready for an autonomous coding agent |
+| ready-for-human | ready-for-human | Human implementation required |
+| wontfix | wontfix | The task will not be implemented |
 
-Когда навык упоминает роль triage, используйте соответствующую метку.
+When a skill refers to a triage role, use the corresponding label.

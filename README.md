@@ -1,21 +1,21 @@
 # clanker-lab
 
-Монорепозиторий для личных экспериментов. Каждый эксперимент живёт в собственной директории со своими зависимостями, документацией и командами разработки.
+A monorepo for personal experiments. Each experiment lives in its own directory with its own dependencies, documentation, and development commands.
 
-## Пакеты
+## Packages
 
-| Пакет | Описание | Стек |
+| Package | Description | Stack |
 | --- | --- | --- |
-| [paclang](paclang/README.md) | Анализ языков программирования, на которых написаны установленные пакеты Arch Linux и других ALPM-систем. | Rust |
-| [Psi](psi/README.md) | Самостоятельный Rust runtime агента; первый разговор через T3 с fixture-моделью. | Rust, T3; Bend в плане MVP |
+| [paclang](paclang/README.md) | Analyze the programming languages used in the source code of installed packages on Arch Linux and other ALPM-based systems. | Rust |
+| [Psi](psi/README.md) | A standalone Rust agent runtime; the first conversation through T3 with a fixture model. | Rust, T3; Bend planned for the MVP |
 
 ## paclang
 
-`paclang` собирает сведения об установленных пакетах, находит их исходники и строит отчёты о языках программирования. Результаты сохраняются локально в SQLite. Точный анализ использует GitHub Linguist; быстрый режим получает приблизительные данные через GitHub Languages API.
+`paclang` collects information about installed packages, locates their source code, and produces programming-language reports. Results are stored locally in SQLite. Exact analysis uses GitHub Linguist; fast mode retrieves approximate data through the GitHub Languages API.
 
-Для сборки нужны Rust с поддержкой edition 2024, Cargo, инструменты сборки C и библиотеки разработки libcurl и libarchive. Для чтения установленных пакетов нужны `pacman` и `expac`, для точного анализа — `github-linguist`. Интеграционные тесты используют Git.
+Building requires Rust with edition 2024 support, Cargo, C build tools, and the libcurl and libarchive development libraries. Reading installed packages requires `pacman` and `expac`; exact analysis requires `github-linguist`. Integration tests use Git.
 
-Из корня монорепозитория:
+From the monorepo root:
 
 ```sh
 cd paclang
@@ -23,27 +23,27 @@ cargo build
 cargo run -- --help
 ```
 
-Создать снимок установленных пакетов без сетевых запросов и посмотреть сводку:
+Create a snapshot of installed packages without network requests and view the summary:
 
 ```sh
 cargo run -- refresh --metadata-only
 cargo run -- count
 ```
 
-Снимок метаданных сам по себе не содержит результатов анализа языков. Чтобы загрузить исходники и проанализировать их установленным GitHub Linguist:
+A metadata snapshot alone contains no language analysis results. To download source code and analyze it using an installed GitHub Linguist:
 
 ```sh
 cargo run -- refresh --sources-only --linguist-executable github-linguist
 cargo run -- count
 ```
 
-Подробности режимов, ограничений и отчётов — в [README пакета](paclang/README.md).
+See the [package README](paclang/README.md) for details on modes, limitations, and reports.
 
-## Разработка
+## Development
 
-Общего Cargo workspace и единой команды сборки пока нет. Выполняйте команды внутри нужного пакета.
+There is no shared Cargo workspace or unified build command yet. Run commands inside the relevant package.
 
-Для `paclang`:
+For `paclang`:
 
 ```sh
 cd paclang
@@ -52,4 +52,4 @@ cargo check
 cargo test
 ```
 
-Правила работы для кодовых агентов описаны в [AGENTS.md](AGENTS.md). При добавлении эксперимента создайте для него отдельную директорию и README, затем обновите таблицу пакетов выше.
+Instructions for coding agents are in [AGENTS.md](AGENTS.md). When adding an experiment, create its own directory and README, then update the package table above.

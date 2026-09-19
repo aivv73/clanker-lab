@@ -1,24 +1,24 @@
 # Domain docs
 
-Все пути ниже отсчитываются от корня clanker-lab.
+All paths below are relative to the clanker-lab root.
 
-## Структура
+## Structure
 
-Сейчас используется один предметный контекст — paclang:
+There is currently one domain context: paclang.
 
-- paclang/CONTEXT.md — словарь.
-- paclang/docs/adr/ — архитектурные решения.
-- paclang/docs/agents/domain.md — дополнительные правила контекста.
+- paclang/CONTEXT.md — glossary.
+- paclang/docs/adr/ — architecture decisions.
+- paclang/docs/agents/domain.md — additional context rules.
 
-## Перед исследованием кода paclang
+## Before exploring paclang code
 
-Прочитайте paclang/README.md, paclang/CONTEXT.md,
-paclang/docs/agents/domain.md и ADR, относящиеся к задаче.
+Read paclang/README.md, paclang/CONTEXT.md,
+paclang/docs/agents/domain.md, and the ADRs relevant to the task.
 
-Используйте термины словаря в задачах, предложениях и тестах.
-Если необходимого понятия нет, отметьте пробел для /domain-modeling.
-Явно обозначайте противоречия с существующими ADR.
+Use glossary terms in issues, proposals, and tests.
+If a required concept is missing, flag the gap for /domain-modeling.
+Explicitly identify conflicts with existing ADRs.
 
-Для новых экспериментов храните предметную документацию внутри
-их директорий согласно корневому AGENTS.md. Отсутствующую документацию
-не создавайте заранее: /domain-modeling добавляет её по необходимости.
+For new experiments, keep domain documentation inside their own directories
+as instructed by the root AGENTS.md. Do not create missing documentation
+in advance: /domain-modeling adds it as needed.
