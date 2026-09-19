@@ -1,66 +1,69 @@
-# Issue #44 — проверка первого разговора
+# Issue #44 — first conversation validation
 
-Дата: 2026-09-19. Результат: **локальный fixture-срез #44 прошёл**.
-Это новый прогон реализации Psi, не перенос результатов прототипа.
+Date: 2026-09-19. Result: **the local fixture slice for #44 passed**.
+This is a new run of the Psi implementation, not a carryover of prototype results.
 
-[Машинный отчёт с версиями и хешами](evidence/issue-44.json).
-Исходники ещё не закоммичены: `source_revision` обозначает базовый commit;
-`implementation_sha256` фиксирует проверенные файлы текущей реализации.
+[Machine-readable report with versions and hashes](evidence/issue-44.json).
+At the time of validation, the source files had not yet been committed:
+`source_revision` identifies the base commit; `implementation_sha256` records the
+validated files of the current implementation.
 
-## Среда
+## Environment
 
-| Компонент | Проверенная версия |
+| Component | Validated version |
 | --- | --- |
-| T3 | `dfbb11bdd7c3f1a5575cb55d3e3abb12be025727` + `t3/t3.patch` и Psi overlay |
-| Node | `24.13.1` (соответствует upstream `^24.13.1`) |
+| T3 | `dfbb11bdd7c3f1a5575cb55d3e3abb12be025727` + `t3/t3.patch` and the Psi overlay |
+| Node | `24.13.1` (satisfies upstream `^24.13.1`) |
 | Rust | rustc `1.97.1 (8bab26f4f 2026-07-14)`, Cargo `1.97.1 (c980f4866 2026-06-30)` |
-| Browser | Google Chrome `152.0.7977.82`, отдельный headless-профиль |
-| Playwright Core | `1.60.0`, npm lockfile в `t3/` |
-| ОС | Linux `7.2.2-1-cachyos`, x86_64 |
+| Browser | Google Chrome `152.0.7977.82`, separate headless profile |
+| Playwright Core | `1.60.0`, npm lockfile in `t3/` |
+| OS | Linux `7.2.2-1-cachyos`, x86_64 |
 
-T3 использовал уже установленный локальный набор зависимостей от того же pin;
-workspace-ссылки перенаправлены в отдельную тестовую копию. SHA-256 неизменённого
-`pnpm-lock.yaml` записан в отчёте. Чистая установка всех upstream-зависимостей с нуля
-в этом прогоне не проверялась. Rust собран с `--locked`. Первичный диагностический
-UI-прогон был на Node 26.8.1; итоговый автоматический прогон выполнен на Node 24.13.1.
+T3 used an already installed local dependency set from the same pin; workspace links
+were redirected to a separate test checkout. The report records the SHA-256 hash of
+the unchanged `pnpm-lock.yaml`. A clean installation of all upstream dependencies
+from scratch was not tested in this run. Rust was built with `--locked`. The initial
+diagnostic UI run used Node 26.8.1; the final automated run used Node 24.13.1.
 
-## Проверки
+## Checks
 
-| Проверка | Результат |
+| Check | Result |
 | --- | --- |
-| `cargo fmt --check`, `cargo check --locked`, `cargo test --locked` из `psi/` | Пройдено, 6 тестов |
-| `tsc -p tsconfig.psi.json --pretty false` в подготовленном T3 | Пройдено: строгая проверка bridge, driver, adapter tests и их импортов |
-| `node --test apps/server/src/psi/adapter.test.ts` с `PSI_BINARY` | Пройдено, 5 тестов на Node 24.13.1 |
-| `node --test t3/e2e.test.mjs` с отдельным T3 | Пройдено, 1 сквозной сценарий, около 59 секунд |
-| Python launcher/preparation | Компиляция и реальный запуск прошли |
+| `cargo fmt --check`, `cargo check --locked`, `cargo test --locked` from `psi/` | Passed, 6 tests |
+| `tsc -p tsconfig.psi.json --pretty false` in the prepared T3 checkout | Passed: strict checking of the bridge, driver, adapter tests, and their imports |
+| `node --test apps/server/src/psi/adapter.test.ts` with `PSI_BINARY` | Passed, 5 tests on Node 24.13.1 |
+| `node --test t3/e2e.test.mjs` with a separate T3 instance | Passed, 1 end-to-end scenario, approximately 59 seconds |
+| Python launcher/preparation | Compilation and actual execution passed |
 
-Rust-тесты проверяют порядок зависимостей, повторный close, cleanup частичного
-старта, отклонение неверного графа, реальный процесс JSONL, Unicode/newline,
-несовместимые handshake, повторы/конфликты ID, независимые сессии и EOF.
-Adapter-тесты дополнительно проверяют ошибку spawn, закрытие процесса, неверную
-версию/возможности со стороны сервера и сохранение идентичности исходной команды.
+The Rust tests cover dependency ordering, repeated close, partial-start cleanup,
+invalid graph rejection, a real JSONL process, Unicode/newlines, incompatible
+handshakes, repeated/conflicting IDs, independent sessions, and EOF. Adapter tests
+also cover spawn failure, process shutdown, incompatible server versions/capabilities,
+and preservation of the originating command's identity.
 
-В сквозном сценарии обычный composer настоящего T3 отправил `Hello Psi issue 44`
-через штатный WebSocket. В разговоре появился ровно один ответ
-`Psi fixture: Hello Psi issue 44`. Тест сопоставил отправленный `commandId`,
-сохранённое событие `thread.turn-start-requested` и `psi-turn:<commandId>` в
-проекции assistant-сообщения. У T3 был один отдельный дочерний Psi-процесс.
-Переход вкладки на `about:blank` сохранил runtime; остановка сервера привела к EOF,
-закрытию плагинов и reap процесса. Ошибок страницы не было.
+In the end-to-end scenario, the normal composer in the real T3 application sent
+`Hello Psi issue 44` over the standard WebSocket. Exactly one response appeared in
+the conversation: `Psi fixture: Hello Psi issue 44`. The test matched the submitted
+`commandId`, the persisted `thread.turn-start-requested` event, and
+`psi-turn:<commandId>` in the assistant-message projection. T3 had one standalone
+Psi child process. Navigating the tab to `about:blank` preserved the runtime;
+stopping the server triggered EOF, plugin shutdown, and process reaping. There
+were no page errors.
 
-Автоматический тест сохраняет screenshot, `report.json` и очищенный от pairing URL
-лог во временной директории, путь которой печатает. Последний прогон этой сессии:
-`/tmp/psi-t3-uizyos3k/`. Эти временные файлы не нужны для повторного запуска.
+The automated test saves a screenshot, `report.json`, and a log with the pairing URL
+removed in the temporary directory whose path it prints. The last run of this session
+used `/tmp/psi-t3-uizyos3k/`. These temporary files are not required to rerun the test.
 
-Во время проверки исправлена очистка дочернего Vite-сервера в тестовом launcher;
-финальный сценарий повторно прошёл после исправления. Штатная остановка T3 сначала
-закрывает контролируемый Rust-процесс; группы собственных дочерних процессов
-launcher используются для уборки оставшихся процессов тестового приложения.
+Validation exposed and fixed cleanup of the Vite child server in the test launcher;
+the final scenario passed again after the fix. Normal T3 shutdown first closes the
+controlled Rust process; the launcher's own child process groups are used to clean
+up remaining test-application processes.
 
-## Не проверено и не заявляется
+## Not tested or claimed
 
-Полная сборка production bundle T3, repo-wide T3 tests/typecheck, desktop/mobile,
-remote/relay, live-аккаунт и весь MVP A01–A28 не проверялись. Реальных инструментов,
-Bend, sandbox/cgroup-политики, отмены долгой работы, durable inbox/replay и
-восстановления истории модели в этом срезе нет. Приёмка всего MVP остаётся отдельной.
-Изменения `paclang` не требовались, его проверки для этого среза не запускались.
+The full T3 production bundle build, repository-wide T3 tests/typecheck,
+desktop/mobile, remote/relay, a live account, and the full MVP A01–A28 were not tested.
+This slice has no real tools, Bend, sandbox/cgroup policy, cancellation of long-running
+work, durable inbox/replay, or model-history recovery. Acceptance of the full MVP
+remains separate. No `paclang` changes were required, and its checks were not run
+for this slice.

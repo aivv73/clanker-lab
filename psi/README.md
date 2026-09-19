@@ -1,17 +1,17 @@
 # Psi
 
-Самостоятельный Rust runtime агента, отдельный от `paclang`. Первый реализованный
-срез ([#44](https://github.com/aivv73/clanker-lab/issues/44)) позволяет отправить
-обычное сообщение в настоящем T3 Web и увидеть ответ `Psi fixture: <сообщение>`.
-Модель детерминированная; аккаунт и инструменты не нужны.
+A standalone Rust agent runtime, separate from `paclang`. The first implemented
+slice ([#44](https://github.com/aivv73/clanker-lab/issues/44)) lets you send an ordinary
+message in the real T3 Web application and see `Psi fixture: <message>` in response.
+The model is deterministic; no account or tools are required.
 
-Это **не весь MVP**: инструменты, Bend, вход в Codex, долговечная история Psi,
-восстановление, отмена долгой работы и sandbox ещё не реализованы. Полный контракт:
-[спецификация](docs/mvp-spec.md), [словарь](CONTEXT.md).
+This is **not the full MVP**: tools, Bend, Codex sign-in, durable Psi history,
+recovery, cancellation of long-running work, and sandboxing are not implemented yet.
+The full contract is in the [specification](docs/mvp-spec.md) and [glossary](CONTEXT.md).
 
-## Сборка и проверки
+## Build and checks
 
-Из `psi/` (общего Cargo workspace нет):
+From `psi/` (there is no shared Cargo workspace):
 
 ```sh
 cargo build --locked
@@ -20,19 +20,21 @@ cargo check --locked
 cargo test --locked
 ```
 
-[Протокол и роли идентификаторов](t3/PROTOCOL.md).
+[Protocol and identity roles](t3/PROTOCOL.md).
 
-Исполняемый файл — `target/debug/psi`. Он читает JSONL из stdin, пишет только
-протокол в stdout и диагностику в stderr. EOF закрывает runtime и плагины.
+The executable is `target/debug/psi`. It reads JSONL from stdin, writes only
+protocol traffic to stdout, and sends diagnostics to stderr. EOF closes the runtime
+and its plugins.
 
-## Запуск с настоящим T3
+## Run with the real T3 application
 
-Поддерживаемая здесь база T3:
-`dfbb11bdd7c3f1a5575cb55d3e3abb12be025727`. Node **24.13.1**, pnpm **11.10.0**
-(версия менеджера из T3). Нужны Python 3, Git, Rust и зависимости сборки T3.
-Используйте отдельную рабочую копию T3; overlay не предназначен для live-установки.
+The supported T3 base revision is
+`dfbb11bdd7c3f1a5575cb55d3e3abb12be025727`. Use Node **24.13.1** and pnpm **11.10.0**
+(the package-manager version specified by T3). Python 3, Git, Rust, and T3's build
+dependencies are required. Use a separate T3 checkout; the overlay is not intended
+for a live installation.
 
-Из `psi/`:
+From `psi/`:
 
 ```sh
 git clone https://github.com/pingdotgg/t3code t3/.checkout
@@ -41,21 +43,23 @@ git -C t3/.checkout checkout --detach dfbb11bdd7c3f1a5575cb55d3e3abb12be025727
 python3 t3/run.py t3/.checkout
 ```
 
-Launcher проверяет pin, накладывает `t3/t3.patch`, копирует драйвер и bridge,
-собирает Rust и создаёт новый временный T3 home с Git workspace. У него включён
-только провайдер Psi. Сервер слушает `127.0.0.1:8844`, web — `127.0.0.1:8845`.
-Откройте напечатанную pairing-ссылку, заменив порт на **8845**. Пройдите onboarding
-без импорта проектов, создайте разговор в тестовом workspace и отправьте сообщение
-с моделью **Psi fixture**. Ctrl-C останавливает запущенные процессы. Существующие
-данные T3 не используются; временная директория остаётся для проверки.
+The launcher verifies the pin, applies `t3/t3.patch`, copies the driver and bridge,
+builds Rust, and creates a new temporary T3 home with a Git workspace. Only the Psi
+provider is enabled. The server listens on `127.0.0.1:8844`; the web application uses
+`127.0.0.1:8845`. Open the printed pairing link, changing the port to **8845**.
+Complete onboarding without importing projects, create a conversation in the test
+workspace, and send a message with **Psi fixture** selected. Ctrl-C stops the
+launched processes. Existing T3 data is not used; the temporary directory remains
+available for inspection.
 
-Другая версия T3 отклоняется. Для обновления pin нужны пересмотр patch и новый
-сквозной прогон. Установка всех upstream-зависимостей может быть большой;
-она не создаёт зависимости между Psi и другими экспериментами репозитория.
+Other T3 versions are rejected. Updating the pin requires reviewing the patch and
+running the end-to-end scenario again. Installing all upstream dependencies may be
+substantial; it creates no dependencies between Psi and other experiments in this
+repository.
 
-## Автоматическая интеграционная проверка
+## Automated integration check
 
-Подготовьте T3 предыдущими командами. Затем из `psi/`:
+Prepare T3 using the commands above. Then, from `psi/`:
 
 ```sh
 python3 t3/prepare.py t3/.checkout
@@ -66,34 +70,36 @@ PSI_T3_CHECKOUT="$PWD/t3/.checkout" PSI_CHROMIUM=/absolute/path/to/chrome \
   node --test t3/e2e.test.mjs
 ```
 
-E2E использует установленный Chromium/Chrome через Playwright Core 1.60.0, новый
-профиль браузера, реальный web/server T3 и Rust. По умолчанию нужны свободные порты
-8854–8855; `PSI_TEST_PORT` меняет первый. Тест отправляет сообщение штатным composer,
-проверяет видимый ответ, WebSocket-команду, её сохранённый ID и соответствующий ID
-хода в проекции T3. Затем проверяет единственный дочерний Psi-процесс, отключение
-вкладки и завершение/reap после остановки сервера. Он не подменяет ответ или
-проекции. `report.json`, screenshot и лог без pairing-токена остаются в напечатанной
-временной директории. Отчёт содержит версии, pin и SHA-256 файлов реализации.
+The E2E test uses an installed Chromium/Chrome through Playwright Core 1.60.0, a
+fresh browser profile, the real T3 web application/server, and Rust. Ports 8854–8855
+must be free by default; `PSI_TEST_PORT` changes the first port. The test sends a
+message through the normal composer and checks the visible response, WebSocket
+command, its persisted ID, and the corresponding turn ID in the T3 projection.
+It then checks the single Psi child process, tab disconnection, and process exit
+and reaping after server shutdown. It does not substitute responses or projections.
+The printed temporary directory retains `report.json`, a screenshot, and a log with
+the pairing token removed. The report includes versions, the pin, and SHA-256 hashes
+of implementation files.
 
-[Зафиксированные результаты проверки](docs/issue-44-validation.md).
+[Recorded validation results](docs/issue-44-validation.md).
 
-## Границы реализации
+## Implementation boundaries
 
-- Ядро управляет контрактами сервисов и жизненным циклом плагинов: проверяет граф
-  зависимостей до запуска, запускает поставщиков первыми и закрывает в обратном
-  порядке, включая частично запущенный плагин. Оркестрация находится в
-  `SingleResponsePlugin`, модель — в `FixtureModelPlugin`; оба предоставляют
-  заменяемые trait-контракты. В этом срезе нет фоновых задач плагинов и инструментов.
-- Один процесс на ProviderInstance обслуживает все его сессии. Драйвер не допускает
-  перекрывающиеся ходы (`busy`). Закрытие одной сессии не закрывает общий процесс.
-- Handshake проверяется с обеих сторон до работы. Кадр ограничен 1 МиБ; зависший
-  ответ bridge прекращает через 10 секунд, закрытие процесса — через 2 секунды
-  с принудительным завершением при необходимости. Эти пределы относятся к fixture,
-  не являются обещанием отмены будущих инструментов.
-- Повторы ID дедуплицируются **только в памяти текущего процесса**. Нет durable
-  acknowledgement/inbox/replay. После перезапуска история разговора T3 остаётся
-  в T3, но не является восстановленной историей модели. Не используйте этот срез
-  для действий с побочными эффектами.
-- Модель, вложения, rollback и вспомогательная генерация не расширяются молча:
-  поддерживается только `fixture`, вложения и неподдержанные операции отклоняются.
-  Полная проверка отключения rollback и checkpoints относится к последующим срезам.
+- The core manages service contracts and plugin lifecycles: it validates the
+  dependency graph before startup, starts providers first, and closes plugins in
+  reverse order, including a partially started plugin. Orchestration belongs to
+  `SingleResponsePlugin`; the model belongs to `FixtureModelPlugin`. Both expose
+  replaceable trait contracts. This slice has no background plugin tasks or tools.
+- One process per ProviderInstance serves all of its sessions. The driver rejects
+  overlapping turns with `busy`. Closing one session does not close the shared process.
+- Both sides validate the handshake before accepting work. Frames are limited to
+  1 MiB; the bridge times out a stalled response after 10 seconds and allows 2 seconds
+  for process shutdown before forcing termination if needed. These limits apply to
+  the fixture and do not establish cancellation guarantees for future tools.
+- Repeated IDs are deduplicated **only in the current process's memory**. There is no
+  durable acknowledgement, inbox, or replay. After a restart, T3 conversation history
+  remains in T3, but it is not recovered model history. Do not use this slice for
+  actions with side effects.
+- Model support, attachments, rollback, and auxiliary generation are not silently
+  broadened: only `fixture` is supported; attachments and unsupported operations are
+  rejected. Full verification of disabled rollback and checkpoints belongs to later slices.
