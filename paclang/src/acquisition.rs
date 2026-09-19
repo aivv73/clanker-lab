@@ -2,6 +2,7 @@
 //! owns deadlines, cancellation, publication, and temporary-directory lifetime.
 mod archive;
 mod git;
+mod git_redirects;
 mod http;
 pub(crate) fn initialize_analysis_tree(tree: &Path) -> Result<(), String> {
     git::initialize(tree).map_err(|error| format!("cannot initialize analysis tree: {error:?}"))

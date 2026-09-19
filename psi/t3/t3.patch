@@ -1,0 +1,43 @@
+diff --git a/apps/server/src/orchestration/Layers/ProviderCommandReactor.ts b/apps/server/src/orchestration/Layers/ProviderCommandReactor.ts
+index 80cf2a1f..f0629d1b 100644
+--- a/apps/server/src/orchestration/Layers/ProviderCommandReactor.ts
++++ b/apps/server/src/orchestration/Layers/ProviderCommandReactor.ts
+@@ -1492,7 +1492,7 @@ const make = Effect.gen(function* () {
+     }
+ 
+     const send = providerService
+-      .sendTurn(sendTurnRequest.value)
++      .sendTurn({ ...sendTurnRequest.value, requestId: event.commandId ?? event.eventId })
+       .pipe(Effect.asVoid, Effect.catchCause(recoverTurnStartFailure));
+     // The forked send settles `sent` from here on, so drop the entry the post-processing hook uses.
+     if (resumed && event.commandId !== null) resumedTurnStarts.delete(event.commandId);
+diff --git a/apps/server/src/provider/builtInDrivers.ts b/apps/server/src/provider/builtInDrivers.ts
+index 60e3402e..020ef8ac 100644
+--- a/apps/server/src/provider/builtInDrivers.ts
++++ b/apps/server/src/provider/builtInDrivers.ts
+@@ -1,3 +1,4 @@
++import { PsiDriver } from "../psi/PsiDriver.ts";
+ /**
+  * BUILT_IN_DRIVERS — the static set of `ProviderDriver`s this build ships
+  * with.
+@@ -47,6 +48,7 @@ export type BuiltInDriversEnv =
+  * iteration order has no functional effect on instance lookup.
+  */
+ export const BUILT_IN_DRIVERS: ReadonlyArray<AnyProviderDriver<BuiltInDriversEnv>> = [
++  PsiDriver,
+   CodexDriver,
+   ClaudeDriver,
+   CursorDriver,
+diff --git a/packages/contracts/src/provider.ts b/packages/contracts/src/provider.ts
+index df91839e..8316f5bb 100644
+--- a/packages/contracts/src/provider.ts
++++ b/packages/contracts/src/provider.ts
+@@ -67,6 +67,8 @@ export const ProviderSessionStartInput = Schema.Struct({
+ export type ProviderSessionStartInput = typeof ProviderSessionStartInput.Type;
+ 
+ export const ProviderSendTurnInput = Schema.Struct({
++  // Identity of the persisted originating command, stable across delivery attempts.
++  requestId: Schema.optional(TrimmedNonEmptyString),
+   threadId: ThreadId,
+   /** Internal recovery signal. Allows an empty turn only for adapters that
+       explicitly support promptless continuation. */

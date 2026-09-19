@@ -404,7 +404,7 @@ fn git_worker_fetches_only_pinned_revisions_and_materializes_a_clean_repo() {
     let mut pins = Vec::new();
     for name in ["grandchild.git", "child.git"] {
         let child = git2::Repository::init_bare(upstream.path().join(name)).unwrap();
-        child.config().unwrap().set_bool("uploadpack.allowReachableSHA1InWant", true).unwrap();
+        child.config().unwrap().set_bool("uploadpack.allowReachableSHA1InWant", name == "grandchild.git").unwrap();
         let mut files = child.treebuilder(None).unwrap();
         files.insert("pinned.rs", child.blob(b"pinned child source\n").unwrap(), 0o100644).unwrap();
         if let Some(pin) = child_pin {
@@ -422,7 +422,7 @@ fn git_worker_fetches_only_pinned_revisions_and_materializes_a_clean_repo() {
     let repo = git2::Repository::init_bare(upstream.path().join("upstream.git")).unwrap();
     repo.config()
         .unwrap()
-        .set_bool("uploadpack.allowReachableSHA1InWant", true)
+        .set_bool("uploadpack.allowReachableSHA1InWant", false)
         .unwrap();
     let blob = repo.blob(b"packaged source\n").unwrap();
     let mut builder = repo.treebuilder(None).unwrap();
@@ -461,10 +461,37 @@ fn git_worker_fetches_only_pinned_revisions_and_materializes_a_clean_repo() {
     repo.set_head("refs/heads/main").unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
-    let url = format!("http://{}/upstream.git", listener.local_addr().unwrap());
+    let canonical = format!("http://{}", listener.local_addr().unwrap());
+    let redirect_listener = TcpListener::bind("127.0.0.2:0").unwrap();
+    redirect_listener.set_nonblocking(true).unwrap();
+    let url = format!("http://{}/old/upstream.git", redirect_listener.local_addr().unwrap());
     let stop = Arc::new(AtomicBool::new(false));
     let done = stop.clone();
     let root = upstream.path().to_path_buf();
+    let redirect_done = stop.clone();
+    let redirect_server = std::thread::spawn(move || {
+        while !redirect_done.load(Ordering::SeqCst) {
+            let (mut stream, _) = match redirect_listener.accept() {
+                Ok(stream) => stream,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(5));
+                    continue;
+                }
+                Err(error) => panic!("{error}"),
+            };
+            stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            let mut headers = Vec::new();
+            while !headers.ends_with(b"\r\n\r\n") {
+                let mut byte = [0];
+                stream.read_exact(&mut byte).unwrap();
+                headers.push(byte[0]);
+                assert!(headers.len() < 8192);
+            }
+            let request = String::from_utf8(headers).unwrap();
+            let path = request.lines().next().unwrap().split_whitespace().nth(1).unwrap().replace("/old/upstream.git", "/upstream.git");
+            let _ = write!(stream, "HTTP/1.1 302 Found\r\nLocation: {canonical}{path}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        }
+    });
     let server = std::thread::spawn(move || {
         while !done.load(Ordering::SeqCst) {
             let (mut stream, _) = match listener.accept() {
@@ -489,6 +516,22 @@ fn git_worker_fetches_only_pinned_revisions_and_materializes_a_clean_repo() {
             let method = first.next().unwrap();
             let location = first.next().unwrap();
             let (path, query) = location.split_once('?').unwrap_or((location, ""));
+            if path.starts_with("/old/upstream.git/") || path.starts_with("/loop.git/") || path.starts_with("/hop") {
+                let next = if path.starts_with("/old/") {
+                    format!("/upstream.git/info/refs?{query}")
+                } else if path.starts_with("/loop.git/") {
+                    location.to_owned()
+                } else {
+                    let hop: usize = path.strip_prefix("/hop").unwrap().split('.').next().unwrap().parse().unwrap();
+                    format!("/hop{}.git/info/refs?{query}", hop + 1)
+                };
+                let _ = write!(stream, "HTTP/1.1 302 Found\r\nLocation: {next}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                continue;
+            }
+            if method == "HEAD" {
+                let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                continue;
+            }
             let length = headers
                 .lines()
                 .find_map(|line| {
@@ -549,16 +592,24 @@ fn git_worker_fetches_only_pinned_revisions_and_materializes_a_clean_repo() {
             1_073_741_824,
             4_294_967_296,
         ),
+        ("commit:1111111111111111111111111111111111111111".to_owned(), "failed", 1_073_741_824, 4_294_967_296),
         ("tag:v1.0".to_owned(), "resource_limited", 1, 4_294_967_296),
         ("tag:v1.0".to_owned(), "resource_limited", 1_073_741_824, 1),
         ("aggregate-download".to_owned(), "resource_limited", 0, 4_294_967_296),
         ("aggregate-files".to_owned(), "resource_limited", 1_073_741_824, 4_294_967_296),
+        ("redirect-loop".to_owned(), "failed", 1_073_741_824, 4_294_967_296),
+        ("redirect-limit".to_owned(), "failed", 1_073_741_824, 4_294_967_296),
     ] {
         let directory = tempfile::tempdir().unwrap();
-        let selected_revision = if revision.starts_with("aggregate-") { "tag:v1.0" } else { &revision };
+        let selected_revision = if revision.starts_with("aggregate-") || revision.starts_with("redirect-") { "tag:v1.0" } else { &revision };
+        let selected_url = match revision.as_str() {
+            "redirect-loop" => url.replace("/old/upstream.git", "/loop.git"),
+            "redirect-limit" => url.replace("/old/upstream.git", "/hop0.git"),
+            _ => url.clone(),
+        };
         let download_limit = if download_limit == 0 { full_download * 3 / 4 } else { download_limit };
         let file_limit = if revision == "aggregate-files" { 4 } else { 250000 };
-        let job = serde_json::json!({"target": {"location": url, "revision": selected_revision, "subdirectory": null, "checksum": null}, "limits": {"source_jobs": 4, "max_download_bytes": download_limit, "max_extracted_bytes": expanded_limit, "max_source_files": file_limit, "source_timeout_seconds": 15}});
+        let job = serde_json::json!({"target": {"location": selected_url, "revision": selected_revision, "subdirectory": null, "checksum": null}, "limits": {"source_jobs": 4, "max_download_bytes": download_limit, "max_extracted_bytes": expanded_limit, "max_source_files": file_limit, "source_timeout_seconds": 15}});
         std::fs::write(
             directory.path().join("job.json"),
             serde_json::to_vec(&job).unwrap(),
@@ -580,6 +631,12 @@ fn git_worker_fetches_only_pinned_revisions_and_materializes_a_clean_repo() {
             serde_json::from_slice(&std::fs::read(directory.path().join("result.json")).unwrap())
                 .unwrap();
         assert_eq!(result["state"], expected, "{revision}: {result}");
+        if revision == "commit:1111111111111111111111111111111111111111" {
+            assert_eq!(result["reason"], "pinned Git commit absent from bounded advertised history (depth 256)");
+            assert!(result["verified_revision"].is_null());
+        }
+        if revision == "redirect-loop" { assert_eq!(result["reason"], "Git redirect cycle detected"); }
+        if revision == "redirect-limit" { assert_eq!(result["reason"], "Git redirect limit exceeded"); }
         if revision == "aggregate-download" {
             assert_eq!(result["verified_revision"], pinned.to_string(), "budget should allow the parent: {result}");
             assert_eq!(result["reason"], "source download byte limit exceeded");
@@ -607,6 +664,7 @@ fn git_worker_fetches_only_pinned_revisions_and_materializes_a_clean_repo() {
     }
     stop.store(true, Ordering::SeqCst);
     server.join().unwrap();
+    redirect_server.join().unwrap();
 }
 
 #[test]

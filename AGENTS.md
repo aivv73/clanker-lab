@@ -1,38 +1,53 @@
-# Работа с clanker-lab
+# Working on clanker-lab
 
-Эти инструкции действуют для всего монорепозитория. Более близкий к изменяемому файлу `AGENTS.md`, если он появится, уточняет правила соответствующего пакета.
+## Agent skills
 
-## Устройство проекта
+### Issue tracker
 
-- `clanker-lab` — монорепозиторий личных экспериментов. Сейчас единственный пакет — `paclang/`, CLI на Rust для анализа языков программирования исходников установленных пакетов ALPM-систем.
-- Каждый эксперимент хранит код, зависимости, тесты и документацию в своей директории. Не вводите общую инфраструктуру или зависимости между экспериментами без необходимости для задачи.
-- Общего Cargo workspace пока нет. Команды Cargo выполняйте из `paclang/`.
-- При добавлении пакета обновляйте корневой `README.md`; подробности его использования храните в README самого пакета.
+GitHub Issues: aivv73/clanker-lab. See `docs/agents/issue-tracker.md`.
 
-## Поиск и чтение
+### Triage labels
 
-- Используйте локальные файлы как источник сведений об этом проекте. Для несвязанных внешних вопросов не ищите доказательства в рабочей директории.
-- Для известных имён, путей, строк и регулярных выражений используйте `zvec_grep_rg`, если инструмент доступен, иначе `rg`.
-- Для поиска по смыслу, связей и сопоставления нескольких файлов используйте `zvec_grep_search`, если он доступен; затем уточняйте результаты точечным поиском. Если инструмент недоступен, используйте `rg` и целевое чтение файлов.
-- В вызовах zvec-grep всегда передавайте абсолютный путь рабочей директории в `root`. Проверяйте `freshness` и `background_refresh` в результатах; достаточные результаты `served_from_current_index` можно использовать без ожидания обновления.
-- Если нужно только установить наличие концептуально связанного материала без точного поискового якоря, сделайте один сфокусированный семантический запрос. При нерелевантных результатах сообщите, что индекс не подтвердил ответ.
-- Достаточный фрагмент поисковой выдачи считайте прочитанным. Открывайте файл дополнительно только для недостающих деталей; избегайте широкого чтения до поиска.
-- Не создавайте, не перестраивайте и не удаляйте постоянный поисковый индекс без явного запроса или разрешения пользователя.
+Five standard triage labels are used. See `docs/agents/triage-labels.md`.
 
-## Изменения в paclang
+### Domain docs
 
-Перед изменениями прочитайте `paclang/README.md`, словарь `paclang/CONTEXT.md` и относящиеся к задаче решения в `paclang/docs/adr/`. Дополнительные предметные инструкции находятся в `paclang/docs/agents/domain.md`. Пути в документации пакета отсчитываются от `paclang/`, если явно не указано другое.
+Single-context: the glossary and ADRs are in `paclang/`.
+See `docs/agents/domain.md`.
 
-- Используйте термины из `CONTEXT.md`. Языки исходников пакетов не равнозначны установленным компиляторам или интерпретаторам.
-- Сохраняйте различия между точным анализом упакованной ревизии, приблизительными данными upstream и устаревшими профилями. Отсутствие данных не превращайте в нулевой результат.
-- Сохраняйте происхождение данных, явные ограничения и показатели покрытия в отчётах. Субъективные оценки не должны подменять измеренные факты.
-- Сохраняйте работу с установленными пакетами только на чтение. Не исполняйте PKGBUILD, загруженные исходники или hooks ради анализа.
-- Учитывайте целостность снимков, отмену операций, ограничения ресурсов и проверку загружаемых исходников. При изменении поведения сверяйтесь с соответствующими ADR; противоречия обозначайте явно.
-- Обновляйте документацию при изменении CLI или поведения. Изменения форматов отчётов проверяйте по тестам и фикстурам в `paclang/tests/`.
+These instructions apply to the entire monorepo. If an `AGENTS.md` closer to the file being edited is added, it refines the rules for that package.
 
-## Проверка и отчёт о работе
+## Project structure
 
-Для изменений Rust-кода выполняйте из `paclang/`:
+- `clanker-lab` is a monorepo of personal experiments. Its only package currently is `paclang/`, a Rust CLI for analyzing the programming languages used in the source code of installed packages on ALPM-based systems.
+- Each experiment keeps its code, dependencies, tests, and documentation in its own directory. Do not introduce shared infrastructure or dependencies between experiments unless the task requires them.
+- There is no shared Cargo workspace yet. Run Cargo commands from `paclang/`.
+- When adding a package, update the root `README.md`; keep detailed usage instructions in the package's own README.
+
+## Searching and reading
+
+- Use local files as the source of information about this project. Do not search the workspace for evidence about unrelated external questions.
+- For known names, paths, strings, and regular expressions, use `zvec_grep_rg` when available; otherwise, use `rg`.
+- For semantic discovery, relationships, and comparisons across files, use `zvec_grep_search` when available, then narrow the results with focused searches. If the tool is unavailable, use `rg` and targeted file reads.
+- Always pass the absolute workspace path as `root` in zvec-grep calls. Check `freshness` and `background_refresh` in the results; sufficient results marked `served_from_current_index` can be used without waiting for a refresh.
+- If the task is only to determine whether conceptually related material exists and no exact search anchor is available, make one focused semantic query. If the results are irrelevant, report that the index did not establish the answer.
+- Treat a sufficient search snippet as already-read evidence. Open the file only for missing details; avoid broad reads before searching.
+- Do not create, rebuild, or delete a persistent search index without an explicit user request or authorization.
+
+## Changes to paclang
+
+Before making changes, read `paclang/README.md`, the glossary in `paclang/CONTEXT.md`, and the relevant decisions in `paclang/docs/adr/`. Additional domain instructions are in `paclang/docs/agents/domain.md`. Paths in package documentation are relative to `paclang/` unless explicitly stated otherwise.
+
+- Use the terms from `CONTEXT.md`. The languages used in package source code are not equivalent to installed compilers or interpreters.
+- Preserve the distinctions between exact analysis of the packaged revision, approximate upstream data, and stale profiles. Do not turn missing data into a zero result.
+- Preserve data provenance, explicit limitations, and coverage metrics in reports. Subjective assessments must not replace measured facts.
+- Keep access to installed packages read-only. Do not execute PKGBUILD files, downloaded source code, or hooks for analysis.
+- Account for snapshot integrity, operation cancellation, resource limits, and validation of downloaded source code. When changing behavior, consult the relevant ADRs and explicitly identify any conflicts.
+- Update documentation when changing the CLI or behavior. Validate report format changes against the tests and fixtures in `paclang/tests/`.
+
+## Verification and reporting
+
+For Rust code changes, run the following from `paclang/`:
 
 ```sh
 cargo fmt --check
@@ -40,6 +55,6 @@ cargo check
 cargo test
 ```
 
-Добавляйте или меняйте тесты, когда меняется поведение. Предпочитайте воспроизводимые локальные фикстуры внешней сети и состоянию установленной системы. Для правок только документации достаточно проверить точность команд, путей и ссылок.
+Add or update tests when behavior changes. Prefer reproducible local fixtures over external networks and the state of the installed system. For documentation-only changes, checking the accuracy of commands, paths, and links is sufficient.
 
-Не редактируйте посторонние файлы и не отменяйте изменения пользователя. В итоговом сообщении кратко укажите результат, выполненные проверки и оставшиеся ограничения. Если проверку не удалось выполнить, сообщите об этом прямо.
+Do not edit unrelated files or undo the user's changes. In the final response, briefly describe the result, the checks performed, and any remaining limitations. If a check could not be run, say so explicitly.
