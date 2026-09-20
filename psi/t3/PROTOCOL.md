@@ -2,7 +2,7 @@
 
 One UTF-8 JSON object per line. Each command and reply carries `version: 1`.
 Stdout is exclusively protocol traffic; stderr is diagnostics. The controller
-owns stdin. EOF closes admission, joins active cooperative work, closes plugins and exits; there are no external tool children.
+owns stdin. EOF closes admission, joins active cooperative work, reaps policy children, closes plugins and exits; there are no external tool children.
 Maximum frame size is 1 MiB. Unknown operations/fields and invalid JSON are errors.
 
 First command:
@@ -81,8 +81,10 @@ Startup failure never reaches hello readiness. Stderr records plugin start/close
 registration/task counts, turn admission, and cleanup, but not model input.
 
 `Runtime → Session → Turn → Invocation` ownership is represented separately from
-plugin ownership. No tool invocation is fabricated for a model call. The loop and selected model run; there are still no real tools, Bend checks, external child
-cleanup, or resource quotas. Forced safe termination of
+plugin ownership. No tool invocation is fabricated for a model call. The normal
+loops run the selected model; the policy fixture runs its harmless counter action.
+Arbitrary tool execution, tool process-tree cleanup, and tool resource quotas
+remain subsequent slices. Forced safe termination of
 arbitrary in-process plugin code is not promised.
 
 ## Streaming and authentication
@@ -161,3 +163,29 @@ be overwritten with a fabricated result. Accepted unfinished turns receive
 `interrupted_outcome_unknown`; their session rejects new turns with
 `session_outcome_unknown`. Terminal-processing pending/done records are available
 for later checkpoint integration. No external effect is made atomic by SQLite.
+
+
+## Checked policy fixture (#46)
+
+`--agent-loop policy-fixture` selects one harmless `fixture_counter` action per
+ordinary turn. It uses the same turn/cancel/close protocol, driver, durable inbox,
+and UI. No special action test endpoint is added. The policy service is a plugin;
+Bend supplies admission decisions and Rust correlates and consumes permits.
+
+Its terminal frame adds `policy` with `epoch`, `turn`, `state`, `closed`,
+`handoffs`, `runtime_counter`, and `transitions`. Each transition records its B1
+request identity, immutable action/arguments, turn and epoch, event, and result.
+This B1 request identity belongs to a single policy process call; the outer JSONL
+request identity still refers to the persisted originating T3 command. The
+harmless counter is process-local. Replaying an old terminal returns its stored
+counter without incrementing the new runtime's counter.
+
+Cancellation sets `cancellation_scope: local_policy`; T3 shows that admission is
+closed. Text-only model cancellation retains its existing remote-processing
+qualification. Failed policy decisions terminate with explicit `policy_*` errors
+and zero new handoffs. Missing bundles, failed processes, malformed/mismatched
+responses, and timeouts never grant fallback authorization. Cleanup failure adds
+`cleanup_error`, fails the turn, and rejects new turns with `runtime_unhealthy`.
+
+The [policy validation document](../docs/issue-46-validation.md) describes the
+250 ms B1 deadline, proof boundary, build provenance, startup settings, and tests.

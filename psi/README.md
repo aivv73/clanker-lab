@@ -14,7 +14,11 @@ The [#48](https://github.com/aivv73/clanker-lab/issues/48) slice adds SQLite mod
 history, durable command acceptance, sequenced replay, and a T3 inbox with
 idempotent conversation projection.
 
-This is **not the full MVP**: tools, Bend, checkpoint/unknown-outcome recovery,
+The [#46](https://github.com/aivv73/clanker-lab/issues/46) slice adds a checked Bend
+policy plugin and a deterministic, harmless action through the real T3 path.
+See [the proof, runtime contract, and validation](docs/issue-46-validation.md).
+
+This is **not the full MVP**: tools, checkpoint/unknown-outcome recovery,
 process-tree cancellation, and sandboxing are not implemented yet.
 The full contract is in the [specification](docs/mvp-spec.md) and [glossary](CONTEXT.md).
 
@@ -23,11 +27,17 @@ The full contract is in the [specification](docs/mvp-spec.md) and [glossary](CON
 From `psi/` (there is no shared Cargo workspace):
 
 ```sh
+python3 policy/build.py
 cargo build --locked
 cargo fmt --check
 cargo check --locked
 cargo test --locked
 ```
+
+The policy build requires Git, Python 3, Bun and Clang. It fetches the pinned
+Bend source into an ignored build directory, checks the proof and its negative
+mutation, and builds the CPU executable required by policy tests. Normal text-only
+turns can still run without this bundle; action admission then fails closed.
 
 [Protocol and identity roles](t3/PROTOCOL.md).
 
@@ -167,8 +177,8 @@ adding a plugin-specific test protocol.
 
 Safe forced termination of arbitrary blocking or hung in-process plugin code is
 **not guaranteed**. Cooperative future cleanup is verified; external tool children,
-Bend admission, process-tree cancellation, and unhealthy-runtime recovery
-remain subsequent slices. Killing the process is not proof of external
+process-tree cancellation, and unhealthy-runtime recovery for arbitrary tools
+remain subsequent slices. Bend policy-child cleanup is covered by #46. Killing the process is not proof of external
 resource cleanup. No conflicts with the existing MVP specification were identified.
 
 [Issue #45 validation](docs/issue-45-validation.md).

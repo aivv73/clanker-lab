@@ -13,8 +13,11 @@ parser = argparse.ArgumentParser()
 parser.add_argument("checkout")
 parser.add_argument("--model", default="fixture")
 parser.add_argument("--oauth-fixture")
-parser.add_argument("--agent-loop", choices=["single-response", "buffered-response"], default="single-response")
+parser.add_argument("--agent-loop", choices=["single-response", "buffered-response", "policy-fixture"], default="single-response")
 parser.add_argument("--startup-fault", choices=["missing", "cycle", "duplicate", "partial"])
+parser.add_argument("--policy-bundle")
+parser.add_argument("--policy-fault", choices=["missing", "hang", "invalid", "mismatch", "failed"])
+parser.add_argument("--hold-policy", action="store_true")
 parser.add_argument("--hold-fixture", action="store_true")
 parser.add_argument("--port", type=int, default=8844)
 parser.add_argument("--web-port", type=int, default=8845)
@@ -33,6 +36,12 @@ instances = {name: {"driver": name, "enabled": False, "config": {}} for name in 
 instances["psi"] = {"driver": "psi", "displayName": "Psi", "enabled": True, "environment": [], "config": {"binary": str(HERE.parent / "target/debug/psi")}}
 instances["psi"]["config"]["agentLoop"] = args.agent_loop
 instances["psi"]["config"]["model"] = args.model
+if args.policy_bundle:
+    instances["psi"]["config"]["policyBundle"] = str(pathlib.Path(args.policy_bundle).resolve())
+if args.policy_fault:
+    instances["psi"]["config"]["policyFault"] = args.policy_fault
+if args.hold_policy:
+    instances["psi"]["config"]["policyGate"] = str(root / "release-policy")
 if args.oauth_fixture:
     instances["psi"]["config"]["oauthFixture"] = args.oauth_fixture
 if args.startup_fault:

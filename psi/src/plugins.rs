@@ -73,6 +73,14 @@ impl Plugin for FixtureModelPlugin {
 #[async_trait]
 pub trait AgentLoop: Send + Sync {
     async fn run(&self, input: ModelRequest, events: Events) -> Result<ModelResponse, String>;
+    async fn run_with_policy(
+        &self,
+        input: ModelRequest,
+        events: Events,
+        _policy: Arc<crate::policy::Gate>,
+    ) -> Result<ModelResponse, String> {
+        self.run(input, events).await
+    }
 }
 pub struct LoopService(pub Arc<dyn AgentLoop>);
 struct SingleResponseLoop {
@@ -197,6 +205,55 @@ impl Plugin for StartupProbe {
     }
     async fn close(&mut self) -> Result<(), String> {
         eprintln!("Psi probe closed");
+        Ok(())
+    }
+}
+
+/// Deterministic vertical slice: one harmless action, admitted by the real policy.
+struct PolicyFixtureLoop;
+#[async_trait]
+impl AgentLoop for PolicyFixtureLoop {
+    async fn run(&self, _: ModelRequest, _: Events) -> Result<ModelResponse, String> {
+        Err("policy_context_required".into())
+    }
+    async fn run_with_policy(
+        &self,
+        _: ModelRequest,
+        events: Events,
+        policy: Arc<crate::policy::Gate>,
+    ) -> Result<ModelResponse, String> {
+        let (count, prefix) = policy.fixture(&events).await?;
+        let text = format!("Psi policy fixture: counter={count}; admitted by Bend.");
+        let _ = events.send(ModelEvent::Text {
+            delta: text.clone(),
+        });
+        let text = format!("{prefix}{text}");
+        Ok(ModelResponse {
+            output: vec![
+                serde_json::json!({"type":"message","role":"assistant","content":[{"type":"output_text","text":text}]}),
+            ],
+            text,
+            response_id: None,
+        })
+    }
+}
+pub struct PolicyFixturePlugin;
+#[async_trait]
+impl Plugin for PolicyFixturePlugin {
+    fn id(&self) -> &'static str {
+        "policy-fixture-loop"
+    }
+    fn provides(&self) -> &'static [&'static str] {
+        &["agent-loop"]
+    }
+    fn requires(&self) -> &'static [&'static str] {
+        &["policy"]
+    }
+    async fn start(&mut self, mut context: Context<'_>) -> Result<(), String> {
+        let _: Arc<crate::policy::PolicyService> = context.dependency("policy")?;
+        context.register("agent-loop", LoopService(Arc::new(PolicyFixtureLoop)))
+    }
+    async fn close(&mut self) -> Result<(), String> {
         Ok(())
     }
 }

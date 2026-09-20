@@ -20,12 +20,13 @@ function alive(pid) {
 }
 
 function recordVersions(report) {
+    report.psi_binary_sha256 = createHash("sha256").update(readFileSync(resolve(here,"../target/debug/psi"))).digest("hex");
     report.rustc = execFileSync("rustc", ["--version"], { encoding: "utf8" }).trim();
     report.cargo = execFileSync("cargo", ["--version"], { encoding: "utf8" }).trim();
     report.os = execFileSync("uname", ["-srmo"], { encoding: "utf8" }).trim();
     report.source_revision = execFileSync("git", ["rev-parse", "HEAD"], { cwd: here, encoding: "utf8" }).trim();
     report.implementation_sha256 = Object.fromEntries([
-      "../src/store.rs", "../tests/durability.rs", "../tests/fixtures/durability.py", "PsiInbox.ts", "PsiProjection.ts", "inbox.test.ts", "durability-worker.ts", "../Cargo.toml", "../Cargo.lock", "../src/admission.rs", "../src/work.rs", "../src/core.rs", "../src/plugins.rs", "../src/protocol.rs", "../src/main.rs", "../src/lib.rs", "../src/codex.rs", "../src/model.rs", "../tests/codex.rs", "../tests/auth_runtime.rs", "../tests/fixtures/runtime_auth.py", "../tests/fixtures/oauth_server.py", "../tests/lifecycle.rs", "../tests/protocol.rs",
+      "../src/policy.rs", "../tests/policy.rs", "../tests/fixtures/policy.py", "../policy/build.py", "../policy/Policy.bend", "../policy/LAWS.bend", "../policy/PROOF.bend", "../policy/Main.bend", "../src/store.rs", "../tests/durability.rs", "../tests/fixtures/durability.py", "PsiInbox.ts", "PsiProjection.ts", "inbox.test.ts", "durability-worker.ts", "../Cargo.toml", "../Cargo.lock", "../src/admission.rs", "../src/work.rs", "../src/core.rs", "../src/plugins.rs", "../src/protocol.rs", "../src/main.rs", "../src/lib.rs", "../src/codex.rs", "../src/model.rs", "../tests/codex.rs", "../tests/auth_runtime.rs", "../tests/fixtures/runtime_auth.py", "../tests/fixtures/oauth_server.py", "../tests/lifecycle.rs", "../tests/protocol.rs",
       "PsiDriver.ts", "PsiBridge.ts", "adapter.test.ts", "t3.patch", "prepare.py", "run.py", "e2e.test.mjs", "package-lock.json",
     ].map((name) => [name, createHash("sha256").update(readFileSync(resolve(here, name))).digest("hex")]));
     report.t3_lock_sha256 = createHash("sha256").update(readFileSync(resolve(checkout, "pnpm-lock.yaml"))).digest("hex");
@@ -34,7 +35,10 @@ function recordVersions(report) {
 test("ordinary T3 browser message crosses WebSocket and Rust; viewer detach and controller cleanup", { timeout: 120_000 }, async () => {
   const port = Number(process.env.PSI_TEST_PORT ?? 8854);
   const webPort = port + 1;
-  const agentLoop = process.env.PSI_TEST_LOOP ?? "single-response";
+  const policy = process.env.PSI_TEST_POLICY;
+  const policyCancel = policy === "cancel";
+  const policyFault = policy && !["normal", "cancel"].includes(policy) ? policy : undefined;
+  const agentLoop = policy ? "policy-fixture" : process.env.PSI_TEST_LOOP ?? "single-response";
   const fault = process.env.PSI_TEST_STARTUP_FAULT;
   const lifecycle = process.env.PSI_TEST_LIFECYCLE === "1";
   const options = ["--agent-loop", agentLoop];
@@ -46,7 +50,10 @@ test("ordinary T3 browser message crosses WebSocket and Rust; viewer detach and 
     const [chunk] = await once(fixture.stdout, "data");
     options.push("--model", "fixture-codex", "--oauth-fixture", chunk.toString().trim());
   }
-  const expected = oauth ? "Psi HTTP fixture: Привет 🌍" : "Psi fixture: Hello Psi issue 44";
+  if (policyCancel) options.push("--hold-policy");
+  if (policyFault) options.push("--policy-fault", policyFault);
+  const policyErrors = {missing:"policy_unavailable", hang:"policy_timeout", invalid:"policy_invalid_response", mismatch:"policy_identity_mismatch", failed:"policy_process_failed"};
+  const expected = policyCancel ? "Cancelled. Policy admission is closed." : policyFault ? `Psi failed: ${policyErrors[policyFault]}` : policy ? "Psi policy fixture: counter=1; admitted by Bend." : oauth ? "Psi HTTP fixture: Привет 🌍" : "Psi fixture: Hello Psi issue 44";
   if (fault) options.push("--startup-fault", fault);
   if (lifecycle) options.push("--hold-fixture");
   const launcher = spawn("python3", [resolve(here, "run.py"), checkout, "--port", String(port), "--web-port", String(webPort), ...options], { stdio: ["ignore", "pipe", "pipe"] });
@@ -151,8 +158,13 @@ test("ordinary T3 browser message crosses WebSocket and Rust; viewer detach and 
       await page.getByTestId("composer-editor").fill("Hello Psi issue 44");
       await page.getByTestId("composer-editor").press("Enter");
     }
-    await page.getByText(expected, { exact: !oauth }).waitFor();
-    assert.equal(await page.getByText(expected, { exact: !oauth }).count(), 1);
+    if (policyCancel) {
+      await page.getByText("Psi policy: Permit received; waiting for fixture release.").waitFor();
+      await page.getByRole("button", {name:"Stop generation", exact:true}).click();
+      assert(frames.some(frame => frame.payload?.type === "thread.turn.interrupt"));
+    }
+    await page.getByText(expected, { exact: !oauth && !policyCancel && !policyFault }).waitFor();
+    assert.equal(await page.getByText(expected, { exact: !oauth && !policyCancel && !policyFault }).count(), 1);
     if (cancelStream) {
       await page.getByRole("button", { name: "Stop generation", exact: true }).click();
       await page.getByText(/Cancelled locally\. Server processing and billing may continue\./).waitFor();
@@ -170,9 +182,32 @@ test("ordinary T3 browser message crosses WebSocket and Rust; viewer detach and 
       assert(messages.every((message) => message.turn_id === `psi-turn:${origin.command_id}`));
       const answer = messages.find((message) => message.text.includes(expected));
       assert(answer);
-      assert(cancelStream ? answer.text.includes("Cancelled locally. Server processing and billing may continue.") : answer.text.endsWith(expected));
+      assert(cancelStream ? answer.text.includes("Cancelled locally. Server processing and billing may continue.") : policyFault ? answer.text.includes(expected) : answer.text.endsWith(expected));
       assert(!JSON.stringify(messages).includes("synthetic-refresh"));
     } finally { db.close(); }
+    let policyEvidence;
+    if (policy) {
+      const state = resolve(root,"psi",createHash("sha256").update("psi").digest("hex"),"history.sqlite");
+      const runtime = new DatabaseSync(state,{readOnly:true});
+      try {
+        const rows = runtime.prepare("SELECT result FROM commands WHERE turn IS NOT NULL").all();
+        assert.equal(rows.length,1);
+        const terminal = JSON.parse(rows[0].result);
+        policyEvidence = terminal.policy;
+        assert.equal(policyEvidence.handoffs,policy === "normal" ? 1 : 0);
+        assert.equal(policyEvidence.closed,true);
+        assert.equal(terminal.status,policyCancel ? "cancelled" : policyFault ? "failed" : "completed");
+        if (!policyFault) assert.equal(policyEvidence.state,policyCancel ? "Cancelled" : "Finished");
+        if (policyCancel) {
+          writeFileSync(resolve(root,"release-policy"),"late release");
+          await new Promise(resolve => setTimeout(resolve,100));
+          assert.equal(runtime.prepare("SELECT COUNT(*) AS n FROM commands WHERE turn IS NOT NULL").get().n,1);
+        }
+      } finally {runtime.close();}
+      const policyPids = [...log.matchAll(/Psi policy child: (\d+)/g)].map(match=>Number(match[1]));
+      if (policy !== "missing") assert(policyPids.length > 0);
+      for (const pid of policyPids) { assert(!alive(pid)); assert(log.includes(`Psi policy reaped: ${pid}`)); }
+    }
     const children = readFileSync(`/proc/${serverPid}/task/${serverPid}/children`, "utf8").trim().split(/\s+/).filter(Boolean).map(Number);
     const runtimes = children.filter((pid) => {
       try { return readlinkSync(`/proc/${pid}/exe`) === resolve(here, "../target/debug/psi"); } catch { return false; }
@@ -188,7 +223,7 @@ test("ordinary T3 browser message crosses WebSocket and Rust; viewer detach and 
     assert(!alive(runtimePid), "Rust must be reaped after the controller server closes");
     assert(log.includes("Psi runtime stopped"), "EOF must run Rust lifecycle cleanup");
     assert.deepEqual(pageErrors, []);
-    const report = { passed: true, oauth_fixture: oauth, local_stream_cancellation: cancelStream, agent_loop: agentLoop, lifecycle, t3: "dfbb11bdd7c3f1a5575cb55d3e3abb12be025727", node: process.version, chromium: execFileSync(executablePath, ["--version"], { encoding: "utf8" }).trim(), normal_websocket: true, visible_response: true, stable_origin_command_id: true, one_runtime: true, viewer_detach_preserves_runtime: true, controller_close_reaps_runtime: true };
+    const report = { passed: true, policy_fixture: policy, policy_evidence: policyEvidence, policy_build: policy ? JSON.parse(readFileSync(resolve(here,"../policy/.build/manifest.json"),"utf8")) : undefined, oauth_fixture: oauth, local_stream_cancellation: cancelStream, agent_loop: agentLoop, lifecycle, t3: "dfbb11bdd7c3f1a5575cb55d3e3abb12be025727", node: process.version, chromium: execFileSync(executablePath, ["--version"], { encoding: "utf8" }).trim(), normal_websocket: true, visible_response: true, stable_origin_command_id: true, one_runtime: true, viewer_detach_preserves_runtime: true, controller_close_reaps_runtime: true };
     recordVersions(report);
     writeFileSync(resolve(root, "report.json"), JSON.stringify(report, null, 2) + "\n");
     console.log(`Evidence: ${root}/report.json`);

@@ -96,6 +96,9 @@ impl Command {
 }
 
 pub struct Controller {
+    policy: Option<Arc<crate::policy::PolicyService>>,
+    gate: Option<Arc<crate::policy::Gate>>,
+    unhealthy: bool,
     store: crate::store::Store,
     directory: std::path::PathBuf,
     runtime_id: String,
@@ -123,6 +126,9 @@ impl Controller {
         store.recover(&runtime_id).map_err(|e| e.to_string())?;
         let (done_tx, done_rx) = tokio::sync::mpsc::unbounded_channel();
         Ok(Self {
+            policy: None,
+            gate: None,
+            unhealthy: false,
             store,
             directory,
             runtime_id,
@@ -138,6 +144,10 @@ impl Controller {
             model: "fixture".into(),
             event_rx: None,
         })
+    }
+    pub fn with_policy(mut self, policy: Arc<crate::policy::PolicyService>) -> Self {
+        self.policy = Some(policy);
+        self
     }
     pub fn with_model(mut self, model: String) -> Self {
         self.model = model;
@@ -286,6 +296,9 @@ impl Controller {
                 {
                     return Ok(Some(self.error("turn_id_conflict")));
                 }
+                if self.unhealthy {
+                    return Ok(Some(self.error("runtime_unhealthy")));
+                }
                 if self.active.is_some() {
                     return Ok(Some(self.error("busy")));
                 }
@@ -313,9 +326,14 @@ impl Controller {
                     session: session_id.clone(),
                     turn: turn_id.clone(),
                 };
+                let gate = self.policy.as_ref().map(|policy| policy.turn(turn_id));
+                self.gate = gate.clone();
                 self.active = Some((command.clone(), lease));
                 if let Err(error) = self.spawner.spawn(owner, async move {
-                    let result = agent.0.run(input, events).await;
+                    let result = match gate {
+                        Some(gate) => agent.0.run_with_policy(input, events, gate).await,
+                        None => agent.0.run(input, events).await,
+                    };
                     let _ = tx.send((id, result));
                 }) {
                     return Ok(Some(self.finish(Err(error)).await?));
@@ -363,9 +381,12 @@ impl Controller {
             .map_err(|e| e.to_string())?;
         Ok(Some(reply))
     }
-    async fn finish(&mut self, result: Result<ModelResponse, String>) -> DurableResult<Value> {
+    async fn finish(&mut self, mut result: Result<ModelResponse, String>) -> DurableResult<Value> {
         let (command, _lease) = self.active.take().unwrap();
         self.event_rx = None;
+        if let Some(gate) = &self.gate {
+            gate.close();
+        }
         let Command::Turn {
             session_id,
             turn_id,
@@ -383,6 +404,19 @@ impl Controller {
             })
             .await;
         let mut reply = json!({"version": VERSION, "runtime_id": self.runtime_id, "request_id": request_id, "session_id": session_id, "turn_id": turn_id});
+        if let Some(gate) = self.gate.take() {
+            let event = if result.is_ok() {
+                crate::policy::Event::Finish
+            } else {
+                crate::policy::Event::Cancel
+            };
+            if let Err(error) = gate.cleanup(event).await {
+                self.unhealthy = true;
+                reply["cleanup_error"] = json!(error);
+                result = Err(error);
+            }
+            reply["policy"] = gate.evidence();
+        }
         match result {
             Ok(output) => {
                 reply["status"] = json!("completed");
@@ -405,8 +439,11 @@ impl Controller {
                 });
                 reply["error"] = json!(reason);
                 if reply["status"] == "cancelled" {
-                    reply["cancellation_scope"] =
-                        json!("local_only_server_processing_and_billing_unknown");
+                    reply["cancellation_scope"] = json!(if reply.get("policy").is_some() {
+                        "local_policy"
+                    } else {
+                        "local_only_server_processing_and_billing_unknown"
+                    });
                 }
             }
         }
