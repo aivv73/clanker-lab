@@ -3,6 +3,7 @@ pub mod codex;
 pub mod core;
 pub mod model;
 pub mod plugins;
+pub mod policy;
 pub mod protocol;
 pub mod store;
 pub mod work;

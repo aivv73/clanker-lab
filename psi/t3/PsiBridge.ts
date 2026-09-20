@@ -21,13 +21,14 @@ const Reply = Schema.Struct({
   turn_id: Schema.optional(Schema.String),
   status: Schema.optional(Schema.String),
   output: Schema.optional(Schema.String),
+  cancellation_scope: Schema.optional(Schema.String),
   duplicate: Schema.optional(Schema.Boolean),
   event: Schema.optional(Schema.Struct({ kind: Schema.String, delta: Schema.optional(Schema.String), url: Schema.optional(Schema.String) })),
 });
 export type PsiReply = typeof Reply.Type;
 const capabilities = ["sessions", "origin-command-id", "model-stream", "durable-events"];
 
-export type PsiOptions = { stateDir?: string | undefined; onFrame?: ((frame: Frame) => void) | undefined; model?: string | undefined; oauthFixture?: string | undefined; agentLoop?: string | undefined; fixtureGate?: string | undefined; startupFault?: string | undefined };
+export type PsiOptions = { policyBundle?: string | undefined; policyGate?: string | undefined; policyFault?: string | undefined; stateDir?: string | undefined; onFrame?: ((frame: Frame) => void) | undefined; model?: string | undefined; oauthFixture?: string | undefined; agentLoop?: string | undefined; fixtureGate?: string | undefined; startupFault?: string | undefined };
 
 /** One controller process per provider instance, shared by every session. */
 export class PsiBridge {
@@ -52,6 +53,9 @@ export class PsiBridge {
     this.options = options;
     const args = ["--agent-loop", options.agentLoop ?? "single-response"];
     args.push("--model", options.model ?? "fixture");
+    if (options.policyBundle) args.push("--policy-bundle", options.policyBundle);
+    if (options.policyGate) args.push("--policy-gate", options.policyGate);
+    if (options.policyFault) args.push("--policy-fault", options.policyFault);
     if (options.stateDir) args.push("--state-dir", options.stateDir);
     if (options.oauthFixture) args.push("--oauth-fixture", options.oauthFixture);
     if (options.fixtureGate) args.push("--fixture-gate", options.fixtureGate);

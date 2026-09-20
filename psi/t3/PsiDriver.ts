@@ -20,7 +20,7 @@ import type { ProviderAdapterShape } from "../provider/Services/ProviderAdapter.
 import { PsiBridge, lifecycleId } from "./PsiBridge.ts";
 
 const kind = ProviderDriverKind.make("psi");
-const Config = Schema.Struct({ stateDir: Schema.optional(Schema.String), binary: Schema.String, model: Schema.optional(Schema.String), oauthFixture: Schema.optional(Schema.String), agentLoop: Schema.optional(Schema.String), fixtureGate: Schema.optional(Schema.String), startupFault: Schema.optional(Schema.String) });
+const Config = Schema.Struct({ policyBundle: Schema.optional(Schema.String), policyGate: Schema.optional(Schema.String), policyFault: Schema.optional(Schema.String), stateDir: Schema.optional(Schema.String), binary: Schema.String, model: Schema.optional(Schema.String), oauthFixture: Schema.optional(Schema.String), agentLoop: Schema.optional(Schema.String), fixtureGate: Schema.optional(Schema.String), startupFault: Schema.optional(Schema.String) });
 
 export const PsiDriver: ProviderDriver<typeof Config.Type> = {
   driverKind: kind,
@@ -144,7 +144,7 @@ export const PsiDriver: ProviderDriver<typeof Config.Type> = {
           await start();
           if (reply.status !== "completed") {
             const cancelled = reply.status === "cancelled";
-            await emit("content.delta", { streamKind: "assistant_text", delta: cancelled ? "\nCancelled locally. Server processing and billing may continue." : `\nPsi failed: ${reply.error ?? "model_failed"}` });
+            await emit("content.delta", { streamKind: "assistant_text", delta: cancelled ? (reply.cancellation_scope === "local_policy" ? "\nCancelled. Policy admission is closed." : "\nCancelled locally. Server processing and billing may continue.") : `\nPsi failed: ${reply.error ?? "model_failed"}` });
             await emit("item.completed", { itemType: "assistant_message", status: "failed" });
             await emit("turn.completed", { state: cancelled ? "interrupted" : "failed" });
             return { threadId: input.threadId, turnId };

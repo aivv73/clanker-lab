@@ -17,6 +17,7 @@ async fn main() {
                 })
                 .join("psi/default")
         });
+    let mut policy = psi::policy::Config::default();
     let mut selection = "single-response".to_string();
     let mut gate = None;
     let mut fault = None;
@@ -26,6 +27,15 @@ async fn main() {
     while let Some(arg) = args.next() {
         let value = args.next().unwrap_or_default();
         match arg.as_str() {
+            "--policy-bundle" => policy.bundle = value.into(),
+            "--policy-gate" => policy.gate = Some(value.into()),
+            "--policy-fault" => {
+                if !["missing", "hang", "invalid", "mismatch", "failed"].contains(&value.as_str()) {
+                    eprintln!("unknown policy fault");
+                    std::process::exit(1);
+                }
+                policy.fault = Some(value);
+            }
             "--state-dir" => directory = value.into(),
             "--agent-loop" => selection = value,
             "--model" => model = value,
@@ -38,11 +48,15 @@ async fn main() {
             }
         }
     }
-    if model.trim().is_empty() || (model == "fixture" && oauth_fixture.is_some()) {
+    if model.trim().is_empty()
+        || (model == "fixture" && oauth_fixture.is_some())
+        || (selection == "policy-fixture" && model != "fixture")
+    {
         eprintln!("invalid model configuration");
         std::process::exit(1);
     }
     let agent: Box<dyn Plugin> = match selection.as_str() {
+        "policy-fixture" => Box::new(psi::plugins::PolicyFixturePlugin),
         "single-response" => Box::new(SingleResponsePlugin),
         "buffered-response" => Box::new(BufferedResponsePlugin),
         _ => {
@@ -65,7 +79,11 @@ async fn main() {
         };
         Box::new(psi::codex::CodexModelPlugin(config))
     };
-    let mut plugins: Vec<Box<dyn Plugin>> = vec![agent, provider];
+    let mut plugins: Vec<Box<dyn Plugin>> = vec![
+        agent,
+        provider,
+        Box::new(psi::policy::PolicyPlugin::new(policy)),
+    ];
     if let Some(fault) = fault {
         let fault = match fault.as_str() {
             "missing" => "missing",
@@ -94,7 +112,15 @@ async fn main() {
             runtime.spawner("agent-loop").unwrap(),
             directory,
         ) {
-            Ok(controller) => controller.with_model(model).serve().await,
+            Ok(controller) => {
+                let controller = controller.with_model(model);
+                let mut controller = if selection == "policy-fixture" {
+                    controller.with_policy(runtime.service("policy").unwrap())
+                } else {
+                    controller
+                };
+                controller.serve().await
+            }
             Err(error) => Err(error),
         },
         Err(error) => Err(error),

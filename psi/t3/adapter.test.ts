@@ -74,14 +74,14 @@ for (const response of [
   });
 }
 
-for (const agentLoop of ["single-response", "buffered-response"]) {
+for (const agentLoop of ["single-response", "buffered-response", "policy-fixture"]) {
   test(`startup selection ${agentLoop} satisfies the same T3 contract`, async () => {
     await Effect.runPromise(Effect.scoped(Effect.gen(function*() {
       const instance = yield* PsiDriver.create({ instanceId: ProviderInstanceId.make(`psi-${agentLoop}`), enabled: true, displayName: undefined, environment: [], config: { stateDir: mkdtempSync(join(tmpdir(), "psi-adapter-")), binary, agentLoop } });
       const threadId = ThreadId.make("contract-session");
       yield* instance.adapter.startSession({ threadId, cwd: workspace, runtimeMode: "full-access" });
       yield* instance.adapter.sendTurn({ threadId, requestId: "contract-command", input: "contract" });
-      assert.deepEqual((yield* instance.adapter.readThread(threadId)).turns[0]?.items, [{ type: "user", text: "contract" }, { type: "assistant", text: "Psi fixture: contract" }]);
+      assert.deepEqual((yield* instance.adapter.readThread(threadId)).turns[0]?.items, [{ type: "user", text: "contract" }, { type: "assistant", text: agentLoop === "policy-fixture" ? "Psi policy fixture: counter=1; admitted by Bend." : "Psi fixture: contract" }]);
     })));
   });
 }
@@ -98,7 +98,7 @@ for (const startupFault of ["missing", "cycle", "duplicate", "partial"]) {
     if (startupFault === "partial") {
       assert(diagnostics.includes("probe resource dropped"));
       const closed = [...diagnostics.matchAll(/Psi plugin closed: (\S+)/g)].map((match) => match[1]);
-      assert.deepEqual(closed, ["startup-probe", "single-response-loop", "fixture-model"]);
+      assert.deepEqual(closed, ["startup-probe", "bend-policy", "single-response-loop", "fixture-model"]);
       assert(diagnostics.includes("registrations=0 tasks=0"));
     } else assert(!diagnostics.includes("plugin starting"));
   });

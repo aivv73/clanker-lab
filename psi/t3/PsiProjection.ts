@@ -82,7 +82,7 @@ export const drainPsiInbox = (
           delta(
             assistant,
             f.status === "cancelled"
-              ? "\nCancelled locally. Server processing and billing may continue."
+              ? (f.cancellation_scope === "local_policy" ? "\nCancelled. Policy admission is closed." : "\nCancelled locally. Server processing and billing may continue.")
               : `\nPsi failed: ${f.error ?? "model_failed"}`,
           );
         complete(assistant);
