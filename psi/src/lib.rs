@@ -4,4 +4,5 @@ pub mod core;
 pub mod model;
 pub mod plugins;
 pub mod protocol;
+pub mod store;
 pub mod work;

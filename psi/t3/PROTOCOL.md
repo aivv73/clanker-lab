@@ -8,7 +8,7 @@ Maximum frame size is 1 MiB. Unknown operations/fields and invalid JSON are erro
 First command:
 
 ```json
-{"op":"hello","version":1,"capabilities":["sessions","origin-command-id","model-stream"]}
+{"op":"hello","version":1,"capabilities":["sessions","origin-command-id","model-stream","durable-events"]}
 ```
 
 Reply includes `version`, `runtime_id`, `capabilities`, the configured `model`, and `pid`.
@@ -29,7 +29,8 @@ required capabilities and version; no compatibility fallback exists.
 | `invocation_id` | Reserved for a future tool execution inside a turn. This slice invokes no tools and fabricates no invocation IDs. Model responses are not tool invocations. |
 
 Lifecycle requests have independent `psi-lifecycle:<UUID>` identities. They are
-currently ephemeral; future durable delivery must persist them at the origin.
+generated for lifecycle operations and stored by Psi; turn retries use the original
+T3 command ID, never a newly generated ID.
 Turn command identities already survive the real T3 command/schema/reactor/adapter
 path. Derived event IDs include instance, session, originating command and ordinal.
 
@@ -44,11 +45,12 @@ After hello:
 
 Open returns `status: ready`, close `closed`, shutdown `shutdown`. A turn returns
 `status: completed`, the session/turn/request/runtime IDs and
-`output: "Psi fixture: hello"`. This is a completed fixture result, **not a durable
-acceptance receipt**. The adapter emits the normal T3 turn/item/content events.
+`output: "Psi fixture: hello"`. Before execution it emits `status: accepted` with
+the same IDs and a session sequence number, after committing command and acceptance.
+The terminal result is separate. T3 stores these frames in its durable inbox.
 One terminal response corresponds to each request, correlated by `request_id`; replies may
-arrive out of order. A busy response can precede the held turn's result. No
-unsolicited frames are allowed. The initial hello has no request ID.
+arrive out of order. A busy response can precede the held turn's result. A replay operation delivers saved frames with their original request IDs and
+`replay: true`; other unsolicited frames are rejected. The initial hello has no request ID.
 
 A repeated request with the same payload returns the prior reply plus
 `duplicate: true`, without another model call or duplicate visible events.
@@ -58,20 +60,20 @@ and runtime/version, plus the originating request ID for parsed commands. Additi
 `invalid_command`, `invalid_request_id`, `invalid_session_id`, `session_not_open`,
 `incompatible_version`, and `incompatible_capabilities`.
 
-All sessions, receipts and results in Psi are in memory. Closing a session first
+Sessions, command receipts, exact model history, and results are persisted in SQLite. Closing a session first
 joins its active work, returns that turn with `status: cancelled` and
 `error: session_closed`, then returns the close acknowledgement. Other sessions and
 shared plugins remain available. Repeated close is safe. An explicit open may reopen
-a closed conversation; old turn IDs and request receipts remain reserved until exit.
+a closed conversation; old turn IDs and request receipts remain reserved across restart.
 Closing a session does not erase T3's durable conversation.
 
 The runtime owns the active-turn slot. A second turn returns `busy` immediately and
 is neither remembered as accepted nor queued; a later explicit retry may succeed.
 The same rule holds across independent Psi processes via a fixed per-user kernel
 lock. The slot remains held until tracked turn work has been joined. A repeated
-request still in flight returns `request_in_progress`; different content with the
-same pending ID returns `request_id_conflict`. Completed receipt replay remains
-in-memory only. Model errors produce `status: failed` with a fixed, credential-free error code.
+request still in flight returns its original `accepted` frame with `duplicate: true`;
+different content with that ID returns `request_id_conflict`. After completion,
+retry also returns the saved terminal result without repeating execution. Model errors produce `status: failed` with a fixed, credential-free error code.
 
 `shutdown` cancels and joins active cooperative work before acknowledging; EOF does
 the same without a reply. Plugin teardown follows in reverse dependency order.
@@ -80,7 +82,7 @@ registration/task counts, turn admission, and cleanup, but not model input.
 
 `Runtime → Session → Turn → Invocation` ownership is represented separately from
 plugin ownership. No tool invocation is fabricated for a model call. The loop and selected model run; there are still no real tools, Bend checks, external child
-cleanup, resource quotas, durable acceptance, or replay. Forced safe termination of
+cleanup, or resource quotas. Forced safe termination of
 arbitrary in-process plugin code is not promised.
 
 ## Streaming and authentication
@@ -100,7 +102,7 @@ delivery to T3. Replay of a terminal receipt emits no new streaming frames.
 
 Completed replies also carry lossless `provider_output` and optional `response_id`.
 The Rust controller appends the exact user input and those output items to its
-in-memory session history. T3 rendering is not the source for model context.
+durable session history in the same transaction as its terminal result. T3 rendering is not the source for model context.
 Failed or cancelled streams do not append a fabricated assistant completion.
 
 ```json
@@ -126,3 +128,36 @@ or storage operation: only the model service owns tokens.
 Absent Content-Type is allowed only with valid SSE and explicit completion, matching
 the pinned Codex reference. Explicit incompatible MIME is rejected with one of the
 fixed `model_mime_*` classes; raw response headers/bodies are never included.
+
+## Durable delivery
+
+Hello also lists saved `sessions`; the bridge reconnects and drains them on T3
+restart. The updated bridge requires `durable-events`. Every accepted, streaming,
+and terminal turn frame has a monotonically increasing per-session `seq`, committed
+before emission. Replay preserves those sequence numbers and payloads; only the
+connection's `runtime_id` and delivery flags change.
+
+```json
+{"op":"replay","version":1,"request_id":"replay-1","session_id":"thread-1","after":0}
+{"op":"history","version":1,"request_id":"history-1","session_id":"thread-1"}
+```
+
+Replay emits saved frames after the cursor, then `status: replayed` correlated to
+its own request. A cursor beyond the stored log or a log gap fails explicitly.
+History returns `status: history`, exact provider `history`, and saved terminal
+`turns`. Model requests use only Psi history; UI snapshots are not model input.
+`open` accepts `workspace`, whose canonical path must not contain the state store.
+The adapter supplies it. Standalone fixture clients may omit it; no tools exist.
+
+The T3 inbox scopes sequences by instance/session and rejects gaps or conflicting
+payloads. It commits the frame, then advances the cursor. Projection completion is
+a separate boundary after all deterministic derived commands have been accepted
+by the real T3 engine. Their IDs encode instance/session/sequence/ordinal; replay
+uses its command receipts, including after dispatch but before inbox completion.
+
+Rust stores action intent before an external handoff and result after it through
+explicit store APIs. An unfinished action becomes `unknown` on restart; it cannot
+be overwritten with a fabricated result. Accepted unfinished turns receive
+`interrupted_outcome_unknown`; their session rejects new turns with
+`session_outcome_unknown`. Terminal-processing pending/done records are available
+for later checkpoint integration. No external effect is made atomic by SQLite.

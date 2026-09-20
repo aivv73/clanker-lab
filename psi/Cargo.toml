@@ -14,3 +14,4 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 futures-util = "0.3"
 base64 = "0.22"
 sha2 = "0.10"
+rusqlite = { version = "0.40.2", features = ["bundled"] }

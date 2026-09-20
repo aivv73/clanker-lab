@@ -25,7 +25,7 @@ function recordVersions(report) {
     report.os = execFileSync("uname", ["-srmo"], { encoding: "utf8" }).trim();
     report.source_revision = execFileSync("git", ["rev-parse", "HEAD"], { cwd: here, encoding: "utf8" }).trim();
     report.implementation_sha256 = Object.fromEntries([
-      "../Cargo.toml", "../Cargo.lock", "../src/admission.rs", "../src/work.rs", "../src/core.rs", "../src/plugins.rs", "../src/protocol.rs", "../src/main.rs", "../src/lib.rs", "../src/codex.rs", "../src/model.rs", "../tests/codex.rs", "../tests/auth_runtime.rs", "../tests/fixtures/runtime_auth.py", "../tests/fixtures/oauth_server.py", "../tests/lifecycle.rs", "../tests/protocol.rs",
+      "../src/store.rs", "../tests/durability.rs", "../tests/fixtures/durability.py", "PsiInbox.ts", "PsiProjection.ts", "inbox.test.ts", "durability-worker.ts", "../Cargo.toml", "../Cargo.lock", "../src/admission.rs", "../src/work.rs", "../src/core.rs", "../src/plugins.rs", "../src/protocol.rs", "../src/main.rs", "../src/lib.rs", "../src/codex.rs", "../src/model.rs", "../tests/codex.rs", "../tests/auth_runtime.rs", "../tests/fixtures/runtime_auth.py", "../tests/fixtures/oauth_server.py", "../tests/lifecycle.rs", "../tests/protocol.rs",
       "PsiDriver.ts", "PsiBridge.ts", "adapter.test.ts", "t3.patch", "prepare.py", "run.py", "e2e.test.mjs", "package-lock.json",
     ].map((name) => [name, createHash("sha256").update(readFileSync(resolve(here, name))).digest("hex")]));
     report.t3_lock_sha256 = createHash("sha256").update(readFileSync(resolve(checkout, "pnpm-lock.yaml"))).digest("hex");

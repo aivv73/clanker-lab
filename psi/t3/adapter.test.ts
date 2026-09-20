@@ -6,8 +6,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as Effect from "effect/Effect";
 import { ProviderInstanceId, ThreadId } from "@t3tools/contracts";
-import { PsiBridge } from "./PsiBridge.ts";
+import { PsiBridge as RealPsiBridge, type PsiOptions } from "./PsiBridge.ts";
 import { PsiDriver } from "./PsiDriver.ts";
+import { PsiInbox, instanceDirectory } from "./PsiInbox.ts";
+
+const workspace = mkdtempSync(join(tmpdir(),"psi-workspace-"));
+class PsiBridge extends RealPsiBridge {
+  constructor(binary: string, options: PsiOptions = {}) { super(binary,{stateDir:mkdtempSync(join(tmpdir(),"psi-bridge-")),...options}); }
+}
 
 const binary = process.env.PSI_BINARY;
 assert(binary, "PSI_BINARY must name the built Psi executable");
@@ -29,10 +35,10 @@ test("spawn failure rejects instead of hanging", async () => {
 
 test("driver shares runtime between sessions and preserves originating IDs", async () => {
   await Effect.runPromise(Effect.scoped(Effect.gen(function*() {
-    const instance = yield* PsiDriver.create({ instanceId: ProviderInstanceId.make("psi-test"), enabled: true, displayName: undefined, environment: [], config: { binary } });
+    const instance = yield* PsiDriver.create({ instanceId: ProviderInstanceId.make("psi-test"), enabled: true, displayName: undefined, environment: [], config: { stateDir: mkdtempSync(join(tmpdir(), "psi-adapter-")), binary } });
     const a = ThreadId.make("session-a");
     const b = ThreadId.make("session-b");
-    for (const threadId of [a, b]) yield* instance.adapter.startSession({ threadId, cwd: "/tmp", runtimeMode: "full-access" });
+    for (const threadId of [a, b]) yield* instance.adapter.startSession({ threadId, cwd: workspace, runtimeMode: "full-access" });
     const input = { threadId: a, requestId: "saved-command-44", input: "hello" };
     const first = yield* instance.adapter.sendTurn(input);
     const duplicate = yield* instance.adapter.sendTurn(input);
@@ -71,9 +77,9 @@ for (const response of [
 for (const agentLoop of ["single-response", "buffered-response"]) {
   test(`startup selection ${agentLoop} satisfies the same T3 contract`, async () => {
     await Effect.runPromise(Effect.scoped(Effect.gen(function*() {
-      const instance = yield* PsiDriver.create({ instanceId: ProviderInstanceId.make(`psi-${agentLoop}`), enabled: true, displayName: undefined, environment: [], config: { binary, agentLoop } });
+      const instance = yield* PsiDriver.create({ instanceId: ProviderInstanceId.make(`psi-${agentLoop}`), enabled: true, displayName: undefined, environment: [], config: { stateDir: mkdtempSync(join(tmpdir(), "psi-adapter-")), binary, agentLoop } });
       const threadId = ThreadId.make("contract-session");
-      yield* instance.adapter.startSession({ threadId, cwd: "/tmp", runtimeMode: "full-access" });
+      yield* instance.adapter.startSession({ threadId, cwd: workspace, runtimeMode: "full-access" });
       yield* instance.adapter.sendTurn({ threadId, requestId: "contract-command", input: "contract" });
       assert.deepEqual((yield* instance.adapter.readThread(threadId)).turns[0]?.items, [{ type: "user", text: "contract" }, { type: "assistant", text: "Psi fixture: contract" }]);
     })));
@@ -131,15 +137,15 @@ test("independent T3 provider instances cannot bypass the Rust lease", async () 
   try {
     await Effect.runPromise(Effect.scoped(Effect.gen(function*() {
       const gate = join(dir, "release");
-      const make = (id: string) => PsiDriver.create({ instanceId: ProviderInstanceId.make(id), enabled: true, displayName: undefined, environment: [], config: { binary, fixtureGate: gate } });
+      const make = (id: string) => PsiDriver.create({ instanceId: ProviderInstanceId.make(id), enabled: true, displayName: undefined, environment: [], config: { stateDir: mkdtempSync(join(tmpdir(), "psi-adapter-")), binary, fixtureGate: gate } });
       const a = yield* make("independent-a"); const b = yield* make("independent-b");
       const first = ThreadId.make("first"); const second = ThreadId.make("second");
-      yield* a.adapter.startSession({ threadId: first, cwd: "/tmp", runtimeMode: "full-access" });
-      yield* b.adapter.startSession({ threadId: second, cwd: "/tmp", runtimeMode: "full-access" });
+      yield* a.adapter.startSession({ threadId: first, cwd: workspace, runtimeMode: "full-access" });
+      yield* b.adapter.startSession({ threadId: second, cwd: workspace, runtimeMode: "full-access" });
       const pending = Effect.runPromise(Effect.exit(a.adapter.sendTurn({ threadId: first, requestId: "held", input: "held" })));
       // Open/close commands on the same controller roundtrip after admission.
       const barrier = ThreadId.make("barrier");
-      yield* a.adapter.startSession({ threadId: barrier, cwd: "/tmp", runtimeMode: "full-access" });
+      yield* a.adapter.startSession({ threadId: barrier, cwd: workspace, runtimeMode: "full-access" });
       const busy = yield* Effect.exit(b.adapter.sendTurn({ threadId: second, requestId: "busy", input: "busy" }));
       assert.equal(busy._tag, "Failure");
       assert.match(String(busy), /busy/);
@@ -179,14 +185,41 @@ test("controller EOF joins a held turn before releasing admission", async () => 
 
 test("closing during session startup leaves no orphaned session; reopening is explicit", async () => {
   await Effect.runPromise(Effect.scoped(Effect.gen(function*() {
-    const instance = yield* PsiDriver.create({ instanceId: ProviderInstanceId.make("start-close"), enabled: true, displayName: undefined, environment: [], config: { binary } });
+    const instance = yield* PsiDriver.create({ instanceId: ProviderInstanceId.make("start-close"), enabled: true, displayName: undefined, environment: [], config: { stateDir: mkdtempSync(join(tmpdir(), "psi-adapter-")), binary } });
     const threadId = ThreadId.make("starting");
-    const start = Effect.runPromise(instance.adapter.startSession({ threadId, cwd: "/tmp", runtimeMode: "full-access" }));
+    const start = Effect.runPromise(instance.adapter.startSession({ threadId, cwd: workspace, runtimeMode: "full-access" }));
     yield* instance.adapter.stopSession(threadId);
     yield* Effect.promise(() => start);
     assert.equal(yield* instance.adapter.hasSession(threadId), false);
-    yield* instance.adapter.startSession({ threadId, cwd: "/tmp", runtimeMode: "full-access" });
+    yield* instance.adapter.startSession({ threadId, cwd: workspace, runtimeMode: "full-access" });
     yield* instance.adapter.sendTurn({ threadId, requestId: "reopened", input: "reopened" });
     assert.equal((yield* instance.adapter.readThread(threadId)).turns.length, 1);
   })));
+});
+
+test("driver restart restores exact conversation snapshots and retries the original command", async () => {
+  const stateDir=mkdtempSync(join(tmpdir(),"psi-driver-restart-"));
+  const config={binary,stateDir};
+  const threadId=ThreadId.make("saved-session");
+  const input={threadId,requestId:"saved-origin",input:"persistent"};
+  try {
+    for (let restart=0;restart<2;restart++) await Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+      const instance=yield* PsiDriver.create({instanceId:ProviderInstanceId.make("saved-instance"),enabled:true,displayName:undefined,environment:[],config});
+      yield* instance.adapter.startSession({threadId,cwd:workspace,runtimeMode:"full-access"});
+      yield* instance.adapter.sendTurn(input);
+      const snapshot=yield* instance.adapter.readThread(threadId);
+      assert.equal(snapshot.turns.length,1);
+      assert.deepEqual(snapshot.turns[0]?.items,[{type:"user",text:"persistent"},{type:"assistant",text:"Psi fixture: persistent"}]);
+      const conflict=yield* Effect.exit(instance.adapter.sendTurn({...input,input:"changed"}));
+      assert.equal(conflict._tag,"Failure");
+    })));
+    const inbox = new PsiInbox(stateDir);
+    inbox.db.prepare("UPDATE cursors SET seq=999").run();
+    inbox.close();
+    await assert.rejects(Effect.runPromise(Effect.scoped(PsiDriver.create({instanceId:ProviderInstanceId.make("saved-instance"),enabled:true,displayName:undefined,environment:[],config}))),/event_cursor_ahead/);
+    // Failed replay must release the process and its store lock.
+    const probe = new RealPsiBridge(binary!,{stateDir:instanceDirectory(stateDir,"saved-instance")});
+    await probe.hello();
+    await probe.close();
+  } finally {rmSync(stateDir,{recursive:true,force:true});}
 });

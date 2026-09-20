@@ -19,10 +19,11 @@ def reader(stream, out):
     for line in stream: out.put(line)
 
 class Runtime:
-    def __init__(self, base, root):
+    def __init__(self, base, root, state):
+        self.state = pathlib.Path(state)
         self.frames = []
         self.out = queue.Queue()
-        self.p = subprocess.Popen([binary, "--model", "fixture-codex", "--oauth-fixture", base], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env={"PATH": os.environ["PATH"], "HOME": str(root), "CODEX_HOME": str(root / ".codex")}, cwd=root)
+        self.p = subprocess.Popen([binary, "--state-dir", str(self.state), "--model", "fixture-codex", "--oauth-fixture", base], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env={"PATH": os.environ["PATH"], "HOME": str(root), "CODEX_HOME": str(root / ".codex")}, cwd=root)
         threading.Thread(target=reader, args=(self.p.stdout, self.out), daemon=True).start()
         self.send(op="hello", capabilities=["sessions", "origin-command-id", "model-stream"])
         assert self.read()["model"] == "fixture-codex"
@@ -40,6 +41,8 @@ class Runtime:
         sign_ins = 0
         while True:
             frame = self.read()
+            if frame.get("status") == "accepted":
+                continue
             if frame.get("status") == "streaming":
                 event = frame["event"]
                 if event["kind"] == "sign_in":
@@ -57,9 +60,12 @@ class Runtime:
         output = "".join(self.frames) + log
         for secret in ["synthetic-refresh", "synthetic.", "synthetic-secret-must-not-leak", "installed-credential-canary"]:
             assert secret not in output, "credential escaped the Rust model service"
+            for path in self.state.rglob("*"):
+                if path.is_file():
+                    assert secret.encode() not in path.read_bytes(), "credential persisted in runtime storage"
         return log
 
-with tempfile.TemporaryDirectory(prefix="psi-auth-lifetime-") as scratch:
+with tempfile.TemporaryDirectory(prefix="psi-auth-lifetime-") as scratch, tempfile.TemporaryDirectory(prefix="psi-auth-state-") as state_root:
     root = pathlib.Path(scratch)
     (root / ".codex").mkdir()
     sentinel = root / ".codex/auth.json"
@@ -76,7 +82,7 @@ with tempfile.TemporaryDirectory(prefix="psi-auth-lifetime-") as scratch:
             fixture = subprocess.Popen([sys.executable, str(fixture_script), scenario], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
             base = fixture.stdout.readline().strip()
             try:
-                runtime = Runtime(base, root)
+                runtime = Runtime(base, root, pathlib.Path(state_root) / scenario)
                 try:
                     reply, sign_ins = runtime.turn(1, cancel=scenario == "hold")
                     assert sign_ins == 1
@@ -96,15 +102,17 @@ with tempfile.TemporaryDirectory(prefix="psi-auth-lifetime-") as scratch:
                 finally:
                     runtime.close()
                 if scenario == "rotation":
-                    restarted = Runtime(base, root)
+                    restarted = Runtime(base, root, pathlib.Path(state_root) / scenario)
                     try:
-                        reply, sign_ins = restarted.turn(1)
+                        reply, sign_ins = restarted.turn(3)
                         assert reply["status"] == "completed" and sign_ins == 1
                     finally:
                         restarted.close()
                     evidence = json.loads(browser.open(base + "/evidence").read())
                     assert evidence["authorizations"] == 2 and evidence["rotations"] == 3
                     assert len(evidence["requests"][1]["input"]) == 5
+                    assert len(evidence["requests"][2]["input"]) == 9, "restart lost exact model context"
+                    assert evidence["requests"][2]["input"][:5] == evidence["requests"][1]["input"], "provider items changed across restart"
             finally:
                 fixture.terminate()
                 fixture.wait(timeout=5)
@@ -117,4 +125,4 @@ with tempfile.TemporaryDirectory(prefix="psi-auth-lifetime-") as scratch:
         os.close(watch)
     after = {str(p.relative_to(root)): p.read_bytes() for p in root.rglob("*") if p.is_file()}
     assert before == after, "runtime persisted data under its home"
-print(json.dumps({"passed": True, "restart_requires_sign_in": True, "refresh_rotation": True, "refresh_failure_discards_tokens": True, "local_cancellation": True, "credential_directory_unaccessed": True, "home_unchanged": True, "protocol_and_stderr_no_tokens": True}))
+print(json.dumps({"passed": True, "restart_requires_sign_in": True, "refresh_rotation": True, "refresh_failure_discards_tokens": True, "local_cancellation": True, "credential_directory_unaccessed": True, "home_unchanged": True, "protocol_and_stderr_no_tokens": True, "sqlite_no_tokens": True, "restart_preserves_model_context": True}))

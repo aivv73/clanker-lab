@@ -1,9 +1,15 @@
 // @effect-diagnostics nodeBuiltinImport:off globalTimers:off - This Promise-based JSONL transport owns Node child handles and shutdown timers outside Effect fibers.
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import type { Frame } from "./PsiInbox.ts";
 import * as Schema from "effect/Schema";
 
 const Reply = Schema.Struct({
+  sessions: Schema.optional(Schema.Array(Schema.String)),
+  seq: Schema.optional(Schema.Number),
+  replay: Schema.optional(Schema.Boolean),
+  history: Schema.optional(Schema.Array(Schema.Unknown)),
+  turns: Schema.optional(Schema.Array(Schema.Struct({turn_id: Schema.String, input: Schema.optional(Schema.String), output: Schema.optional(Schema.String), status: Schema.String}))),
   version: Schema.Number,
   runtime_id: Schema.String,
   request_id: Schema.optional(Schema.String),
@@ -19,9 +25,9 @@ const Reply = Schema.Struct({
   event: Schema.optional(Schema.Struct({ kind: Schema.String, delta: Schema.optional(Schema.String), url: Schema.optional(Schema.String) })),
 });
 export type PsiReply = typeof Reply.Type;
-const capabilities = ["sessions", "origin-command-id", "model-stream"];
+const capabilities = ["sessions", "origin-command-id", "model-stream", "durable-events"];
 
-export type PsiOptions = { model?: string | undefined; oauthFixture?: string | undefined; agentLoop?: string | undefined; fixtureGate?: string | undefined; startupFault?: string | undefined };
+export type PsiOptions = { stateDir?: string | undefined; onFrame?: ((frame: Frame) => void) | undefined; model?: string | undefined; oauthFixture?: string | undefined; agentLoop?: string | undefined; fixtureGate?: string | undefined; startupFault?: string | undefined };
 
 /** One controller process per provider instance, shared by every session. */
 export class PsiBridge {
@@ -34,6 +40,7 @@ export class PsiBridge {
   private closing = false;
   private pending: {
     requestId: string | undefined;
+    replaySession?: string | undefined;
     resolve: (reply: PsiReply) => void;
     reject: (error: Error) => void;
     timer: ReturnType<typeof setTimeout>;
@@ -45,6 +52,7 @@ export class PsiBridge {
     this.options = options;
     const args = ["--agent-loop", options.agentLoop ?? "single-response"];
     args.push("--model", options.model ?? "fixture");
+    if (options.stateDir) args.push("--state-dir", options.stateDir);
     if (options.oauthFixture) args.push("--oauth-fixture", options.oauthFixture);
     if (options.fixtureGate) args.push("--fixture-gate", options.fixtureGate);
     if (options.startupFault) args.push("--startup-fault", options.startupFault);
@@ -67,13 +75,23 @@ export class PsiBridge {
         const line = this.buffer.slice(0, end);
         this.buffer = this.buffer.slice(end + 1);
         try {
-          const reply = Schema.decodeUnknownSync(Reply)(JSON.parse(line));
+          const raw = JSON.parse(line);
+          const reply = Schema.decodeUnknownSync(Reply)(raw);
+          if (reply.version !== 1 || (this.runtimeId && reply.runtime_id !== this.runtimeId)) throw new Error("Psi incompatible reply");
+          if (reply.replay) {
+            if (!this.runtimeId || !this.pending.some(p=>p.replaySession === reply.session_id && p.replaySession !== undefined)) throw new Error("Psi unsolicited replay");
+            if (reply.seq === undefined) throw new Error("Psi missing replay sequence");
+            this.options.onFrame?.(raw as Frame);
+            continue;
+          }
           const index = this.pending.findIndex((pending) => pending.requestId === reply.request_id);
           const next = this.pending[index];
           if (!next || reply.version !== 1 || (this.runtimeId && reply.runtime_id !== this.runtimeId)) {
             throw new Error("Psi incompatible or unsolicited reply");
           }
           if (next.requestId !== reply.request_id) throw new Error("Psi request identity mismatch");
+          if (reply.seq !== undefined) this.options.onFrame?.(raw as Frame);
+          if (reply.status === "accepted") continue;
           if (reply.status === "streaming") { next.onEvent?.(reply); continue; }
           this.pending.splice(index, 1);
           clearTimeout(next.timer);
@@ -122,7 +140,7 @@ export class PsiBridge {
         reject(new Error("Psi: request_in_progress"));
         return;
       }
-      this.pending.push({ requestId: command.request_id, resolve, reject, timer, onEvent });
+      this.pending.push({ requestId: command.request_id, replaySession: command.op === "replay" ? String(command.session_id) : undefined, resolve, reject, timer, onEvent });
       this.child.stdin.write(JSON.stringify({ ...command, version: 1 }) + "\n");
     });
   }

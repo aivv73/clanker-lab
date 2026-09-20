@@ -12,6 +12,10 @@ struct Process {
 impl Process {
     fn new() -> Self {
         let mut child = Command::new(env!("CARGO_BIN_EXE_psi"))
+            .env(
+                "PSI_STATE_DIR",
+                std::env::temp_dir().join(format!("psi-test-{}", uuid::Uuid::new_v4())),
+            )
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -29,7 +33,7 @@ impl Process {
             let mut line = String::new();
             self.output.read_line(&mut line).unwrap();
             let reply: Value = serde_json::from_str(&line).unwrap();
-            if reply["status"] != "streaming" {
+            if reply["status"] != "streaming" && reply["status"] != "accepted" {
                 return reply;
             }
         }
