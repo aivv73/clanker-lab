@@ -7,7 +7,7 @@ use std::{
     time::Duration,
 };
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::{AsyncBufReadExt, AsyncWriteExt},
     process::Command,
     sync::watch,
 };
@@ -26,8 +26,13 @@ pub struct ExecArgs {
     pub tty: bool,
     #[serde(default = "deadline")]
     pub timeout_ms: u64,
+    #[serde(default = "yield_ms")]
+    pub yield_time_ms: u64,
     #[serde(default = "tokens")]
     pub max_output_tokens: usize,
+}
+fn yield_ms() -> u64 {
+    10_000
 }
 fn deadline() -> u64 {
     120_000
@@ -43,6 +48,7 @@ impl ExecArgs {
             || self.login
             || self.tty
             || self.shell.as_deref().is_some_and(|s| s != "/bin/sh")
+            || self.yield_time_ms > 30_000
             || self.timeout_ms == 0
             || self.timeout_ms > 600_000
             || self.max_output_tokens == 0
@@ -63,13 +69,49 @@ impl ExecArgs {
     }
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct WriteArgs {
+    pub session_id: String,
+    #[serde(default)]
+    pub chars: String,
+    #[serde(default = "yield_ms")]
+    pub yield_time_ms: u64,
+    #[serde(default = "tokens")]
+    pub max_output_tokens: usize,
+}
+impl WriteArgs {
+    fn validate(&self) -> Result<(), String> {
+        if self.chars.len() > 65536
+            || self.yield_time_ms > 30000
+            || self.max_output_tokens == 0
+            || self.max_output_tokens > 16000
+        {
+            return Err("unsupported_write_arguments".into());
+        }
+        Ok(())
+    }
+}
+type Reply = tokio::sync::oneshot::Sender<Result<Value, String>>;
+struct Request {
+    arguments: Value,
+    id: String,
+    reply: Reply,
+}
+struct Running {
+    id: String,
+    requests: tokio::sync::mpsc::UnboundedSender<Request>,
+    terminal: Arc<Mutex<Option<Result<Value, String>>>>,
+}
 pub struct ToolTurn {
     workspace: PathBuf,
     directory: PathBuf,
     session: String,
     turn: String,
     cancel: watch::Sender<bool>,
-    worker: Mutex<Option<tokio::task::JoinHandle<Result<Value, String>>>>,
+    running: Mutex<Option<Running>>,
+    invocation: tokio::sync::Mutex<()>,
+    worker: Mutex<Vec<tokio::task::JoinHandle<Result<Value, String>>>>,
 }
 impl ToolTurn {
     pub fn new(workspace: PathBuf, directory: PathBuf, session: String, turn: String) -> Arc<Self> {
@@ -79,7 +121,9 @@ impl ToolTurn {
             session,
             turn,
             cancel: watch::channel(false).0,
-            worker: Mutex::new(None),
+            running: Mutex::new(None),
+            invocation: tokio::sync::Mutex::new(()),
+            worker: Mutex::new(Vec::new()),
         })
     }
     pub async fn execute(
@@ -87,33 +131,160 @@ impl ToolTurn {
         arguments: Value,
         gate: Arc<crate::policy::Gate>,
     ) -> Result<Value, String> {
-        let args: ExecArgs =
-            serde_json::from_value(arguments.clone()).map_err(|_| "unsupported_exec_arguments")?;
-        args.validate()?;
-        let action = crate::policy::Action::new("exec_command", arguments.clone());
+        self.invoke("exec_command", arguments, gate).await
+    }
+    pub async fn write_stdin(
+        self: &Arc<Self>,
+        arguments: Value,
+        gate: Arc<crate::policy::Gate>,
+    ) -> Result<Value, String> {
+        self.invoke("write_stdin", arguments, gate).await
+    }
+    pub async fn invoke(
+        self: &Arc<Self>,
+        name: &str,
+        arguments: Value,
+        gate: Arc<crate::policy::Gate>,
+    ) -> Result<Value, String> {
+        self.invoke_identified(name, arguments, gate, uuid::Uuid::new_v4().to_string())
+            .await
+    }
+    pub async fn invoke_identified(
+        self: &Arc<Self>,
+        name: &str,
+        arguments: Value,
+        gate: Arc<crate::policy::Gate>,
+        call_id: String,
+    ) -> Result<Value, String> {
+        let _invocation = self.invocation.try_lock().map_err(|_| "tool_busy")?;
+        let action = crate::policy::Action::identified(call_id.clone(), name, arguments.clone());
         let permit = gate.request(action.clone()).await?;
+        let id = call_id;
         let (tx, rx) = tokio::sync::oneshot::channel();
-        let this = self.clone();
-        // Persistence and worker creation share the synchronous admission barrier.
         gate.handoff(permit, &action, || {
-            let mut worker = self.worker.lock().unwrap();
-            if worker.is_some() { return Err("tool_busy".into()); }
-            let id = format!("{}:exec:1", self.turn);
-            let db = self.db()?;
-            db.execute("INSERT INTO actions(id,session,turn,intent,state) VALUES (?,?,?,?,'intent')", rusqlite::params![id,self.session,self.turn,json!({"name":"exec_command","arguments":arguments}).to_string()]).map_err(|_| "action_intent_failed")?;
-            *worker = Some(tokio::spawn(async move {
-                let result = supervise(&this.workspace, &args, this.cancel.subscribe()).await;
-                let result = result.and_then(|value| {
-                    let changed = this.db()?.execute("UPDATE actions SET state='result',result=? WHERE id=? AND state='intent'", rusqlite::params![value.to_string(),id]).map_err(|_| "action_result_failed")?;
-                    if changed != 1 { return Err("action_state_conflict".into()); }
-                    Ok(value)
-                });
-                let _ = tx.send(result.clone());
-                result
-            }));
+            let mut running = self.running.lock().unwrap();
+            if name != "write_stdin" && running.is_some() {
+                return Err("tool_busy".into());
+            }
+            match name {
+                "exec_command" => {
+                    let args: ExecArgs = serde_json::from_value(arguments.clone())
+                        .map_err(|_| "unsupported_exec_arguments")?;
+                    args.validate()?;
+                    self.intent(&id, name, &arguments)?;
+                    let process = uuid::Uuid::new_v4().to_string();
+                    self.db()?.execute("INSERT INTO command_processes(id,session,turn,invocation) VALUES (?,?,?,?)", rusqlite::params![process,self.session,self.turn,id]).map_err(|_| "action_intent_failed")?;
+                    let (requests, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+                    let terminal = Arc::new(Mutex::new(None));
+                    *running = Some(Running {
+                        id: process.clone(),
+                        requests,
+                        terminal: terminal.clone(),
+                    });
+                    let this = self.clone();
+                    let request = Request {
+                        arguments: arguments.clone(),
+                        id: id.clone(),
+                        reply: tx,
+                    };
+                    self.worker.lock().unwrap().push(tokio::spawn(async move {
+                        let result = supervise(
+                            &this,
+                            &args,
+                            &process,
+                            &mut receiver,
+                            request,
+                            this.cancel.subscribe(),
+                        )
+                        .await;
+                        let mut final_state = terminal.lock().unwrap();
+                        *final_state = Some(result.clone());
+                        while let Ok(request) = receiver.try_recv() {
+                            let value = result.clone().and_then(|v| this.result(&request.id, v));
+                            let _ = request.reply.send(value);
+                        }
+                        result
+                    }));
+                }
+                "write_stdin" => {
+                    let args: WriteArgs = serde_json::from_value(arguments.clone())
+                        .map_err(|_| "unsupported_write_arguments")?;
+                    args.validate()?;
+                    let command = running
+                        .as_ref()
+                        .filter(|r| r.id == args.session_id)
+                        .ok_or("unknown_process")?;
+                    self.intent(&id, name, &arguments)?;
+                    let terminal = command.terminal.lock().unwrap();
+                    if let Some(result) = terminal.as_ref() {
+                        let result = result.clone().and_then(|v| self.result(&id, v));
+                        let _ = tx.send(result);
+                    } else {
+                        command
+                            .requests
+                            .send(Request {
+                                arguments: arguments.clone(),
+                                id: id.clone(),
+                                reply: tx,
+                            })
+                            .map_err(|_| "executor_worker_failed")?;
+                    }
+                }
+                _ => return Err("unsupported_tool".into()),
+            }
             Ok(())
         })?;
-        rx.await.map_err(|_| "executor_worker_failed")?
+        let value = rx.await.map_err(|_| "executor_worker_failed")??;
+        if value["cleanup_confirmed"] == true {
+            self.running.lock().unwrap().take();
+        }
+        Ok(value)
+    }
+    fn intent(&self, id: &str, name: &str, arguments: &Value) -> Result<(), String> {
+        self.db()?
+            .execute(
+                "INSERT INTO actions(id,session,turn,intent,state) VALUES (?,?,?,?,'intent')",
+                rusqlite::params![
+                    id,
+                    self.session,
+                    self.turn,
+                    json!({"name":name,"arguments":arguments}).to_string()
+                ],
+            )
+            .map_err(|_| "action_intent_failed")?;
+        Ok(())
+    }
+    fn result(&self, id: &str, mut value: Value) -> Result<Value, String> {
+        // A process may exit between requests. Apply the current invocation's
+        // response budget even when its terminal output was already buffered.
+        let intent: String = self
+            .db()?
+            .query_row("SELECT intent FROM actions WHERE id=?", [id], |r| r.get(0))
+            .map_err(|_| "action_store_failed")?;
+        let intent: Value = serde_json::from_str(&intent).map_err(|_| "action_store_failed")?;
+        let limit = intent["arguments"]["max_output_tokens"]
+            .as_u64()
+            .unwrap_or(16000) as usize;
+        if let Some(output) = value["output"].as_str().filter(|s| s.len() > limit) {
+            let mut end = limit;
+            while !output.is_char_boundary(end) {
+                end -= 1;
+            }
+            let output = output[..end].to_owned();
+            value["output"] = json!(output);
+            value["truncated"] = json!(true);
+        }
+        let changed = self
+            .db()?
+            .execute(
+                "UPDATE actions SET state='result',result=? WHERE id=? AND state='intent'",
+                rusqlite::params![value.to_string(), id],
+            )
+            .map_err(|_| "action_result_failed")?;
+        if changed != 1 {
+            return Err("action_state_conflict".into());
+        }
+        Ok(value)
     }
     fn db(&self) -> Result<rusqlite::Connection, String> {
         let db = rusqlite::Connection::open(self.directory.join("history.sqlite"))
@@ -124,27 +295,55 @@ impl ToolTurn {
     }
     pub async fn cleanup(&self) -> Result<Option<Value>, String> {
         self.cancel.send_replace(true);
-        let worker = self.worker.lock().unwrap().take();
-        if let Some(worker) = worker {
+        let workers = std::mem::take(&mut *self.worker.lock().unwrap());
+        let mut last = None;
+        for worker in workers {
             let result = worker.await.map_err(|_| "executor_cleanup_unconfirmed")??;
             if result["cleanup_confirmed"] != true {
                 return Err("executor_cleanup_unconfirmed".into());
             }
-            return Ok(Some(result));
+            last = Some(result);
         }
-        Ok(None)
+        Ok(last)
     }
 }
 
 async fn supervise(
-    workspace: &Path,
+    owner: &ToolTurn,
     args: &ExecArgs,
+    process: &str,
+    requests: &mut tokio::sync::mpsc::UnboundedReceiver<Request>,
+    initial: Request,
     mut cancel: watch::Receiver<bool>,
 ) -> Result<Value, String> {
+    let mut pending = Some(initial);
+    let result = supervise_io(owner, args, process, requests, &mut pending, &mut cancel).await;
+    let result = result.and_then(|value| {
+        owner
+            .db()?
+            .execute(
+                "UPDATE command_processes SET result=? WHERE id=?",
+                rusqlite::params![value.to_string(), process],
+            )
+            .map_err(|_| "action_result_failed")?;
+        Ok(value)
+    });
+    if let Some(request) = pending {
+        let delivered = result.clone().and_then(|v| owner.result(&request.id, v));
+        let _ = request.reply.send(delivered);
+    }
+    result
+}
+async fn supervise_io(
+    owner: &ToolTurn,
+    args: &ExecArgs,
+    process: &str,
+    requests: &mut tokio::sync::mpsc::UnboundedReceiver<Request>,
+    pending: &mut Option<Request>,
+    cancel: &mut watch::Receiver<bool>,
+) -> Result<Value, String> {
     if *cancel.borrow() {
-        return Ok(
-            json!({"reason":"cancelled","exit_code":null,"output":"","truncated":false,"cleanup_confirmed":true}),
-        );
+        return Ok(json!({"reason":"cancelled","cleanup_confirmed":true,"output":""}));
     }
     let mut manager = Command::new("/usr/bin/systemctl");
     manager
@@ -177,55 +376,64 @@ async fn supervise(
         ])
         .arg(binary)
         .arg("--exec-supervisor")
-        .arg(workspace)
+        .arg(&owner.workspace)
         .kill_on_drop(true)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .spawn()
         .map_err(|_| "preflight_user_systemd")?;
-    let mut input = child.stdin.take().unwrap();
+    let mut input = Some(child.stdin.take().unwrap());
     let frame = format!("{}\n", serde_json::to_string(args).unwrap());
-    if !matches!(
-        tokio::time::timeout(Duration::from_secs(2), input.write_all(frame.as_bytes())).await,
-        Ok(Ok(()))
-    ) {
-        drop(input);
-        let _ = child.kill().await;
-        return Err("executor_cleanup_unconfirmed".into());
-    }
-    let mut output = child.stdout.take().unwrap().take(256 * 1024);
-    let mut bytes = Vec::new();
-    // Closing the control pipe also handles a crash of Rust/T3. The supervisor
-    // never uses it as payload stdin, and systemd keeps it outside the payload cgroup.
-    let read = output.read_to_end(&mut bytes);
-    tokio::pin!(read);
-    let completed = tokio::select! {
-        r = &mut read => Some(r),
-        _ = cancel.changed() => None,
-        _ = tokio::time::sleep(Duration::from_millis(args.timeout_ms + 15000)) => None,
+    let sent = tokio::select! {
+        result = tokio::time::timeout(Duration::from_secs(2), input.as_mut().unwrap().write_all(frame.as_bytes())) => matches!(result, Ok(Ok(()))),
+        _ = cancel.changed() => false,
     };
-    drop(input);
-    if completed.is_none() {
-        tokio::time::timeout(Duration::from_secs(6), &mut read)
-            .await
-            .map_err(|_| "executor_cleanup_unconfirmed")?
-            .map_err(|_| "executor_cleanup_unconfirmed")?;
-    } else {
-        completed
-            .unwrap()
-            .map_err(|_| "executor_cleanup_unconfirmed")?;
+    let mut stopping = None;
+    if !sent {
+        drop(input.take());
+        stopping = Some(tokio::time::Instant::now() + Duration::from_secs(6));
     }
-    let status = tokio::time::timeout(Duration::from_secs(6), child.wait())
-        .await
-        .map_err(|_| "executor_cleanup_unconfirmed")?
-        .map_err(|_| "executor_cleanup_unconfirmed")?;
-    if bytes.is_empty() && !status.success() {
-        // No payload can start except inside the service. A missing reply from an
-        // established service is deliberately uncertain, never proof of cleanup.
-        return Err("preflight_user_systemd_or_supervisor_lost".into());
+    let mut output = tokio::io::BufReader::new(child.stdout.take().unwrap()).lines();
+    let deadline = tokio::time::sleep(Duration::from_millis(args.timeout_ms + 15000));
+    tokio::pin!(deadline);
+    loop {
+        tokio::select! {
+            line = output.next_line() => {
+                let line = line.map_err(|_| "executor_cleanup_unconfirmed")?.ok_or("executor_cleanup_unconfirmed")?;
+                let mut value: Value = serde_json::from_str(&line).map_err(|_| "executor_cleanup_unconfirmed")?;
+                let running = value["reason"] == "running";
+                if running { value["session_id"] = json!(process); }
+                if !running {
+                    drop(input.take());
+                    tokio::time::timeout(Duration::from_secs(6), child.wait()).await.map_err(|_| "executor_cleanup_unconfirmed")?.map_err(|_| "executor_cleanup_unconfirmed")?;
+                    return Ok(value);
+                }
+                if let Some(request) = pending.take() {
+                    let result = owner.result(&request.id, value);
+                    let _ = request.reply.send(result);
+                }
+            }
+            Some(request) = requests.recv(), if pending.is_none() && input.is_some() => {
+                let frame = format!("{}\n", request.arguments);
+                *pending = Some(request);
+                let sent = tokio::select! {
+                    result = tokio::time::timeout(Duration::from_secs(2), input.as_mut().unwrap().write_all(frame.as_bytes())) => matches!(result, Ok(Ok(()))),
+                    _ = cancel.changed() => false,
+                };
+                if !sent {
+                    drop(input.take());
+                    stopping = Some(tokio::time::Instant::now() + Duration::from_secs(6));
+                }
+            }
+            _ = cancel.changed(), if input.is_some() => {
+                drop(input.take());
+                stopping = Some(tokio::time::Instant::now() + Duration::from_secs(6));
+            }
+            _ = async { match stopping { Some(until) => tokio::time::sleep_until(until).await, None => std::future::pending().await } } => return Err("executor_cleanup_unconfirmed".into()),
+            _ = &mut deadline => return Err("executor_cleanup_unconfirmed".into()),
+        }
     }
-    serde_json::from_slice(&bytes).map_err(|_| "executor_cleanup_unconfirmed".into())
 }
 
 /// Trusted trampoline inside the sandbox. A launch marker precedes user code.
@@ -401,7 +609,7 @@ mod linux {
             .arg(fd.to_string())
             .args(["/psi-executor", "--sandbox-payload", &args.cmd]);
         cmd.env_clear()
-            .stdin(Stdio::null())
+            .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         cmd
@@ -410,7 +618,7 @@ mod linux {
         let mut line = String::new();
         std::io::stdin()
             .lock()
-            .take(128 * 1024)
+            .take(512 * 1024)
             .read_line(&mut line)
             .map_err(|_| "supervisor_input")?;
         let args: ExecArgs =
@@ -556,6 +764,20 @@ mod linux {
             .spawn()
             .map_err(|_| "preflight_bubblewrap_or_membership")?;
         drop(enter);
+        let mut payload_input = child.stdin.take().unwrap();
+        for fd in [0, payload_input.as_raw_fd()] {
+            assert_eq!(
+                unsafe { libc::fcntl(fd, libc::F_SETFL, libc::O_NONBLOCK) },
+                0
+            );
+        }
+        let mut control_bytes = Vec::new();
+        let mut input_bytes = Vec::new();
+        let mut input_offset = 0;
+        let mut controller_closed = false;
+        let mut response_due = Some(Instant::now() + Duration::from_millis(args.yield_time_ms));
+        let mut response_limit = args.max_output_tokens;
+        let mut chunk_total = 0usize;
         let mut pipes = vec![
             (
                 true,
@@ -603,8 +825,41 @@ mod linux {
             unsafe {
                 libc::poll(&mut control, 1, 0);
             }
+            if control.revents != 0 && !controller_closed {
+                let mut buffer = [0u8; 8192];
+                match std::io::stdin().read(&mut buffer) {
+                    Ok(0) => controller_closed = true,
+                    Ok(n) => control_bytes.extend_from_slice(&buffer[..n]),
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                    Err(_) => controller_closed = true,
+                }
+                if control_bytes.len() > 512 * 1024 {
+                    controller_closed = true;
+                }
+                if let Some(end) = control_bytes.iter().position(|b| *b == b'\n') {
+                    let frame: Vec<_> = control_bytes.drain(..=end).collect();
+                    match serde_json::from_slice::<WriteArgs>(&frame) {
+                        Ok(request) if request.validate().is_ok() && response_due.is_none() => {
+                            input_bytes = request.chars.into_bytes();
+                            input_offset = 0;
+                            response_limit = request.max_output_tokens;
+                            bytes.truncate(response_limit);
+                            response_due =
+                                Some(Instant::now() + Duration::from_millis(request.yield_time_ms));
+                        }
+                        _ => controller_closed = true,
+                    }
+                }
+            }
+            if input_offset < input_bytes.len() {
+                match payload_input.write(&input_bytes[input_offset..]) {
+                    Ok(n) => input_offset += n,
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                    Err(_) => input_offset = input_bytes.len(),
+                }
+            }
             if graceful.is_none() && forced.is_none() {
-                if control.revents != 0 {
+                if controller_closed {
                     reason = "cancelled";
                     graceful = Some(Instant::now());
                 } else if start.elapsed() >= Duration::from_millis(args.timeout_ms) {
@@ -671,7 +926,8 @@ mod linux {
                             }
                             let n = n - offset;
                             total = total.saturating_add(n);
-                            let keep = n.min(args.max_output_tokens.saturating_sub(bytes.len()));
+                            chunk_total = chunk_total.saturating_add(n);
+                            let keep = n.min(response_limit.saturating_sub(bytes.len()));
                             bytes.extend_from_slice(&buffer[offset..offset + keep]);
                         }
                         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
@@ -690,6 +946,24 @@ mod linux {
             }
             if forced.is_some_and(|t| t.elapsed() >= Duration::from_secs(2)) {
                 break;
+            }
+            if response_due.is_some_and(|due| Instant::now() >= due)
+                && input_offset == input_bytes.len()
+                && graceful.is_none()
+                && forced.is_none()
+                && marker_bytes == marker
+            {
+                println!(
+                    "{}",
+                    json!({"reason":"running","exit_code":null,"output":String::from_utf8_lossy(&bytes),"output_bytes":total,"truncated":chunk_total>bytes.len(),"cleanup_confirmed":false})
+                );
+                if std::io::stdout().flush().is_err() {
+                    controller_closed = true;
+                }
+                bytes.clear();
+                chunk_total = 0;
+                response_limit = 16000;
+                response_due = None;
             }
             std::thread::sleep(Duration::from_millis(5));
         }
@@ -718,7 +992,7 @@ mod linux {
         }
         let _ = fs::remove_dir(&child_cg);
         Ok(
-            json!({"reason":reason,"exit_code":if marker_bytes==marker {exited.and_then(|s|s.code())} else {None},"launched":marker_bytes==marker,"output":String::from_utf8_lossy(&bytes),"output_bytes":total,"truncated":total>bytes.len(),"cleanup_confirmed":cleanup_ok,"cgroup":child_cg,"memory_max":2147483648u64,"swap_max":0,"pids_max":128,"tmp_bytes":268435456,"memory_events":memory,"pids_events":pids}),
+            json!({"reason":reason,"exit_code":if marker_bytes==marker {exited.and_then(|s|s.code())} else {None},"launched":marker_bytes==marker,"output":String::from_utf8_lossy(&bytes),"output_bytes":total,"truncated":chunk_total>bytes.len(),"cleanup_confirmed":cleanup_ok,"cgroup":child_cg,"memory_max":2147483648u64,"swap_max":0,"pids_max":128,"tmp_bytes":268435456,"memory_events":memory,"pids_events":pids}),
         )
     }
 }

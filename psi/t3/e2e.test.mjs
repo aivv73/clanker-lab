@@ -265,6 +265,35 @@ print('isolated command complete',end='')
       assert(!existsSync(resolve(root,"workspace/must-not-run")),"preflight failure must not run the command");
       assert.equal(readFileSync(resolve(root,"workspace/target.txt"),"utf8"),"value=new\n");
       await page.screenshot({path:resolve(root,"exec-and-preflight.png"),fullPage:true});
+      const continuation = {commands:[
+        {name:"exec_command",arguments:{cmd:"printf 'continuation ready\\n'; read value; printf '%s\\n' \"$value\" > continued.txt; printf 'continuation complete\\n'",yield_time_ms:50}},
+        {name:"exec_command",arguments:{cmd:"touch competing"}},
+        {name:"apply_patch",arguments:{patch:"*** Begin Patch\n*** Add File: competing\n+bad\n*** End Patch"}},
+        {name:"write_stdin",arguments:{session_id:"$process",yield_time_ms:20}},
+        {name:"write_stdin",arguments:{session_id:"$process",chars:"same process\n",yield_time_ms:1000}},
+      ]};
+      await page.getByTestId("composer-editor").fill(JSON.stringify(continuation));
+      await page.getByTestId("composer-editor").press("Enter");
+      await page.getByText(/write_stdin: exit/).waitFor();
+      await page.getByText(/exec_command: running/).waitFor();
+      await page.getByText(/apply_patch: tool_busy/).waitFor();
+      assert.equal(readFileSync(resolve(root,"workspace/continued.txt"),"utf8"),"same process\n");
+      assert(!existsSync(resolve(root,"workspace/competing")));
+      const runtime = new DatabaseSync(resolve(root,"psi",createHash("sha256").update("psi").digest("hex"),"history.sqlite"),{readOnly:true});
+      try {
+        const rows = runtime.prepare("SELECT result FROM commands WHERE turn IS NOT NULL ORDER BY rowid").all();
+        const terminal = JSON.parse(rows.at(-1).result);
+        assert.equal(terminal.status,"completed");
+        const items=terminal.provider_output.slice(0,-1);
+        assert.equal(items.length,10);
+        for(let i=0;i<items.length;i+=2) assert.equal(items[i].call_id,items[i+1].call_id);
+        assert.equal(JSON.parse(items[1].output).reason,"running");
+        assert.equal(JSON.parse(items[9].output).cleanup_confirmed,true);
+        assert.equal(terminal.policy.handoffs,5);
+        assert.equal(terminal.policy.transitions.filter(t=>t.event==="Request").length,5);
+      } finally { runtime.close(); }
+      await page.screenshot({path:resolve(root,"continuation.png"),fullPage:true});
+
     }
     let policyEvidence;
     if (policy) {
@@ -304,7 +333,7 @@ print('isolated command complete',end='')
     assert(!alive(runtimePid), "Rust must be reaped after the controller server closes");
     assert(log.includes("Psi runtime stopped"), "EOF must run Rust lifecycle cleanup");
     assert.deepEqual(pageErrors, []);
-    const report = { passed: true, exec_fixture: exec, policy_fixture: policy, policy_evidence: policyEvidence, policy_build: (policy || exec) ? JSON.parse(readFileSync(resolve(here,"../policy/.build/manifest.json"),"utf8")) : undefined, oauth_fixture: oauth, local_stream_cancellation: cancelStream, agent_loop: agentLoop, lifecycle, t3: "dfbb11bdd7c3f1a5575cb55d3e3abb12be025727", node: process.version, chromium: execFileSync(executablePath, ["--version"], { encoding: "utf8" }).trim(), normal_websocket: true, visible_response: true, stable_origin_command_id: true, one_runtime: true, viewer_detach_preserves_runtime: true, controller_close_reaps_runtime: true };
+    const report = { passed: true, exec_fixture: exec, continuation_fixture: exec, policy_fixture: policy, policy_evidence: policyEvidence, policy_build: (policy || exec) ? JSON.parse(readFileSync(resolve(here,"../policy/.build/manifest.json"),"utf8")) : undefined, oauth_fixture: oauth, local_stream_cancellation: cancelStream, agent_loop: agentLoop, lifecycle, t3: "dfbb11bdd7c3f1a5575cb55d3e3abb12be025727", node: process.version, chromium: execFileSync(executablePath, ["--version"], { encoding: "utf8" }).trim(), normal_websocket: true, visible_response: true, stable_origin_command_id: true, one_runtime: true, viewer_detach_preserves_runtime: true, controller_close_reaps_runtime: true };
     recordVersions(report);
     writeFileSync(resolve(root, "report.json"), JSON.stringify(report, null, 2) + "\n");
     console.log(`Evidence: ${root}/report.json`);

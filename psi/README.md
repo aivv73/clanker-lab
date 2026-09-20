@@ -18,7 +18,7 @@ The [#46](https://github.com/aivv73/clanker-lab/issues/46) slice adds a checked 
 policy plugin and a deterministic, harmless action through the real T3 path.
 See [the proof, runtime contract, and validation](docs/issue-46-validation.md).
 
-This is **not the full MVP**: command continuation, patches, integrated live tool use,
+This is **not the full MVP**: patches, integrated live tool use,
 and unknown-outcome acknowledgement remain later slices. Issue #49 adds isolated
 commands and awaited Git checkpoints through the deterministic `exec-fixture` loop.
 The full contract is in the [specification](docs/mvp-spec.md) and [glossary](CONTEXT.md).
@@ -353,5 +353,35 @@ available in the UI and is rejected by the server.
 Supported arguments/results and intentional reductions are in
 [PROTOCOL.md](t3/PROTOCOL.md#exec_command-slice-49). This fixture is enabled only by
 startup configuration, never by a prompt sent to the ordinary text-only model.
-There is no `write_stdin`, patch execution, PTY, or live model tool loop in this
-slice. [Validation and reproduction](docs/issue-49-validation.md).
+Issue #50 adds `write_stdin` continuation as described below. Patch execution,
+PTY, and a live model tool loop remain later work. [Validation and reproduction](docs/issue-49-validation.md).
+
+
+## Command continuation (#50)
+
+The `exec-fixture` loop supports a deterministic sequence of tool calls. For example,
+send this JSON in T3 (the `$process` placeholder selects the latest running command):
+
+```json
+{"commands":[{"name":"exec_command","arguments":{"cmd":"printf 'ready\\n'; read value; printf '%s\\n' \"$value\"","yield_time_ms":50}},{"name":"write_stdin","arguments":{"session_id":"$process","chars":"hello\n","yield_time_ms":1000}}]}
+```
+
+A running result includes an opaque `session_id`; it is a process handle, not the
+conversation ID or an OS PID. Empty or omitted `chars` polls output. Every call,
+including polling, needs its own Bend permit bound to the exact call ID, arguments,
+turn and runtime epoch. Other exec/patch calls return `tool_busy` while the process
+owns the slot; foreign, unknown and consumed process handles return `unknown_process`.
+The slot is released only after the final result confirms cleanup and is delivered.
+
+Each invocation returns only newly collected output, with cumulative `output_bytes`.
+Reading does not reset the original deadline or the 10 MiB command output limit.
+The supervisor continues enforcing both limits between invocations. T3 displays
+each result as it arrives. Exact call/result pairs are streamed durably and retained
+in completed model history; action rows use the same call IDs. A separate
+`command_processes` record retains the final process outcome even if cancellation
+occurs between calls. An interrupted turn still blocks recovery without replay.
+
+Once scripted calls finish, the fixture model polls any remaining process until
+cleanup. This exercises the model/tool contract without a live account; live Codex
+tool orchestration remains outside this slice. See [validation](docs/issue-50-validation.md)
+and the [continuation schema](t3/PROTOCOL.md#write_stdin-and-continuations-50).

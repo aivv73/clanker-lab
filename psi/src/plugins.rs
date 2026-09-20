@@ -314,33 +314,95 @@ impl AgentLoop for ExecFixtureLoop {
             .into_iter()
             .next()
             .ok_or("missing_tool_call")?;
-        let call_id = call["call_id"]
-            .as_str()
-            .ok_or("invalid_tool_call")?
-            .to_string();
-        let arguments = call["arguments"].as_str().ok_or("invalid_tool_call")?;
-        let value = serde_json::from_str(arguments).map_err(|_| "invalid_fixture_command")?;
-        let result = tools.execute(value, policy).await?;
-        let text = format!(
-            "exec_command: {}\n{}{}",
-            result["reason"].as_str().unwrap_or("unknown"),
-            result["output"].as_str().unwrap_or(""),
-            if result["truncated"] == true {
-                "\n[output truncated]"
+        let value: serde_json::Value =
+            serde_json::from_str(call["arguments"].as_str().ok_or("invalid_tool_call")?)
+                .map_err(|_| "invalid_fixture_command")?;
+        let mut commands: std::collections::VecDeque<serde_json::Value> =
+            if let Some(commands) = value.get("commands") {
+                commands
+                    .as_array()
+                    .ok_or("invalid_fixture_command")?
+                    .clone()
+                    .into()
             } else {
-                ""
+                vec![serde_json::json!({"name":"exec_command","arguments":value})].into()
+            };
+        let mut process = None;
+        let mut output = Vec::new();
+        let mut text = String::new();
+        while let Some(command) = commands.pop_front().or_else(|| {
+            process
+                .as_ref()
+                .map(|id| serde_json::json!({"name":"write_stdin","arguments":{"session_id":id}}))
+        }) {
+            let name = command["name"].as_str().ok_or("invalid_tool_call")?;
+            let mut arguments = command["arguments"].clone();
+            if arguments["session_id"] == "$process" {
+                arguments["session_id"] =
+                    serde_json::json!(process.as_ref().ok_or("no_running_process")?);
             }
-        );
-        let _ = events.send(ModelEvent::Text {
-            delta: text.clone(),
-        });
+            let call_id = format!("tool-{}", uuid::Uuid::new_v4());
+            let call = serde_json::json!({"type":"function_call","name":name,"call_id":call_id,"arguments":arguments.to_string()});
+            let _ = events.send(ModelEvent::OutputItem {
+                index: output.len() as u64,
+                item: call.clone(),
+            });
+            output.push(call);
+            let result = match tools
+                .invoke_identified(name, arguments, policy.clone(), call_id.clone())
+                .await
+            {
+                Ok(value) => value,
+                Err(error)
+                    if process.is_some()
+                        && matches!(
+                            error.as_str(),
+                            "tool_busy"
+                                | "unknown_process"
+                                | "unsupported_tool"
+                                | "unsupported_exec_arguments"
+                                | "unsupported_write_arguments"
+                                | "unsupported_workdir"
+                        ) =>
+                {
+                    serde_json::json!({"reason":"rejected","error":error})
+                }
+                Err(error) => return Err(error),
+            };
+            if result["reason"] == "running" {
+                process = result["session_id"].as_str().map(str::to_owned);
+            } else if result["cleanup_confirmed"] == true {
+                process = None;
+            }
+            let item = serde_json::json!({"type":"function_call_output","call_id":call_id,"output":result.to_string()});
+            let _ = events.send(ModelEvent::OutputItem {
+                index: output.len() as u64,
+                item: item.clone(),
+            });
+            output.push(item);
+            let delta = format!(
+                "{}: {}\n{}{}",
+                name,
+                result["error"]
+                    .as_str()
+                    .or(result["reason"].as_str())
+                    .unwrap_or("unknown"),
+                result["output"].as_str().unwrap_or(""),
+                if result["truncated"] == true {
+                    "\n[output truncated]"
+                } else {
+                    ""
+                }
+            );
+            let _ = events.send(ModelEvent::Text {
+                delta: delta.clone(),
+            });
+            text.push_str(&delta);
+        }
+        output.push(serde_json::json!({"type":"message","role":"assistant","content":[{"type":"output_text","text":text}]}));
         Ok(ModelResponse {
-            text: text.clone(),
-            output: vec![
-                call,
-                serde_json::json!({"type":"function_call_output","call_id":call_id,"output":result.to_string()}),
-                serde_json::json!({"type":"message","role":"assistant","content":[{"type":"output_text","text":text}]}),
-            ],
+            text,
+            output,
             response_id: None,
         })
     }
