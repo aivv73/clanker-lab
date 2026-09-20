@@ -10,8 +10,12 @@ admission, execution scopes, tracked plugin work, and startup loop selection.
 The [#47](https://github.com/aivv73/clanker-lab/issues/47) slice adds independent
 ChatGPT OAuth/PKCE, memory-only refresh, and streamed model responses through T3.
 
-This is **not the full MVP**: tools, Bend, durable Psi history,
-recovery, process-tree cancellation, and sandboxing are not implemented yet.
+The [#48](https://github.com/aivv73/clanker-lab/issues/48) slice adds SQLite model
+history, durable command acceptance, sequenced replay, and a T3 inbox with
+idempotent conversation projection.
+
+This is **not the full MVP**: tools, Bend, checkpoint/unknown-outcome recovery,
+process-tree cancellation, and sandboxing are not implemented yet.
 The full contract is in the [specification](docs/mvp-spec.md) and [glossary](CONTEXT.md).
 
 ## Build and checks
@@ -109,10 +113,12 @@ of implementation files.
   (including sign-in), and 2 seconds
   for process shutdown before forcing termination if needed. These limits apply to
   the fixture and do not establish cancellation guarantees for future tools.
-- Repeated IDs are deduplicated **only in the current process's memory**. There is no
-  durable acknowledgement, inbox, or replay. After a restart, T3 conversation history
-  remains in T3, but it is not recovered model history. Do not use this slice for
-  actions with side effects.
+- Turn commands and acceptance are durable before model execution. Identical retries
+  return the saved acceptance/result; changed content conflicts. Completed model
+  history survives restart, independently of T3 text. Sequenced events enter a
+  durable T3 inbox before its cursor advances; deterministic projection commands
+  prevent duplicate messages after dispatch/restart. This does not promise atomic
+  exactly-once external effects.
 - Model support, attachments, rollback, and auxiliary generation are not silently
   broadened: `fixture` and the configured ChatGPT model are supported; attachments and unsupported operations are
   rejected. Full verification of disabled rollback and checkpoints belongs to later slices.
@@ -161,8 +167,8 @@ adding a plugin-specific test protocol.
 
 Safe forced termination of arbitrary blocking or hung in-process plugin code is
 **not guaranteed**. Cooperative future cleanup is verified; external tool children,
-Bend admission, process-tree cancellation, unhealthy-runtime recovery, and durable
-records remain subsequent slices. Killing the process is not proof of external
+Bend admission, process-tree cancellation, and unhealthy-runtime recovery
+remain subsequent slices. Killing the process is not proof of external
 resource cleanup. No conflicts with the existing MVP specification were identified.
 
 [Issue #45 validation](docs/issue-45-validation.md).
@@ -189,18 +195,17 @@ reported as unknown in the provider snapshot; the turn displays sign-in/failure
 state. This slice initiates sign-in from the conversation, not T3's provider setup
 wizard. Credentials never travel through T3. After a Rust restart, send a new
 message and sign in again; existing T3 conversation records remain independent.
-Psi's exact model history is still in memory and is **not** recovered from T3 text.
+Psi's exact model history is recovered from its SQLite store, independently of T3 text.
 
 The launcher selects T3 token streaming; other T3 streaming preferences remain
 available. Sign-in is its own completed message item so that buffering cannot hide
 the actionable link. The normal loop streams text and reasoning as received. The buffered loop forwards
 sign-in immediately but buffers model deltas. Completed provider output items,
 including encrypted reasoning, item IDs, call IDs and exact argument strings, are
-preserved in `ModelResponse` and in subsequent in-memory model input. Completed
+preserved in `ModelResponse` and in subsequent model input. Completed
 items also cross the model event boundary before any later stream failure; failed
 streams do not append a fabricated successful response to session history. This slice
-advertises no tools and does not execute tool calls. Durable context, budget checks,
-and integrated tool use remain later slices.
+advertises no tools and does not execute tool calls. Context budget checks and integrated tool use remain later slices.
 
 Access/refresh tokens live only in the Rust model service. Refresh replaces both
 tokens; failed or cancelled rotation drops the old token. A 401 is explicit, clears
@@ -257,3 +262,26 @@ printed origin to `run.py --model fixture-codex --oauth-fixture <origin>`. The f
 accepts synthetic sign-in without an account; never use it for a real account.
 
 [Issue #47 validation and remaining live checks](docs/issue-47-validation.md).
+
+## Durable conversation storage (#48)
+
+The T3 integration stores its inbox under `<T3 base directory>/psi/inbox.sqlite`
+and Psi history under `psi/<SHA-256 of provider instance ID>/history.sqlite`.
+Both locations are outside the selected tool workspace. The standalone binary
+accepts `--state-dir /absolute/path` (or `PSI_STATE_DIR`); the default is
+`$XDG_STATE_HOME/psi/default`, falling back to `$HOME/.local/state/psi/default`.
+Do not share one directory between simultaneous controllers; startup rejects it.
+Closing a session keeps its saved history. Reopening restores it.
+
+After an ambiguous crash, accepted unfinished work is marked with unknown outcome
+and is never automatically executed again. That session blocks continuation;
+explicit recovery acknowledgement belongs to #49. Access and refresh tokens are
+not persisted, so model authentication is still required after restart.
+
+Psi projects streamed conversation text directly from the durable inbox, using
+T3 command receipts. Its durable path currently uses token streaming regardless
+of the global buffering preference. The inbox's cursor records durable acceptance,
+not UI rendering. Action intent/result and terminal-processing records are extension
+points for tools and checkpoints; they do not establish atomic file effects.
+
+[Protocol](t3/PROTOCOL.md) and [validation with crash tests](docs/issue-48-validation.md).

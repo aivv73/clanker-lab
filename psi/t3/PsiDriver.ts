@@ -1,3 +1,9 @@
+// @effect-diagnostics nodeBuiltinImport:off - Durable adapter paths use Node filesystem semantics.
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import * as Option from "effect/Option";
+import { ServerConfig } from "../config.ts";
+import { PsiInbox, instanceDirectory, outsideWorkspace } from "./PsiInbox.ts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as PubSub from "effect/PubSub";
@@ -10,11 +16,11 @@ import {
 import { createModelCapabilities } from "@t3tools/shared/model";
 import { ProviderAdapterValidationError, ProviderDriverError, type ProviderAdapterError } from "../provider/Errors.ts";
 import type { ProviderDriver } from "../provider/ProviderDriver.ts";
-import type { ProviderAdapterShape, ProviderThreadSnapshot } from "../provider/Services/ProviderAdapter.ts";
+import type { ProviderAdapterShape } from "../provider/Services/ProviderAdapter.ts";
 import { PsiBridge, lifecycleId } from "./PsiBridge.ts";
 
 const kind = ProviderDriverKind.make("psi");
-const Config = Schema.Struct({ binary: Schema.String, model: Schema.optional(Schema.String), oauthFixture: Schema.optional(Schema.String), agentLoop: Schema.optional(Schema.String), fixtureGate: Schema.optional(Schema.String), startupFault: Schema.optional(Schema.String) });
+const Config = Schema.Struct({ stateDir: Schema.optional(Schema.String), binary: Schema.String, model: Schema.optional(Schema.String), oauthFixture: Schema.optional(Schema.String), agentLoop: Schema.optional(Schema.String), fixtureGate: Schema.optional(Schema.String), startupFault: Schema.optional(Schema.String) });
 
 export const PsiDriver: ProviderDriver<typeof Config.Type> = {
   driverKind: kind,
@@ -22,12 +28,17 @@ export const PsiDriver: ProviderDriver<typeof Config.Type> = {
   configSchema: Config,
   defaultConfig: () => ({ binary: "psi" }),
   create: ({ instanceId, displayName, enabled, config }) => Effect.gen(function*() {
+    const server = yield* Effect.serviceOption(ServerConfig);
+    const stateRoot = Option.isSome(server) ? join(server.value.baseDir, "psi") : config.stateDir;
+    if (!stateRoot) return yield* Effect.fail(new ProviderDriverError({driver:kind,instanceId,detail:"stateDir required outside T3"}));
+    const inbox = new PsiInbox(stateRoot);
+    yield* Effect.addFinalizer(() => Effect.sync(() => inbox.close()));
+    const stateDir = instanceDirectory(stateRoot,instanceId);
     const events = yield* PubSub.unbounded<ProviderRuntimeEvent>();
     const sessions = new Map<ThreadId, ProviderSession>();
     const sessionStarts = new Map<ThreadId, Promise<ProviderSession>>();
     let stopped = false;
     const model = config.model ?? "fixture";
-    const history = new Map<ThreadId, ProviderThreadSnapshot["turns"]>();
     let bridge: PsiBridge | undefined;
     let starting: Promise<PsiBridge> | undefined;
 
@@ -36,10 +47,16 @@ export const PsiDriver: ProviderDriver<typeof Config.Type> = {
     const runtime = async () => {
       if (bridge) return bridge;
       starting ??= (async () => {
-        const next = new PsiBridge(config.binary, config);
-        await next.hello();
-        bridge = next;
-        return next;
+        const next = new PsiBridge(config.binary, { ...config, stateDir, onFrame: frame => inbox.accept(instanceId,frame) });
+        try {
+          const hello = await next.hello();
+          for (const session of hello.sessions ?? []) await next.send({op:"replay",request_id:lifecycleId(),session_id:session,after:inbox.cursor(instanceId,session)});
+          bridge = next;
+          return next;
+        } catch (error) {
+          await next.close();
+          throw error;
+        }
       })();
       try { return await starting; } finally { starting = undefined; }
     };
@@ -50,9 +67,10 @@ export const PsiDriver: ProviderDriver<typeof Config.Type> = {
       if (current) await current.close();
       bridge = undefined;
       sessions.clear();
-      history.clear();
     };
     yield* Effect.addFinalizer(() => Effect.promise(stopAll));
+    // Reconnect and drain persisted events even without a new user message.
+    if (enabled && existsSync(join(stateDir,"history.sqlite"))) yield* Effect.tryPromise({try:runtime,catch:e=>new ProviderDriverError({driver:kind,instanceId,detail:String(e)})});
     const unsupported = (operation: string) => Effect.fail(fail(operation, "unsupported by Psi fixture"));
     const adapter: ProviderAdapterShape<ProviderAdapterError> = {
       provider: kind,
@@ -64,12 +82,13 @@ export const PsiDriver: ProviderDriver<typeof Config.Type> = {
         if (pending) return pending;
         const start = (async () => {
           if (!input.cwd) throw new Error("workspace_required");
+          outsideWorkspace(stateRoot,input.cwd);
           const current = await runtime();
-          await current.send({ op: "open", request_id: lifecycleId(), session_id: input.threadId });
+          await current.send({ op: "open", request_id: lifecycleId(), session_id: input.threadId, workspace: input.cwd });
+          await current.send({op:"replay",request_id:lifecycleId(),session_id:input.threadId,after:inbox.cursor(instanceId,input.threadId)});
           const now = DateTime.formatIso(DateTime.nowUnsafe());
           const session: ProviderSession = { provider: kind, providerInstanceId: instanceId, threadId: input.threadId, cwd: input.cwd, runtimeMode: input.runtimeMode, status: "ready", createdAt: now, updatedAt: now };
           sessions.set(input.threadId, session);
-          history.set(input.threadId, []);
           return session;
         })();
         sessionStarts.set(input.threadId, start);
@@ -134,7 +153,6 @@ export const PsiDriver: ProviderDriver<typeof Config.Type> = {
           if (!streamed) await emit("content.delta", { streamKind: "assistant_text", delta: reply.output });
           await emit("item.completed", { itemType: "assistant_message", status: "completed" });
           await emit("turn.completed", { state: "completed" });
-          history.set(input.threadId, [...(history.get(input.threadId) ?? []), { id: turnId, items: [{ type: "user", text: input.input ?? "" }, { type: "assistant", text: reply.output }] }]);
         }
         return { threadId: input.threadId, turnId };
       }),
@@ -144,7 +162,6 @@ export const PsiDriver: ProviderDriver<typeof Config.Type> = {
       stopSession: (id) => wrap("stopSession", async () => {
         await sessionStarts.get(id)?.catch(() => undefined);
         const existed = sessions.delete(id);
-        history.delete(id);
         if (bridge && existed) await bridge.send({ op: "close", request_id: lifecycleId(), session_id: id });
       }),
       stopAll: () => wrap("stopAll", stopAll),
@@ -152,7 +169,8 @@ export const PsiDriver: ProviderDriver<typeof Config.Type> = {
       hasSession: (id) => Effect.sync(() => sessions.has(id)),
       readThread: (id) => wrap("readThread", async () => {
         if (!sessions.has(id)) throw new Error("session_not_started");
-        return { threadId: id, turns: history.get(id) ?? [] };
+        const reply = await bridge!.send({op:"history",request_id:lifecycleId(),session_id:id});
+        return {threadId:id,turns:(reply.turns ?? []).filter(t=>t.status==="completed").map(t=>({id:TurnId.make(t.turn_id),items:[{type:"user" as const,text:t.input ?? ""},{type:"assistant" as const,text:t.output ?? ""}]}))};
       }),
       rollbackThread: () => unsupported("rollbackThread"),
       respondToRequest: () => unsupported("respondToRequest"),

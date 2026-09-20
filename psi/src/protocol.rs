@@ -1,4 +1,4 @@
-//! Non-durable JSONL controller. Credentials stay behind the model service boundary.
+//! Durable JSONL controller. Credentials stay behind the model service boundary.
 use crate::{
     admission::TurnLease,
     model::{ModelEvent, ModelRequest, ModelResponse},
@@ -16,7 +16,9 @@ pub const CAPABILITIES: &[&str] = &[
     "origin-command-id",
     "model-stream",
     "memory-oauth",
+    "durable-events",
 ];
+type DurableResult<T> = std::result::Result<T, String>;
 const MAX_LINE: usize = 1024 * 1024;
 
 #[derive(Deserialize, Serialize, Clone, PartialEq)]
@@ -27,6 +29,18 @@ pub enum Command {
         capabilities: Vec<String>,
     },
     Open {
+        version: u32,
+        request_id: String,
+        session_id: String,
+        workspace: Option<String>,
+    },
+    Replay {
+        version: u32,
+        request_id: String,
+        session_id: String,
+        after: u64,
+    },
+    History {
         version: u32,
         request_id: String,
         session_id: String,
@@ -58,6 +72,8 @@ impl Command {
     fn version(&self) -> u32 {
         match self {
             Self::Hello { version, .. }
+            | Self::Replay { version, .. }
+            | Self::History { version, .. }
             | Self::Open { version, .. }
             | Self::Turn { version, .. }
             | Self::Cancel { version, .. }
@@ -68,7 +84,9 @@ impl Command {
     fn request_id(&self) -> Option<&str> {
         match self {
             Self::Hello { .. } => None,
-            Self::Open { request_id, .. }
+            Self::Replay { request_id, .. }
+            | Self::History { request_id, .. }
+            | Self::Open { request_id, .. }
             | Self::Turn { request_id, .. }
             | Self::Cancel { request_id, .. }
             | Self::Close { request_id, .. }
@@ -78,12 +96,12 @@ impl Command {
 }
 
 pub struct Controller {
+    store: crate::store::Store,
+    directory: std::path::PathBuf,
     runtime_id: String,
     ready: bool,
     agent: Arc<LoopService>,
     sessions: HashMap<String, Vec<Value>>,
-    receipts: HashMap<String, (Command, Value)>,
-    turns: HashMap<String, String>,
     work: Work,
     spawner: Spawner,
     active: Option<(Command, TurnLease)>,
@@ -94,15 +112,23 @@ pub struct Controller {
     event_rx: Option<tokio::sync::mpsc::UnboundedReceiver<ModelEvent>>,
 }
 impl Controller {
-    pub fn new(agent: Arc<LoopService>, work: Work, spawner: Spawner) -> Self {
+    pub fn new(
+        agent: Arc<LoopService>,
+        work: Work,
+        spawner: Spawner,
+        directory: std::path::PathBuf,
+    ) -> DurableResult<Self> {
+        let mut store = crate::store::Store::open(&directory).map_err(|e| e.to_string())?;
+        let runtime_id = uuid::Uuid::new_v4().to_string();
+        store.recover(&runtime_id).map_err(|e| e.to_string())?;
         let (done_tx, done_rx) = tokio::sync::mpsc::unbounded_channel();
-        Self {
-            runtime_id: uuid::Uuid::new_v4().to_string(),
+        Ok(Self {
+            store,
+            directory,
+            runtime_id,
             ready: false,
             agent,
             sessions: HashMap::new(),
-            receipts: HashMap::new(),
-            turns: HashMap::new(),
             work,
             spawner,
             active: None,
@@ -111,7 +137,7 @@ impl Controller {
             outbox: Vec::new(),
             model: "fixture".into(),
             event_rx: None,
-        }
+        })
     }
     pub fn with_model(mut self, model: String) -> Self {
         self.model = model;
@@ -120,24 +146,24 @@ impl Controller {
     fn error(&self, code: &str) -> Value {
         json!({"version": VERSION, "runtime_id": self.runtime_id, "error": code})
     }
-    async fn execute(&mut self, command: Command) -> Option<Value> {
+    async fn execute(&mut self, command: Command) -> DurableResult<Option<Value>> {
         let request = command.request_id().map(str::to_owned);
-        let reply = self.dispatch(command).await;
-        reply.map(|mut reply| {
+        let reply = self.dispatch(command).await?;
+        Ok(reply.map(|mut reply| {
             if let Some(request) = request {
                 reply["request_id"] = json!(request);
             }
             reply
-        })
+        }))
     }
-    async fn dispatch(&mut self, command: Command) -> Option<Value> {
+    async fn dispatch(&mut self, command: Command) -> DurableResult<Option<Value>> {
         if command.version() != VERSION {
             self.ready = false;
-            return Some(self.error("incompatible_version"));
+            return Ok(Some(self.error("incompatible_version")));
         }
         if let Command::Hello { capabilities, .. } = &command {
             if self.ready {
-                return Some(self.error("already_initialized"));
+                return Ok(Some(self.error("already_initialized")));
             }
             let mut supported = CAPABILITIES.to_vec();
             if self.model == "fixture" {
@@ -148,46 +174,103 @@ impl Controller {
                     .iter()
                     .any(|c| !supported.contains(&c.as_str()))
             {
-                return Some(self.error("incompatible_capabilities"));
+                return Ok(Some(self.error("incompatible_capabilities")));
             }
             self.ready = true;
-            return Some(
-                json!({"version": VERSION, "runtime_id": self.runtime_id, "capabilities": supported, "model": self.model, "pid": std::process::id()}),
-            );
+            return Ok(Some(
+                json!({"version": VERSION, "runtime_id": self.runtime_id, "capabilities": supported, "model": self.model, "pid": std::process::id(), "sessions":self.store.sessions().map_err(|e|e.to_string())?}),
+            ));
         }
         if !self.ready {
-            return Some(self.error("handshake_required"));
+            return Ok(Some(self.error("handshake_required")));
         }
         let request_id = command.request_id().unwrap().to_owned();
         if request_id.trim().is_empty() {
-            return Some(self.error("invalid_request_id"));
+            return Ok(Some(self.error("invalid_request_id")));
         }
-        if let Some((original, reply)) = self.receipts.get(&request_id) {
-            return Some(if original == &command {
-                let mut reply = reply.clone();
+        if matches!(command, Command::Turn { .. }) {
+            if let Some((original, mut acceptance, result)) =
+                self.store.receipt(&request_id).map_err(|e| e.to_string())?
+            {
+                if original != serde_json::to_value(&command).unwrap() {
+                    return Ok(Some(self.error("request_id_conflict")));
+                }
+                acceptance["runtime_id"] = json!(self.runtime_id);
+                acceptance["duplicate"] = json!(true);
+                if let Some(mut result) = result {
+                    self.outbox.push(acceptance);
+                    result["runtime_id"] = json!(self.runtime_id);
+                    result["duplicate"] = json!(true);
+                    return Ok(Some(result));
+                }
+                return Ok(Some(acceptance));
+            }
+        }
+        if !matches!(command, Command::Turn { .. }) {
+            if let Some((original, mut reply, _)) =
+                self.store.receipt(&request_id).map_err(|e| e.to_string())?
+            {
+                if original != serde_json::to_value(&command).unwrap() {
+                    return Ok(Some(self.error("request_id_conflict")));
+                }
+                if let Command::Open {
+                    session_id,
+                    workspace,
+                    ..
+                } = &command
+                {
+                    self.store
+                        .session(session_id, workspace.as_deref(), &self.directory)
+                        .map_err(|e| e.to_string())?;
+                    self.work.reopen_session(session_id);
+                    self.sessions.insert(
+                        session_id.clone(),
+                        self.store.history(session_id).map_err(|e| e.to_string())?,
+                    );
+                }
+                reply["runtime_id"] = json!(self.runtime_id);
                 reply["duplicate"] = json!(true);
-                reply
-            } else {
-                self.error("request_id_conflict")
-            });
-        }
-        if let Some((pending, _)) = &self.active {
-            if pending.request_id() == Some(&request_id) {
-                return Some(self.error(if pending == &command {
-                    "request_in_progress"
-                } else {
-                    "request_id_conflict"
-                }));
+                return Ok(Some(reply));
             }
         }
         let mut reply = match &command {
-            Command::Open { session_id, .. } => {
+            Command::Open {
+                session_id,
+                workspace,
+                ..
+            } => {
                 if session_id.trim().is_empty() {
-                    return Some(self.error("invalid_session_id"));
+                    return Ok(Some(self.error("invalid_session_id")));
+                }
+                if let Err(e) =
+                    self.store
+                        .session(session_id, workspace.as_deref(), &self.directory)
+                {
+                    return Ok(Some(self.error(&e.to_string())));
                 }
                 self.work.reopen_session(session_id);
-                self.sessions.entry(session_id.clone()).or_default();
+                self.sessions.insert(
+                    session_id.clone(),
+                    self.store.history(session_id).map_err(|e| e.to_string())?,
+                );
                 json!({"session_id": session_id, "status": "ready"})
+            }
+            Command::Replay {
+                session_id, after, ..
+            } => {
+                let events = match self.store.events(session_id, *after) {
+                    Ok(events) => events,
+                    Err(error) => return Ok(Some(self.error(&error.to_string()))),
+                };
+                for mut event in events {
+                    event["runtime_id"] = json!(self.runtime_id);
+                    event["replay"] = json!(true);
+                    self.outbox.push(event);
+                }
+                json!({"status":"replayed","session_id":session_id})
+            }
+            Command::History { session_id, .. } => {
+                json!({"status":"history","session_id":session_id,"history":self.store.history(session_id).map_err(|e|e.to_string())?,"turns":self.store.completed(session_id).map_err(|e|e.to_string())?})
             }
             Command::Turn {
                 session_id,
@@ -196,18 +279,28 @@ impl Controller {
                 ..
             } => {
                 if !self.sessions.contains_key(session_id) {
-                    return Some(self.error("session_not_open"));
+                    return Ok(Some(self.error("session_not_open")));
                 }
-                if turn_id.trim().is_empty() || self.turns.contains_key(turn_id) {
-                    return Some(self.error("turn_id_conflict"));
+                if turn_id.trim().is_empty()
+                    || self.store.turn_exists(turn_id).map_err(|e| e.to_string())?
+                {
+                    return Ok(Some(self.error("turn_id_conflict")));
                 }
                 if self.active.is_some() {
-                    return Some(self.error("busy"));
+                    return Ok(Some(self.error("busy")));
+                }
+                if self.store.blocked(session_id).map_err(|e| e.to_string())? {
+                    return Ok(Some(self.error("session_outcome_unknown")));
                 }
                 let lease = match TurnLease::acquire() {
                     Ok(lease) => lease,
-                    Err(error) => return Some(self.error(&error)),
+                    Err(error) => return Ok(Some(self.error(&error))),
                 };
+                let mut acceptance = json!({"version":VERSION,"runtime_id":self.runtime_id,"request_id":request_id,"session_id":session_id,"turn_id":turn_id,"status":"accepted"});
+                self.store
+                    .accept(&serde_json::to_value(&command).unwrap(), &mut acceptance)
+                    .map_err(|e| e.to_string())?;
+                self.outbox.push(acceptance);
                 let agent = self.agent.clone();
                 let mut model_input = self.sessions[session_id].clone();
                 model_input.extend(ModelRequest::user(input).input);
@@ -220,16 +313,15 @@ impl Controller {
                     session: session_id.clone(),
                     turn: turn_id.clone(),
                 };
+                self.active = Some((command.clone(), lease));
                 if let Err(error) = self.spawner.spawn(owner, async move {
                     let result = agent.0.run(input, events).await;
                     let _ = tx.send((id, result));
                 }) {
-                    return Some(self.error(&error));
+                    return Ok(Some(self.finish(Err(error)).await?));
                 }
-                self.turns.insert(turn_id.clone(), request_id.clone());
                 eprintln!("Psi turn admitted: session={session_id} turn={turn_id}");
-                self.active = Some((command, lease));
-                return None;
+                return Ok(None);
             }
 
             Command::Cancel {
@@ -238,14 +330,14 @@ impl Controller {
                 ..
             } => {
                 if self.active.as_ref().is_some_and(|(c, _)| matches!(c, Command::Turn { session_id: active, turn_id: active_turn, .. } if active == session_id && turn_id.as_ref().is_none_or(|id| id == active_turn))) {
-                    let cancelled = self.finish(Err("local_cancelled".into())).await;
+                    let cancelled = self.finish(Err("local_cancelled".into())).await?;
                     self.outbox.push(cancelled);
                 }
                 json!({"status":"cancel_requested", "session_id":session_id})
             }
             Command::Close { session_id, .. } => {
                 if self.active.as_ref().is_some_and(|(c, _)| matches!(c, Command::Turn { session_id: active, .. } if active == session_id)) {
-                    let cancelled = self.finish(Err("session_closed".into())).await;
+                    let cancelled = self.finish(Err("session_closed".into())).await?;
                     self.outbox.push(cancelled);
                 }
                 self.work
@@ -256,7 +348,7 @@ impl Controller {
             }
             Command::Shutdown { .. } => {
                 if self.active.is_some() {
-                    let cancelled = self.finish(Err("runtime_closed".into())).await;
+                    let cancelled = self.finish(Err("runtime_closed".into())).await?;
                     self.outbox.push(cancelled);
                 }
                 json!({"status": "shutdown"})
@@ -266,10 +358,12 @@ impl Controller {
         reply["version"] = json!(VERSION);
         reply["runtime_id"] = json!(self.runtime_id);
         reply["request_id"] = json!(request_id);
-        self.receipts.insert(request_id, (command, reply.clone()));
-        Some(reply)
+        self.store
+            .accept(&serde_json::to_value(&command).unwrap(), &mut reply)
+            .map_err(|e| e.to_string())?;
+        Ok(Some(reply))
     }
-    async fn finish(&mut self, result: Result<ModelResponse, String>) -> Value {
+    async fn finish(&mut self, result: Result<ModelResponse, String>) -> DurableResult<Value> {
         let (command, _lease) = self.active.take().unwrap();
         self.event_rx = None;
         let Command::Turn {
@@ -316,15 +410,16 @@ impl Controller {
                 }
             }
         }
-        self.receipts
-            .insert(request_id.clone(), (command, reply.clone()));
+        self.store
+            .finish(&mut reply, Some(&self.sessions[session_id]))
+            .map_err(|e| e.to_string())?;
         eprintln!("Psi turn cleaned: tasks={}", self.work.count());
-        reply
+        Ok(reply)
     }
     pub async fn serve(&mut self) -> Result<(), String> {
         let result = self.serve_inner().await;
         if self.active.is_some() {
-            self.finish(Err("controller_closed".into())).await;
+            self.finish(Err("controller_closed".into())).await?;
         }
         result
     }
@@ -340,19 +435,21 @@ impl Controller {
                     let parsed = serde_json::from_slice::<Command>(&line);
                     line.clear();
                     match parsed {
-                        Ok(command) => self.execute(command).await,
+                        Ok(command) => self.execute(command).await?,
                         Err(_) => Some(self.error("invalid_command")),
                     }
                 }
                 Some(event) = async { match &mut self.event_rx { Some(rx) => rx.recv().await, None => std::future::pending().await } } => {
-                    self.active.as_ref().map(|(c, _)| {
+                    let mut frame = self.active.as_ref().map(|(c, _)| {
                         let Command::Turn { request_id, session_id, turn_id, .. } = c else { unreachable!() };
                         json!({"version":VERSION,"runtime_id":self.runtime_id,"request_id":request_id,"session_id":session_id,"turn_id":turn_id,"status":"streaming","event":event})
-                    })
+                    });
+                    if let Some(frame) = &mut frame { self.store.event(frame).map_err(|e|e.to_string())?; }
+                    frame
                 }
                 Some((id, result)) = self.done_rx.recv() => {
                     if self.active.as_ref().is_some_and(|(c, _)| matches!(c, Command::Turn { turn_id, .. } if turn_id == &id)) {
-                        Some(self.finish(result).await)
+                        Some(self.finish(result).await?)
                     } else { None }
                 }
             };

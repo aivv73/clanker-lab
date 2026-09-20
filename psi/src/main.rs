@@ -6,6 +6,17 @@ use psi::{
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
+    let mut directory = std::env::var_os("PSI_STATE_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::env::var_os("XDG_STATE_HOME")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| {
+                    std::path::PathBuf::from(std::env::var_os("HOME").expect("HOME required"))
+                        .join(".local/state")
+                })
+                .join("psi/default")
+        });
     let mut selection = "single-response".to_string();
     let mut gate = None;
     let mut fault = None;
@@ -15,6 +26,7 @@ async fn main() {
     while let Some(arg) = args.next() {
         let value = args.next().unwrap_or_default();
         match arg.as_str() {
+            "--state-dir" => directory = value.into(),
             "--agent-loop" => selection = value,
             "--model" => model = value,
             "--oauth-fixture" => oauth_fixture = Some(value),
@@ -76,16 +88,15 @@ async fn main() {
     };
     eprintln!("Psi runtime started");
     let result = match runtime.service("agent-loop") {
-        Ok(agent) => {
-            Controller::new(
-                agent,
-                runtime.work(),
-                runtime.spawner("agent-loop").unwrap(),
-            )
-            .with_model(model)
-            .serve()
-            .await
-        }
+        Ok(agent) => match Controller::new(
+            agent,
+            runtime.work(),
+            runtime.spawner("agent-loop").unwrap(),
+            directory,
+        ) {
+            Ok(controller) => controller.with_model(model).serve().await,
+            Err(error) => Err(error),
+        },
         Err(error) => Err(error),
     };
     let cleanup = runtime.close().await;
