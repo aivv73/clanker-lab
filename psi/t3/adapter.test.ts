@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - Node test fixtures exercise real files and subprocess lifetimes.
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
@@ -109,7 +110,7 @@ test("Rust rejects overlap across bridges without a queue; close cleans only its
     const admitted = new Promise<void>((resolve) => a.child.stderr.on("data", (data: Buffer) => { if (data.toString().includes("turn admitted")) resolve(); }));
     const pending = a.send({ op: "turn", request_id: "first", session_id: "a", turn_id: "first", input: "held" });
     // Attach a handler before close rejects the original turn.
-    const cancelled = assert.rejects(pending, /session_closed/);
+    const cancelled = pending.then((reply) => { assert.equal(reply.status, "cancelled"); assert.equal(reply.error, "session_closed"); });
     await admitted;
     await assert.rejects(a.send({ op: "turn", request_id: "conflict", session_id: "b", turn_id: "conflict", input: "must not queue" }), /busy/);
     await assert.rejects(b.send({ op: "turn", request_id: "independent", session_id: "independent", turn_id: "independent", input: "must not queue" }), /busy/);
@@ -144,7 +145,7 @@ test("independent T3 provider instances cannot bypass the Rust lease", async () 
       assert.match(String(busy), /busy/);
       yield* a.adapter.stopSession(first);
       yield* a.adapter.stopSession(first);
-      assert.equal((yield* Effect.promise(() => pending))._tag, "Failure");
+      assert.equal((yield* Effect.promise(() => pending))._tag, "Success");
       writeFileSync(gate, "release");
       yield* b.adapter.sendTurn({ threadId: second, requestId: "after", input: "after" });
       assert.equal((yield* b.adapter.readThread(second)).turns.length, 1);

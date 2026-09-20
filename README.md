@@ -7,7 +7,7 @@ A monorepo for personal experiments. Each experiment lives in its own directory 
 | Package | Description | Stack |
 | --- | --- | --- |
 | [paclang](paclang/README.md) | Analyze the programming languages used in the source code of installed packages on Arch Linux and other ALPM-based systems. | Rust |
-| [Psi](psi/README.md) | A standalone Rust agent runtime; the first conversation through T3 with a fixture model. | Rust, T3; Bend planned for the MVP |
+| [Psi](psi/README.md) | A standalone Rust agent runtime; T3 conversations, memory-only ChatGPT sign-in, and streamed responses. | Rust, T3; Bend planned for the MVP |
 
 ## paclang
 

@@ -9,11 +9,15 @@ async fn main() {
     let mut selection = "single-response".to_string();
     let mut gate = None;
     let mut fault = None;
+    let mut model = "fixture".to_string();
+    let mut oauth_fixture = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         let value = args.next().unwrap_or_default();
         match arg.as_str() {
             "--agent-loop" => selection = value,
+            "--model" => model = value,
+            "--oauth-fixture" => oauth_fixture = Some(value),
             "--fixture-gate" => gate = Some(std::path::PathBuf::from(value)),
             "--startup-fault" => fault = Some(value),
             _ => {
@@ -21,6 +25,10 @@ async fn main() {
                 std::process::exit(1);
             }
         }
+    }
+    if model.trim().is_empty() || (model == "fixture" && oauth_fixture.is_some()) {
+        eprintln!("invalid model configuration");
+        std::process::exit(1);
     }
     let agent: Box<dyn Plugin> = match selection.as_str() {
         "single-response" => Box::new(SingleResponsePlugin),
@@ -30,7 +38,22 @@ async fn main() {
             std::process::exit(1);
         }
     };
-    let mut plugins: Vec<Box<dyn Plugin>> = vec![agent, Box::new(FixtureModelPlugin { gate })];
+    let provider: Box<dyn Plugin> = if model == "fixture" {
+        Box::new(FixtureModelPlugin { gate })
+    } else {
+        let config = match oauth_fixture {
+            Some(base) => match psi::codex::Config::fixture(&base, model.clone()) {
+                Ok(config) => config,
+                Err(error) => {
+                    eprintln!("{error}");
+                    std::process::exit(1);
+                }
+            },
+            None => psi::codex::Config::live(model.clone()),
+        };
+        Box::new(psi::codex::CodexModelPlugin(config))
+    };
+    let mut plugins: Vec<Box<dyn Plugin>> = vec![agent, provider];
     if let Some(fault) = fault {
         let fault = match fault.as_str() {
             "missing" => "missing",
@@ -51,7 +74,7 @@ async fn main() {
             std::process::exit(1);
         }
     };
-    eprintln!("Psi fixture runtime started");
+    eprintln!("Psi runtime started");
     let result = match runtime.service("agent-loop") {
         Ok(agent) => {
             Controller::new(
@@ -59,6 +82,7 @@ async fn main() {
                 runtime.work(),
                 runtime.spawner("agent-loop").unwrap(),
             )
+            .with_model(model)
             .serve()
             .await
         }

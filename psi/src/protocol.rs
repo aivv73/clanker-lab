@@ -1,6 +1,7 @@
-//! Initial, non-durable JSONL controller. No tools, credentials, or file access.
+//! Non-durable JSONL controller. Credentials stay behind the model service boundary.
 use crate::{
     admission::TurnLease,
+    model::{ModelEvent, ModelRequest, ModelResponse},
     plugins::LoopService,
     work::{Owner, Spawner, Work},
 };
@@ -10,7 +11,12 @@ use std::{collections::HashMap, sync::Arc};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 pub const VERSION: u32 = 1;
-pub const CAPABILITIES: &[&str] = &["fixture-model", "sessions", "origin-command-id"];
+pub const CAPABILITIES: &[&str] = &[
+    "sessions",
+    "origin-command-id",
+    "model-stream",
+    "memory-oauth",
+];
 const MAX_LINE: usize = 1024 * 1024;
 
 #[derive(Deserialize, Serialize, Clone, PartialEq)]
@@ -32,6 +38,12 @@ pub enum Command {
         turn_id: String,
         input: String,
     },
+    Cancel {
+        version: u32,
+        request_id: String,
+        session_id: String,
+        turn_id: Option<String>,
+    },
     Close {
         version: u32,
         request_id: String,
@@ -48,6 +60,7 @@ impl Command {
             Self::Hello { version, .. }
             | Self::Open { version, .. }
             | Self::Turn { version, .. }
+            | Self::Cancel { version, .. }
             | Self::Close { version, .. }
             | Self::Shutdown { version, .. } => *version,
         }
@@ -57,6 +70,7 @@ impl Command {
             Self::Hello { .. } => None,
             Self::Open { request_id, .. }
             | Self::Turn { request_id, .. }
+            | Self::Cancel { request_id, .. }
             | Self::Close { request_id, .. }
             | Self::Shutdown { request_id, .. } => Some(request_id),
         }
@@ -73,9 +87,11 @@ pub struct Controller {
     work: Work,
     spawner: Spawner,
     active: Option<(Command, TurnLease)>,
-    done_tx: tokio::sync::mpsc::UnboundedSender<(String, Result<String, String>)>,
-    done_rx: tokio::sync::mpsc::UnboundedReceiver<(String, Result<String, String>)>,
+    done_tx: tokio::sync::mpsc::UnboundedSender<(String, Result<ModelResponse, String>)>,
+    done_rx: tokio::sync::mpsc::UnboundedReceiver<(String, Result<ModelResponse, String>)>,
     outbox: Vec<Value>,
+    model: String,
+    event_rx: Option<tokio::sync::mpsc::UnboundedReceiver<ModelEvent>>,
 }
 impl Controller {
     pub fn new(agent: Arc<LoopService>, work: Work, spawner: Spawner) -> Self {
@@ -93,7 +109,13 @@ impl Controller {
             done_tx,
             done_rx,
             outbox: Vec::new(),
+            model: "fixture".into(),
+            event_rx: None,
         }
+    }
+    pub fn with_model(mut self, model: String) -> Self {
+        self.model = model;
+        self
     }
     fn error(&self, code: &str) -> Value {
         json!({"version": VERSION, "runtime_id": self.runtime_id, "error": code})
@@ -117,15 +139,20 @@ impl Controller {
             if self.ready {
                 return Some(self.error("already_initialized"));
             }
-            if capabilities
-                .iter()
-                .any(|c| !CAPABILITIES.contains(&c.as_str()))
+            let mut supported = CAPABILITIES.to_vec();
+            if self.model == "fixture" {
+                supported.push("fixture-model");
+            }
+            if !capabilities.iter().any(|c| c == "model-stream")
+                || capabilities
+                    .iter()
+                    .any(|c| !supported.contains(&c.as_str()))
             {
                 return Some(self.error("incompatible_capabilities"));
             }
             self.ready = true;
             return Some(
-                json!({"version": VERSION, "runtime_id": self.runtime_id, "capabilities": CAPABILITIES, "model": "fixture", "pid": std::process::id()}),
+                json!({"version": VERSION, "runtime_id": self.runtime_id, "capabilities": supported, "model": self.model, "pid": std::process::id()}),
             );
         }
         if !self.ready {
@@ -182,7 +209,11 @@ impl Controller {
                     Err(error) => return Some(self.error(&error)),
                 };
                 let agent = self.agent.clone();
-                let input = input.clone();
+                let mut model_input = self.sessions[session_id].clone();
+                model_input.extend(ModelRequest::user(input).input);
+                let input = ModelRequest { input: model_input };
+                let (events, receiver) = tokio::sync::mpsc::unbounded_channel();
+                self.event_rx = Some(receiver);
                 let tx = self.done_tx.clone();
                 let id = turn_id.clone();
                 let owner = Owner::Turn {
@@ -190,7 +221,7 @@ impl Controller {
                     turn: turn_id.clone(),
                 };
                 if let Err(error) = self.spawner.spawn(owner, async move {
-                    let result = agent.0.run(&input).await;
+                    let result = agent.0.run(input, events).await;
                     let _ = tx.send((id, result));
                 }) {
                     return Some(self.error(&error));
@@ -201,6 +232,17 @@ impl Controller {
                 return None;
             }
 
+            Command::Cancel {
+                session_id,
+                turn_id,
+                ..
+            } => {
+                if self.active.as_ref().is_some_and(|(c, _)| matches!(c, Command::Turn { session_id: active, turn_id: active_turn, .. } if active == session_id && turn_id.as_ref().is_none_or(|id| id == active_turn))) {
+                    let cancelled = self.finish(Err("local_cancelled".into())).await;
+                    self.outbox.push(cancelled);
+                }
+                json!({"status":"cancel_requested", "session_id":session_id})
+            }
             Command::Close { session_id, .. } => {
                 if self.active.as_ref().is_some_and(|(c, _)| matches!(c, Command::Turn { session_id: active, .. } if active == session_id)) {
                     let cancelled = self.finish(Err("session_closed".into())).await;
@@ -227,8 +269,9 @@ impl Controller {
         self.receipts.insert(request_id, (command, reply.clone()));
         Some(reply)
     }
-    async fn finish(&mut self, result: Result<String, String>) -> Value {
+    async fn finish(&mut self, result: Result<ModelResponse, String>) -> Value {
         let (command, _lease) = self.active.take().unwrap();
+        self.event_rx = None;
         let Command::Turn {
             session_id,
             turn_id,
@@ -249,20 +292,28 @@ impl Controller {
         match result {
             Ok(output) => {
                 reply["status"] = json!("completed");
-                reply["output"] = json!(output);
+                reply["output"] = json!(output.text);
+                reply["provider_output"] = json!(output.output);
+                reply["response_id"] = json!(output.response_id);
                 reply["input"] = json!(input);
-                self.sessions
-                    .get_mut(session_id)
-                    .unwrap()
-                    .push(reply.clone());
+                let history = self.sessions.get_mut(session_id).unwrap();
+                history.extend(ModelRequest::user(input).input);
+                history.extend(output.output);
             }
             Err(reason) => {
-                reply["status"] = json!(if reason == "model_failed" {
-                    "failed"
-                } else {
+                reply["status"] = json!(if matches!(
+                    reason.as_str(),
+                    "session_closed" | "runtime_closed" | "controller_closed" | "local_cancelled"
+                ) {
                     "cancelled"
+                } else {
+                    "failed"
                 });
                 reply["error"] = json!(reason);
+                if reply["status"] == "cancelled" {
+                    reply["cancellation_scope"] =
+                        json!("local_only_server_processing_and_billing_unknown");
+                }
             }
         }
         self.receipts
@@ -283,6 +334,7 @@ impl Controller {
         let mut line = Vec::new();
         loop {
             let reply = tokio::select! {
+                biased;
                 frame = read_frame(&mut input, &mut line) => {
                     if !frame? { break; }
                     let parsed = serde_json::from_slice::<Command>(&line);
@@ -292,9 +344,15 @@ impl Controller {
                         Err(_) => Some(self.error("invalid_command")),
                     }
                 }
+                Some(event) = async { match &mut self.event_rx { Some(rx) => rx.recv().await, None => std::future::pending().await } } => {
+                    self.active.as_ref().map(|(c, _)| {
+                        let Command::Turn { request_id, session_id, turn_id, .. } = c else { unreachable!() };
+                        json!({"version":VERSION,"runtime_id":self.runtime_id,"request_id":request_id,"session_id":session_id,"turn_id":turn_id,"status":"streaming","event":event})
+                    })
+                }
                 Some((id, result)) = self.done_rx.recv() => {
                     if self.active.as_ref().is_some_and(|(c, _)| matches!(c, Command::Turn { turn_id, .. } if turn_id == &id)) {
-                        Some(self.finish(result.map_err(|_| "model_failed".to_string())).await)
+                        Some(self.finish(result).await)
                     } else { None }
                 }
             };

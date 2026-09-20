@@ -8,10 +8,13 @@ Maximum frame size is 1 MiB. Unknown operations/fields and invalid JSON are erro
 First command:
 
 ```json
-{"op":"hello","version":1,"capabilities":["fixture-model","sessions","origin-command-id"]}
+{"op":"hello","version":1,"capabilities":["sessions","origin-command-id","model-stream"]}
 ```
 
-Reply includes `version`, `runtime_id`, `capabilities`, `model: "fixture"`, `pid`.
+Reply includes `version`, `runtime_id`, `capabilities`, the configured `model`, and `pid`.
+`model-stream` is required: an older peer that does not request it is rejected
+before work. `fixture-model` is only advertised in fixture mode; `memory-oauth`
+identifies the memory-only authentication contract.
 A requested unsupported capability or version returns an error and closes the
 connection before accepting a turn. The adapter independently verifies all
 required capabilities and version; no compatibility fallback exists.
@@ -43,7 +46,7 @@ Open returns `status: ready`, close `closed`, shutdown `shutdown`. A turn return
 `status: completed`, the session/turn/request/runtime IDs and
 `output: "Psi fixture: hello"`. This is a completed fixture result, **not a durable
 acceptance receipt**. The adapter emits the normal T3 turn/item/content events.
-One response corresponds to each request, correlated by `request_id`; replies may
+One terminal response corresponds to each request, correlated by `request_id`; replies may
 arrive out of order. A busy response can precede the held turn's result. No
 unsolicited frames are allowed. The initial hello has no request ID.
 
@@ -68,7 +71,7 @@ The same rule holds across independent Psi processes via a fixed per-user kernel
 lock. The slot remains held until tracked turn work has been joined. A repeated
 request still in flight returns `request_in_progress`; different content with the
 same pending ID returns `request_id_conflict`. Completed receipt replay remains
-in-memory only. Model errors produce `status: failed`, `error: model_failed`.
+in-memory only. Model errors produce `status: failed` with a fixed, credential-free error code.
 
 `shutdown` cancels and joins active cooperative work before acknowledging; EOF does
 the same without a reply. Plugin teardown follows in reverse dependency order.
@@ -76,7 +79,50 @@ Startup failure never reaches hello readiness. Stderr records plugin start/close
 registration/task counts, turn admission, and cleanup, but not model input.
 
 `Runtime → Session → Turn → Invocation` ownership is represented separately from
-plugin ownership. No tool invocation is fabricated for a model call. Only the loop
-and model fixtures run; there are still no real tools, Bend checks, external child
+plugin ownership. No tool invocation is fabricated for a model call. The loop and selected model run; there are still no real tools, Bend checks, external child
 cleanup, resource quotas, durable acceptance, or replay. Forced safe termination of
 arbitrary in-process plugin code is not promised.
+
+## Streaming and authentication
+
+Before its terminal reply, a turn can emit any number of correlated frames:
+
+```json
+{"version":1,"runtime_id":"runtime","request_id":"command","session_id":"thread","turn_id":"turn","status":"streaming","event":{"kind":"text","delta":"Hello"}}
+```
+
+`event.kind` is `text`, `reasoning` (both carry `delta`), `sign_in` (carries a
+browser authorization `url`, never access/refresh tokens or an authorization code),
+or `output_item` (carries the output `index` and lossless provider `item`, including
+items completed before a later stream failure).
+The bridge keeps the request pending until its terminal reply and serializes event
+delivery to T3. Replay of a terminal receipt emits no new streaming frames.
+
+Completed replies also carry lossless `provider_output` and optional `response_id`.
+The Rust controller appends the exact user input and those output items to its
+in-memory session history. T3 rendering is not the source for model context.
+Failed or cancelled streams do not append a fabricated assistant completion.
+
+```json
+{"op":"cancel","version":1,"request_id":"cancel-command","session_id":"thread-1"}
+```
+
+Cancel joins the active turn's owned future before returning its terminal
+`status: cancelled`, `error: local_cancelled`, and
+`cancellation_scope: local_only_server_processing_and_billing_unknown`. It then
+acknowledges the cancel command with `status: cancel_requested`. The session remains
+open. An optional `turn_id` scopes cancellation to that turn, so a delayed
+interrupt cannot cancel a newer turn. T3 maps its ordinary interrupt command to this operation. Close/shutdown
+cancellation has the same local-only scope. No remote processing/billing claim is made.
+
+Representative failure codes: `sign_in_state_mismatch`, `sign_in_denied`,
+`sign_in_failed`, `sign_in_timeout`, `refresh_failed`, `model_unauthorized`,
+`model_mime_json`, `model_mime_html`, `model_mime_other`, `model_incomplete`, `model_unfinished_stream`, `model_transport`,
+`model_invalid_utf8`, `model_invalid_json`, `model_item_mismatch`,
+`model_text_mismatch`, and `model_stream_limit`. Neither provider error bodies nor
+credential-bearing requests are included. Authentication has no persistent receipt
+or storage operation: only the model service owns tokens.
+
+Absent Content-Type is allowed only with valid SSE and explicit completion, matching
+the pinned Codex reference. Explicit incompatible MIME is rejected with one of the
+fixed `model_mime_*` classes; raw response headers/bodies are never included.

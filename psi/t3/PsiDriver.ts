@@ -1,3 +1,4 @@
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
@@ -7,13 +8,13 @@ import {
   type ThreadId, type ProviderSession,
 } from "@t3tools/contracts";
 import { createModelCapabilities } from "@t3tools/shared/model";
-import { ProviderAdapterValidationError, type ProviderAdapterError } from "../provider/Errors.ts";
+import { ProviderAdapterValidationError, ProviderDriverError, type ProviderAdapterError } from "../provider/Errors.ts";
 import type { ProviderDriver } from "../provider/ProviderDriver.ts";
 import type { ProviderAdapterShape, ProviderThreadSnapshot } from "../provider/Services/ProviderAdapter.ts";
 import { PsiBridge, lifecycleId } from "./PsiBridge.ts";
 
 const kind = ProviderDriverKind.make("psi");
-const Config = Schema.Struct({ binary: Schema.String, agentLoop: Schema.optional(Schema.String), fixtureGate: Schema.optional(Schema.String), startupFault: Schema.optional(Schema.String) });
+const Config = Schema.Struct({ binary: Schema.String, model: Schema.optional(Schema.String), oauthFixture: Schema.optional(Schema.String), agentLoop: Schema.optional(Schema.String), fixtureGate: Schema.optional(Schema.String), startupFault: Schema.optional(Schema.String) });
 
 export const PsiDriver: ProviderDriver<typeof Config.Type> = {
   driverKind: kind,
@@ -25,6 +26,7 @@ export const PsiDriver: ProviderDriver<typeof Config.Type> = {
     const sessions = new Map<ThreadId, ProviderSession>();
     const sessionStarts = new Map<ThreadId, Promise<ProviderSession>>();
     let stopped = false;
+    const model = config.model ?? "fixture";
     const history = new Map<ThreadId, ProviderThreadSnapshot["turns"]>();
     let bridge: PsiBridge | undefined;
     let starting: Promise<PsiBridge> | undefined;
@@ -64,7 +66,7 @@ export const PsiDriver: ProviderDriver<typeof Config.Type> = {
           if (!input.cwd) throw new Error("workspace_required");
           const current = await runtime();
           await current.send({ op: "open", request_id: lifecycleId(), session_id: input.threadId });
-          const now = new Date().toISOString();
+          const now = DateTime.formatIso(DateTime.nowUnsafe());
           const session: ProviderSession = { provider: kind, providerInstanceId: instanceId, threadId: input.threadId, cwd: input.cwd, runtimeMode: input.runtimeMode, status: "ready", createdAt: now, updatedAt: now };
           sessions.set(input.threadId, session);
           history.set(input.threadId, []);
@@ -77,28 +79,68 @@ export const PsiDriver: ProviderDriver<typeof Config.Type> = {
         if (!input.requestId) throw new Error("originating_command_id_required");
         if (!sessions.has(input.threadId) || !bridge) throw new Error("session_not_started");
         if (input.attachments?.length) throw new Error("attachments_unsupported");
-        if (input.modelSelection && input.modelSelection.model !== "fixture") throw new Error("model_unsupported");
+        if (input.modelSelection && input.modelSelection.model !== model) throw new Error("model_unsupported");
         const current = bridge;
         const turnId = TurnId.make(`psi-turn:${input.requestId}`);
-        const reply = await current.send({ op: "turn", request_id: input.requestId, session_id: input.threadId, turn_id: turnId, input: input.input ?? "" });
-        if (reply.turn_id !== turnId || reply.session_id !== input.threadId || reply.status !== "completed" || typeof reply.output !== "string") throw new Error("invalid_turn_reply");
-        if (!sessions.has(input.threadId)) throw new Error("session_closed");
+        let itemId = `${turnId}:assistant`;
+        let ordinal = 0;
+        let started = false;
+        let streamed = "";
+        let delivery = Promise.resolve();
+        const emit = async (type: string, payload: unknown) => {
+          const event = Schema.decodeUnknownSync(ProviderRuntimeEvent)({ eventId: `psi:${instanceId}:${input.threadId}:${input.requestId}:${ordinal++}`, provider: kind, providerInstanceId: instanceId, threadId: input.threadId, turnId, itemId, createdAt: DateTime.formatIso(DateTime.nowUnsafe()), type, payload });
+          await Effect.runPromise(PubSub.publish(events, event));
+        };
+        const start = async () => {
+          if (started) return;
+          started = true;
+          await emit("turn.started", { model });
+          await emit("item.started", { itemType: "assistant_message", status: "inProgress" });
+        };
+        const reply = await current.send({ op: "turn", request_id: input.requestId, session_id: input.threadId, turn_id: turnId, input: input.input ?? "" }, (frame) => {
+          delivery = delivery.then(async () => {
+            if (frame.turn_id !== turnId || frame.session_id !== input.threadId) throw new Error("invalid_stream_identity");
+            if (frame.event?.kind === "sign_in") itemId = `${turnId}:sign-in`;
+            await start();
+            if (frame.event?.kind === "sign_in") {
+              await emit("content.delta", { streamKind: "assistant_text", delta: `Sign in to Psi: ${frame.event.url}\n\n` });
+              // Flush this actionable link even when T3 buffers whole answers.
+              await emit("item.completed", { itemType: "assistant_message", status: "completed" });
+              itemId = `${turnId}:assistant`;
+              await emit("item.started", { itemType: "assistant_message", status: "inProgress" });
+            } else if (frame.event?.kind === "text") {
+              const delta = frame.event.delta ?? "";
+              streamed += delta;
+              await emit("content.delta", { streamKind: "assistant_text", delta });
+            } else if (frame.event?.kind === "reasoning") {
+              await emit("content.delta", { streamKind: "reasoning_text", delta: frame.event.delta ?? "" });
+            }
+          });
+          // Observe immediately; await below still propagates failures.
+          void delivery.catch(() => undefined);
+        });
+        await delivery;
+        if (reply.turn_id !== turnId || reply.session_id !== input.threadId) throw new Error("invalid_turn_reply");
         if (!reply.duplicate) {
-          const itemId = `${turnId}:assistant`;
-          const emit = async (ordinal: number, type: string, payload: unknown) => {
-            const event = Schema.decodeUnknownSync(ProviderRuntimeEvent)({ eventId: `psi:${instanceId}:${input.threadId}:${input.requestId}:${ordinal}`, provider: kind, providerInstanceId: instanceId, threadId: input.threadId, turnId, itemId, createdAt: new Date().toISOString(), type, payload });
-            await Effect.runPromise(PubSub.publish(events, event));
-          };
-          await emit(0, "turn.started", { model: "fixture" });
-          await emit(1, "item.started", { itemType: "assistant_message", status: "inProgress" });
-          await emit(2, "content.delta", { streamKind: "assistant_text", delta: reply.output });
-          await emit(3, "item.completed", { itemType: "assistant_message", status: "completed" });
-          await emit(4, "turn.completed", { state: "completed" });
+          await start();
+          if (reply.status !== "completed") {
+            const cancelled = reply.status === "cancelled";
+            await emit("content.delta", { streamKind: "assistant_text", delta: cancelled ? "\nCancelled locally. Server processing and billing may continue." : `\nPsi failed: ${reply.error ?? "model_failed"}` });
+            await emit("item.completed", { itemType: "assistant_message", status: "failed" });
+            await emit("turn.completed", { state: cancelled ? "interrupted" : "failed" });
+            return { threadId: input.threadId, turnId };
+          }
+          if (typeof reply.output !== "string") throw new Error("invalid_turn_reply");
+          if (!streamed) await emit("content.delta", { streamKind: "assistant_text", delta: reply.output });
+          await emit("item.completed", { itemType: "assistant_message", status: "completed" });
+          await emit("turn.completed", { state: "completed" });
           history.set(input.threadId, [...(history.get(input.threadId) ?? []), { id: turnId, items: [{ type: "user", text: input.input ?? "" }, { type: "assistant", text: reply.output }] }]);
         }
         return { threadId: input.threadId, turnId };
       }),
-      interruptTurn: () => unsupported("interruptTurn"),
+      interruptTurn: (input, turnId) => wrap("interruptTurn", async () => {
+        if (bridge) await bridge.send({ op: "cancel", request_id: lifecycleId(), session_id: input, ...(turnId ? { turn_id: turnId } : {}) });
+      }),
       stopSession: (id) => wrap("stopSession", async () => {
         await sessionStarts.get(id)?.catch(() => undefined);
         const existed = sessions.delete(id);
@@ -117,7 +159,7 @@ export const PsiDriver: ProviderDriver<typeof Config.Type> = {
       respondToUserInput: () => unsupported("respondToUserInput"),
       streamEvents: Stream.fromPubSub(events),
     };
-    const snapshot = Schema.decodeUnknownSync(ServerProvider)({ instanceId, driver: kind, displayName: displayName ?? "Psi", enabled, installed: true, version: "0.1.0", status: "ready", auth: { status: "authenticated" }, checkedAt: new Date().toISOString(), supportsConversationRollback: false, supportsTextGeneration: false, models: [{ slug: "fixture", name: "Psi fixture", isCustom: false, capabilities: createModelCapabilities({ optionDescriptors: [] }) }] });
+    const snapshot = yield* Schema.decodeUnknownEffect(ServerProvider)({ instanceId, driver: kind, displayName: displayName ?? "Psi", enabled, installed: true, version: "0.1.0", status: "ready", auth: { status: model === "fixture" ? "authenticated" : "unknown" }, checkedAt: DateTime.formatIso(DateTime.nowUnsafe()), supportsConversationRollback: false, supportsTextGeneration: false, models: [{ slug: model, name: model === "fixture" ? "Psi fixture" : `Psi ${model}`, isCustom: false, capabilities: createModelCapabilities({ optionDescriptors: [] }) }] }).pipe(Effect.mapError(() => new ProviderDriverError({ driver: kind, instanceId, detail: "invalid Psi provider configuration" })));
     const text = () => Effect.fail(new TextGenerationError({ operation: "psi", detail: "Psi fixture has no auxiliary text generation" }));
     return {
       instanceId, driverKind: kind, displayName, enabled,
