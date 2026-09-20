@@ -138,8 +138,11 @@ pub struct Action {
 }
 impl Action {
     pub fn new(name: &str, arguments: Value) -> Self {
+        Self::identified(uuid::Uuid::new_v4().to_string(), name, arguments)
+    }
+    pub fn identified(id: String, name: &str, arguments: Value) -> Self {
         Self {
-            id: uuid::Uuid::new_v4().to_string(),
+            id,
             name: name.into(),
             arguments,
         }

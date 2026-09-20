@@ -206,12 +206,12 @@ at `open`; T3's awaited baseline happens before `turn` is sent.
 | `login`, `tty` | Omitted or `false`; `true` is rejected. |
 | `timeout_ms` | 1–600000 milliseconds; default 120000. No read extends it. |
 | `max_output_tokens` | 1–16000, default 16000; conservative output byte ceiling, not a tokenizer estimate. |
+| `yield_time_ms` | 0–30000, default 10000; wait before returning a running result. |
 
 All other fields are rejected, including `sandbox_permissions`, `justification`,
-`prefix_rule`, `yield_time_ms`, and environment/access overrides. Privilege or
-access expansion has no approval/fallback route. Command continuation and
-`write_stdin` are intentionally unavailable in this slice; a short command returns
-its final result, never a fabricated live session ID.
+`prefix_rule`, and environment/access overrides. Privilege or
+access expansion has no approval/fallback route. Issue #50 adds running results
+and `write_stdin` as documented below.
 
 The function result and terminal `tool_result` contain `output`, `exit_code`,
 `reason`, `truncated`, and `cleanup_confirmed`. Executed results additionally carry
@@ -222,8 +222,9 @@ memory/pids event counters. Reasons distinguish `exit` (including nonzero exit),
 shell exit. A temp filesystem ENOSPC is observable in the executed program's
 output/exit; exhaustive syscall/limit diagnosis belongs to later slices.
 
-Action intent precedes handoff, and action result commits after supervisor cleanup
-and before terminal. A missing supervisor reply is uncertain and makes the runtime
+Action intent precedes handoff, and each invocation result commits before delivery.
+The command remains owned across running results; its terminal outcome commits
+after supervisor cleanup and before turn terminal. A missing supervisor reply is uncertain and makes the runtime
 unhealthy rather than inventing cleanup. Cancelled exec turns retain `tool_result`
 when available and use `cancellation_scope: local_tools`. Action records survive
 cancellation; automatic action replay is forbidden. The existing unknown-outcome
@@ -233,3 +234,44 @@ T3's terminal cursor means inbox acceptance. Its separate done marker follows
 message projection **and** the awaited standard checkpoint handler. A captured
 checkpoint ref is preserved on replay. Psi rollback is rejected in the engine
 before domain effects, in addition to the adapter rejection and UI capability.
+
+
+## write_stdin and continuations (#50)
+
+`exec_command` can return `reason: "running"`, `exit_code: null`,
+`cleanup_confirmed: false`, and an opaque string `session_id`. This ID belongs to
+one command in one runtime turn. It never authorizes an operation by itself.
+
+| Argument | Supported behavior |
+| --- | --- |
+| `session_id` | Required opaque string from the running result. |
+| `chars` | Optional UTF-8 string, default empty, at most 65536 bytes. Empty means read-only polling. |
+| `yield_time_ms` | 0–30000 milliseconds, default 10000. |
+| `max_output_tokens` | 1–16000, default 16000; conservative byte ceiling. |
+
+Unsupported fields, including timeouts and access overrides, are rejected. Pipes
+are used, without terminal control-character semantics; a Ctrl-D byte is not EOF.
+Input is delivered through a nonblocking pipe. Backpressure may delay a response
+until input delivery or the original command deadline; it cannot block supervision.
+
+Every continuation obtains a fresh, single-use Bend permit and persists its exact
+arguments before forwarding input or exposing buffered output. The model call ID
+is also the action ID in policy evidence and durable action records. Concurrent
+invocations are rejected as busy. New exec/patch invocations cannot acquire a live
+command's slot. An unsupported patch outside a live slot remains unsupported.
+
+Output is consumed per response, not replayed on later polls. `output_bytes` is the
+cumulative stdout/stderr total for the command; per-response truncation is explicit.
+Both the original deadline and cumulative output ceiling are enforced even with
+no pending poll. Terminal output buffered between invocations is capped by the
+next invocation's response budget. Cleanup and its final outcome are retained in
+`command_processes`, separately from each call's immutable result. After terminal
+delivery, that process ID is stale and cannot be used in this or another turn.
+
+The startup-only deterministic loop accepts either the original exec argument
+object or `{"commands":[{"name":"exec_command","arguments":{...}}, ...]}`.
+Its `$process` placeholder is resolved before creating the immutable model call
+and requesting admission. Each call/result is emitted as a durable `output_item`
+event and its result is displayed through the normal T3 text projection. Remaining
+work is polled automatically after the scripted sequence. This is a local fixture
+model, not live Codex tool integration.

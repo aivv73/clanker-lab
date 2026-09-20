@@ -28,6 +28,7 @@ impl Store {
           CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY, workspace TEXT, history TEXT NOT NULL DEFAULT '[]');
           CREATE TABLE IF NOT EXISTS commands(id TEXT PRIMARY KEY, command TEXT NOT NULL, acceptance TEXT NOT NULL, result TEXT, session TEXT, turn TEXT UNIQUE);
           CREATE TABLE IF NOT EXISTS events(session TEXT NOT NULL, seq INTEGER NOT NULL, frame TEXT NOT NULL, PRIMARY KEY(session,seq));
+          CREATE TABLE IF NOT EXISTS command_processes(id TEXT PRIMARY KEY, session TEXT NOT NULL, turn TEXT NOT NULL, invocation TEXT NOT NULL, result TEXT);
           CREATE TABLE IF NOT EXISTS actions(id TEXT PRIMARY KEY, session TEXT NOT NULL, turn TEXT NOT NULL, intent TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('intent','result','unknown')), result TEXT);
           CREATE TABLE IF NOT EXISTS terminal_processing(session TEXT NOT NULL, turn TEXT PRIMARY KEY, state TEXT NOT NULL CHECK(state IN ('pending','done')));
         ")?;
