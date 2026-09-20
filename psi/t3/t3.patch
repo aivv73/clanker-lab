@@ -1,44 +1,208 @@
-diff --git a/apps/server/src/orchestration/Layers/ProviderCommandReactor.ts b/apps/server/src/orchestration/Layers/ProviderCommandReactor.ts
-index 80cf2a1f4..f0629d1bd 100644
---- a/apps/server/src/orchestration/Layers/ProviderCommandReactor.ts
-+++ b/apps/server/src/orchestration/Layers/ProviderCommandReactor.ts
-@@ -1492,7 +1492,7 @@ const make = Effect.gen(function* () {
+diff --git a/apps/server/src/orchestration/Layers/CheckpointReactor.ts b/apps/server/src/orchestration/Layers/CheckpointReactor.ts
+index 4cfdccfd8..114aca808 100644
+--- a/apps/server/src/orchestration/Layers/CheckpointReactor.ts
++++ b/apps/server/src/orchestration/Layers/CheckpointReactor.ts
+@@ -1,3 +1,4 @@
++import { validatePsiWorkspace } from "../../psi/PsiWorkspace.ts";
+ import {
+   CommandId,
+   type CheckpointRef,
+@@ -36,6 +37,7 @@ import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
+ import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
+ import { RuntimeReceiptBus } from "../Services/RuntimeReceiptBus.ts";
+ import type { CheckpointStoreError } from "../../checkpointing/Errors.ts";
++import { OrchestrationCommandInvariantError } from "../Errors.ts";
+ import type { OrchestrationDispatchError } from "../Errors.ts";
+ import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
+ import * as WorkspaceEntries from "../../workspace/WorkspaceEntries.ts";
+@@ -255,6 +257,7 @@ const make = Effect.gen(function* () {
+     readonly status: "ready" | "missing" | "error";
+     readonly assistantMessageId: MessageId | undefined;
+     readonly createdAt: string;
++    readonly preserveExisting?: boolean;
+   }) {
+     const fromTurnCount = Math.max(0, input.turnCount - 1);
+     const fromCheckpointRef = checkpointRefForThreadTurn(input.threadId, fromTurnCount);
+@@ -282,10 +285,14 @@ const make = Effect.gen(function* () {
+       });
      }
 
-     const send = providerService
++    // A durable provider may replay after the ref was written but before the
++    // projection committed. Preserve that snapshot rather than recapturing files.
++    if (!input.preserveExisting || !(yield* checkpointStore.hasCheckpointRef({cwd: input.cwd, checkpointRef: targetCheckpointRef}))) {
+     yield* checkpointStore.captureCheckpoint({
+       cwd: input.cwd,
+       checkpointRef: targetCheckpointRef,
+     });
++    }
+
+     // Refresh the workspace entry index so the @-mention file picker
+     // reflects files created or deleted during this turn.
+@@ -399,6 +406,7 @@ const make = Effect.gen(function* () {
+
+       const thread = yield* resolveThreadDetail(event.threadId);
+       if (!thread) {
++        if (event.provider === "psi") return yield* Effect.die("Psi checkpoint thread is missing");
+         return;
+       }
+
+@@ -426,6 +434,7 @@ const make = Effect.gen(function* () {
+         preferSessionRuntime: true,
+       });
+       if (!checkpointCwd) {
++        if (event.provider === "psi") return yield* Effect.die("Psi requires a Git workspace for checkpoints");
+         return;
+       }
+
+@@ -443,6 +452,7 @@ const make = Effect.gen(function* () {
+         : currentTurnCount + 1;
+
+       yield* captureAndDispatchCheckpoint({
++        preserveExisting: event.provider === "psi",
+         threadId: thread.id,
+         turnId,
+         thread,
+@@ -467,6 +477,7 @@ const make = Effect.gen(function* () {
+
+       const thread = yield* resolveThreadDetail(event.threadId);
+       if (!thread) {
++        if (event.provider === "psi") return yield* Effect.die("Psi checkpoint thread is missing");
+         return;
+       }
+
+@@ -478,9 +489,13 @@ const make = Effect.gen(function* () {
+         preferSessionRuntime: false,
+       });
+       if (!checkpointCwd) {
++        if (event.provider === "psi") return yield* Effect.die("Psi requires a Git workspace for checkpoints");
+         return;
+       }
+
++      if (event.provider === "psi") {
++        yield* Effect.tryPromise({try: () => validatePsiWorkspace(checkpointCwd), catch: () => new OrchestrationCommandInvariantError({commandType:"thread.turn.start",detail:"Psi requires immutable Git metadata and no external Git filters/diff/fsmonitor programs"})});
++      }
+       const currentTurnCount = thread.checkpoints.reduce(
+         (maxTurnCount, checkpoint) => Math.max(maxTurnCount, checkpoint.checkpointTurnCount),
+         0,
+@@ -1010,7 +1025,11 @@ const make = Effect.gen(function* () {
+     CheckpointStoreError | OrchestrationDispatchError | PlatformError.PlatformError,
+     never
+   > =>
+-    input.source === "domain" ? processDomainEvent(input.event) : processRuntimeEvent(input.event);
++    input.source === "domain" ? Effect.gen(function* () {
++      const thread = yield* resolveThreadDetail(input.event.aggregateId as ThreadId);
++      if (thread?.session?.providerName === "psi" || thread?.modelSelection.instanceId === "psi") return;
++      yield* processDomainEvent(input.event);
++    }) : processRuntimeEvent(input.event);
+
+   const processInputSafely = (input: ReactorInput) =>
+     processInput(input).pipe(
+@@ -1044,6 +1063,7 @@ const make = Effect.gen(function* () {
+
+     yield* forkParked(
+       Stream.runForEach(providerService.streamEvents, (event) => {
++        if (event.provider === "psi") return Effect.void;
+         if (
+           event.type !== "turn.started" &&
+           event.type !== "turn.completed" &&
+@@ -1059,6 +1079,8 @@ const make = Effect.gen(function* () {
+
+   return {
+     start,
++    psiBaseline: ensurePreTurnBaselineFromTurnStart,
++    psiComplete: captureCheckpointFromTurnCompletion,
+     drain: worker.drain.pipe(
+       Effect.andThen(statusRefreshWorker.drain),
+       Effect.andThen(entryRefreshWorker.drain),
+diff --git a/apps/server/src/orchestration/Layers/OrchestrationEngine.ts b/apps/server/src/orchestration/Layers/OrchestrationEngine.ts
+index fb2fadde5..4227ce182 100644
+--- a/apps/server/src/orchestration/Layers/OrchestrationEngine.ts
++++ b/apps/server/src/orchestration/Layers/OrchestrationEngine.ts
+@@ -242,6 +242,13 @@ const makeOrchestrationEngine = Effect.gen(function* () {
+           envelope.command.type === "thread.user-input.dismiss"
+             ? yield* projectionSnapshotQuery.getUserInputActivity(envelope.command)
+             : Option.none();
++        if ((envelope.command.type === "thread.checkpoint.revert" || envelope.command.type === "thread.conversation.revert")) {
++          const targetId = envelope.command.threadId;
++          const target = commandReadModel.threads.find(t => t.id === targetId);
++          if (target?.session?.providerName === "psi" || target?.modelSelection.instanceId === "psi") {
++            return yield* new OrchestrationCommandInvariantError({commandType: envelope.command.type, detail: "Psi rollback is unsupported"});
++          }
++        }
+         const eventBase = yield* decideOrchestrationCommand({
+           command: envelope.command,
+           readModel: commandReadModel,
+diff --git a/apps/server/src/orchestration/Layers/ProviderCommandReactor.ts b/apps/server/src/orchestration/Layers/ProviderCommandReactor.ts
+index 80cf2a1f4..ef5ece1d3 100644
+--- a/apps/server/src/orchestration/Layers/ProviderCommandReactor.ts
++++ b/apps/server/src/orchestration/Layers/ProviderCommandReactor.ts
+@@ -1,3 +1,5 @@
++import { CheckpointReactor } from "../Services/CheckpointReactor.ts";
++import { ProviderRuntimeEvent } from "@t3tools/contracts";
+ import { withWorkspaceLease } from "../../workspace/workspaceLease.ts";
+ import {
+   type ChatAttachment,
+@@ -208,6 +210,7 @@ function buildGeneratedWorktreeBranchName(raw: string): string {
+ }
+
+ const make = Effect.gen(function* () {
++  const psiCheckpoints = yield* CheckpointReactor;
+   const crypto = yield* Crypto.Crypto;
+   const orchestrationEngine = yield* OrchestrationEngineService;
+   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+@@ -1491,9 +1494,19 @@ const make = Effect.gen(function* () {
+       return;
+     }
+
+-    const send = providerService
 -      .sendTurn(sendTurnRequest.value)
-+      .sendTurn({ ...sendTurnRequest.value, requestId: event.commandId ?? event.eventId })
-       .pipe(Effect.asVoid, Effect.catchCause(recoverTurnStartFailure));
+-      .pipe(Effect.asVoid, Effect.catchCause(recoverTurnStartFailure));
++    const send = Effect.gen(function* () {
++      const session = (yield* providerService.listSessions()).find(s => s.threadId === event.payload.threadId);
++      if (session?.provider === "psi") {
++        const requestId = event.commandId ?? event.eventId;
++        const baselineEvent = yield* Schema.decodeUnknownEffect(ProviderRuntimeEvent)({
++          eventId: `psi-baseline:${requestId}`, provider: "psi", providerInstanceId: session.providerInstanceId,
++          threadId: event.payload.threadId, turnId: `psi-turn:${requestId}`, createdAt: event.payload.createdAt,
++          type: "turn.started", payload: {},
++        });
++        if (baselineEvent.type === "turn.started") yield* psiCheckpoints.psiBaseline(baselineEvent);
++      }
++      yield* providerService.sendTurn({ ...sendTurnRequest.value, requestId: event.commandId ?? event.eventId });
++    }).pipe(Effect.asVoid, Effect.catchCause(recoverTurnStartFailure));
      // The forked send settles `sent` from here on, so drop the entry the post-processing hook uses.
      if (resumed && event.commandId !== null) resumedTurnStarts.delete(event.commandId);
+     yield* send.pipe(
 diff --git a/apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts b/apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts
-index 0db70e491..ecbe847e0 100644
+index 0db70e491..f4cb4c86a 100644
 --- a/apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts
 +++ b/apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts
-@@ -1,3 +1,6 @@
+@@ -1,3 +1,7 @@
++import { CheckpointReactor } from "../Services/CheckpointReactor.ts";
 +import { ServerConfig } from "../../config.ts";
 +import { PsiInbox, inboxRoot } from "../../psi/PsiInbox.ts";
 +import { drainPsiInbox } from "../../psi/PsiProjection.ts";
  import {
    ApprovalRequestId,
    CommandId,
-@@ -1017,6 +1020,9 @@ export function runtimeEventToActivities(
+@@ -1017,6 +1021,10 @@ export function runtimeEventToActivities(
  }
 
  const make = Effect.gen(function* () {
++  const psiCheckpoints = yield* CheckpointReactor;
 +  const psiConfig = yield* ServerConfig;
 +  const psiInbox = new PsiInbox(inboxRoot(psiConfig.baseDir));
 +  yield* Effect.addFinalizer(() => Effect.sync(() => psiInbox.close()));
    const threadBackgroundLiveness = yield* ThreadBackgroundLivenessService;
    const threadPlanProgress = yield* ThreadPlanProgressService;
    const crypto = yield* Crypto.Crypto;
-@@ -2685,9 +2691,20 @@ const make = Effect.gen(function* () {
+@@ -2685,9 +2693,20 @@ const make = Effect.gen(function* () {
 
    const start: ProviderRuntimeIngestionShape["start"] = () =>
      Effect.gen(function* () {
 +      yield* forkParked(
 +        Effect.forever(
-+          drainPsiInbox(psiInbox, orchestrationEngine).pipe(Effect.andThen(Effect.sleep("50 millis"))),
++          drainPsiInbox(psiInbox, orchestrationEngine, psiCheckpoints.psiComplete).pipe(Effect.andThen(Effect.sleep("50 millis"))),
 +        ).pipe(
 +          Effect.catchCause((cause) =>
 +            Effect.logError("Psi durable ingestion stopped; inbox remains pending", Cause.pretty(cause)).pipe(
@@ -54,6 +218,32 @@ index 0db70e491..ecbe847e0 100644
              ? diffWorker.enqueue(event)
              : worker.enqueue({ source: "runtime", event }),
          ),
+diff --git a/apps/server/src/orchestration/Services/CheckpointReactor.ts b/apps/server/src/orchestration/Services/CheckpointReactor.ts
+index bd3ee3e88..cde2cdd1c 100644
+--- a/apps/server/src/orchestration/Services/CheckpointReactor.ts
++++ b/apps/server/src/orchestration/Services/CheckpointReactor.ts
+@@ -6,6 +6,10 @@
+  *
+  * @module CheckpointReactor
+  */
++import type * as PlatformError from "effect/PlatformError";
++import type { ProviderRuntimeEvent } from "@t3tools/contracts";
++import type { CheckpointStoreError } from "../../checkpointing/Errors.ts";
++import type { OrchestrationDispatchError } from "../Errors.ts";
+ import * as Context from "effect/Context";
+ import type * as Effect from "effect/Effect";
+ import type * as Scope from "effect/Scope";
+@@ -14,6 +18,10 @@ import type * as Scope from "effect/Scope";
+  * CheckpointReactorShape - Service API for checkpoint reactor lifecycle.
+  */
+ export interface CheckpointReactorShape {
++  /** Awaited barriers for durable providers; failures must prevent handoff/ack. */
++  readonly psiBaseline: (event: Extract<ProviderRuntimeEvent, {type: "turn.started"}>) => Effect.Effect<void, CheckpointStoreError | OrchestrationDispatchError | PlatformError.PlatformError>;
++  readonly psiComplete: (event: Extract<ProviderRuntimeEvent, {type: "turn.completed"}>) => Effect.Effect<void, CheckpointStoreError | OrchestrationDispatchError | PlatformError.PlatformError>;
++
+   /**
+    * Start the checkpoint reactor.
+    *
 diff --git a/apps/server/src/provider/builtInDrivers.ts b/apps/server/src/provider/builtInDrivers.ts
 index 60e3402ee..020ef8ac7 100644
 --- a/apps/server/src/provider/builtInDrivers.ts

@@ -33,6 +33,13 @@ impl Store {
         ")?;
         Ok(Self(db, lock))
     }
+    pub fn workspace(&self, session: &str) -> Result<Option<String>> {
+        Ok(self.0.query_row(
+            "SELECT workspace FROM sessions WHERE id=?",
+            [session],
+            |r| r.get(0),
+        )?)
+    }
     pub fn sessions(&self) -> Result<Vec<String>> {
         let mut stmt = self.0.prepare("SELECT id FROM sessions ORDER BY id")?;
         Ok(stmt

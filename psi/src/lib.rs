@@ -1,6 +1,7 @@
 pub mod admission;
 pub mod codex;
 pub mod core;
+pub mod executor;
 pub mod model;
 pub mod plugins;
 pub mod policy;

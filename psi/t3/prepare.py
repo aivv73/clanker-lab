@@ -22,10 +22,10 @@ def prepare(checkout):
         subprocess.run(["git", "apply", "--reverse", "--check", patch], cwd=checkout, check=True)
     target = checkout / "apps/server/src/psi"
     target.mkdir(exist_ok=True)
-    for name in ("PsiDriver.ts", "PsiBridge.ts", "PsiInbox.ts", "PsiProjection.ts", "inbox.test.ts", "durability-worker.ts", "adapter.test.ts"):
+    for name in ("PsiDriver.ts", "PsiBridge.ts", "PsiWorkspace.ts", "workspace.test.ts", "PsiInbox.ts", "PsiProjection.ts", "inbox.test.ts", "durability-worker.ts", "adapter.test.ts"):
         if (HERE / name).exists():
             shutil.copyfile(HERE / name, target / name)
-    (checkout / "tsconfig.psi.json").write_text('{"extends":"./tsconfig.base.json","compilerOptions":{"noEmit":true,"skipLibCheck":true,"types":["node"]},"include":["apps/server/src/psi/*.ts","apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts"]}\n')
+    (checkout / "tsconfig.psi.json").write_text('{"extends":"./tsconfig.base.json","compilerOptions":{"noEmit":true,"skipLibCheck":true,"types":["node"]},"include":["apps/server/src/psi/*.ts","apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts","apps/server/src/orchestration/Layers/ProviderCommandReactor.ts","apps/server/src/orchestration/Layers/CheckpointReactor.ts","apps/server/src/orchestration/Layers/OrchestrationEngine.ts"]}\n')
     return checkout
 
 

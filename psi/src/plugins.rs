@@ -45,6 +45,7 @@ impl Model for FixtureModel {
 }
 pub struct FixtureModelPlugin {
     pub gate: Option<std::path::PathBuf>,
+    pub exec: bool,
 }
 #[async_trait]
 impl Plugin for FixtureModelPlugin {
@@ -60,9 +61,13 @@ impl Plugin for FixtureModelPlugin {
     async fn start(&mut self, mut context: Context<'_>) -> Result<(), String> {
         context.register(
             "model",
-            ModelService(Arc::new(FixtureModel {
-                gate: self.gate.clone(),
-            })),
+            ModelService(if self.exec {
+                Arc::new(ExecFixtureModel)
+            } else {
+                Arc::new(FixtureModel {
+                    gate: self.gate.clone(),
+                })
+            }),
         )
     }
     async fn close(&mut self) -> Result<(), String> {
@@ -73,6 +78,15 @@ impl Plugin for FixtureModelPlugin {
 #[async_trait]
 pub trait AgentLoop: Send + Sync {
     async fn run(&self, input: ModelRequest, events: Events) -> Result<ModelResponse, String>;
+    async fn run_with_tools(
+        &self,
+        input: ModelRequest,
+        events: Events,
+        policy: Arc<crate::policy::Gate>,
+        _tools: Arc<crate::executor::ToolTurn>,
+    ) -> Result<ModelResponse, String> {
+        self.run_with_policy(input, events, policy).await
+    }
     async fn run_with_policy(
         &self,
         input: ModelRequest,
@@ -252,6 +266,105 @@ impl Plugin for PolicyFixturePlugin {
     async fn start(&mut self, mut context: Context<'_>) -> Result<(), String> {
         let _: Arc<crate::policy::PolicyService> = context.dependency("policy")?;
         context.register("agent-loop", LoopService(Arc::new(PolicyFixtureLoop)))
+    }
+    async fn close(&mut self) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+/// Deterministic model emits one function call with the prompt's JSON arguments.
+struct ExecFixtureModel;
+#[async_trait]
+impl Model for ExecFixtureModel {
+    async fn respond(&self, request: ModelRequest, _: Events) -> Result<ModelResponse, String> {
+        let arguments = request
+            .input
+            .last()
+            .and_then(|i| i["content"].as_str())
+            .ok_or("invalid_fixture_command")?;
+        let _: serde_json::Value =
+            serde_json::from_str(arguments).map_err(|_| "invalid_fixture_command")?;
+        Ok(ModelResponse {
+            text: String::new(),
+            output: vec![
+                serde_json::json!({"type":"function_call","name":"exec_command","call_id":format!("exec-{}",uuid::Uuid::new_v4()),"arguments":arguments}),
+            ],
+            response_id: None,
+        })
+    }
+}
+struct ExecFixtureLoop {
+    model: Arc<ModelService>,
+}
+#[async_trait]
+impl AgentLoop for ExecFixtureLoop {
+    async fn run(&self, _: ModelRequest, _: Events) -> Result<ModelResponse, String> {
+        Err("tool_context_required".into())
+    }
+    async fn run_with_tools(
+        &self,
+        input: ModelRequest,
+        events: Events,
+        policy: Arc<crate::policy::Gate>,
+        tools: Arc<crate::executor::ToolTurn>,
+    ) -> Result<ModelResponse, String> {
+        let response = self.model.0.respond(input, events.clone()).await?;
+        let call = response
+            .output
+            .into_iter()
+            .next()
+            .ok_or("missing_tool_call")?;
+        let call_id = call["call_id"]
+            .as_str()
+            .ok_or("invalid_tool_call")?
+            .to_string();
+        let arguments = call["arguments"].as_str().ok_or("invalid_tool_call")?;
+        let value = serde_json::from_str(arguments).map_err(|_| "invalid_fixture_command")?;
+        let result = tools.execute(value, policy).await?;
+        let text = format!(
+            "exec_command: {}\n{}{}",
+            result["reason"].as_str().unwrap_or("unknown"),
+            result["output"].as_str().unwrap_or(""),
+            if result["truncated"] == true {
+                "\n[output truncated]"
+            } else {
+                ""
+            }
+        );
+        let _ = events.send(ModelEvent::Text {
+            delta: text.clone(),
+        });
+        Ok(ModelResponse {
+            text: text.clone(),
+            output: vec![
+                call,
+                serde_json::json!({"type":"function_call_output","call_id":call_id,"output":result.to_string()}),
+                serde_json::json!({"type":"message","role":"assistant","content":[{"type":"output_text","text":text}]}),
+            ],
+            response_id: None,
+        })
+    }
+}
+pub struct ExecFixturePlugin;
+#[async_trait]
+impl Plugin for ExecFixturePlugin {
+    fn id(&self) -> &'static str {
+        "exec-fixture-loop"
+    }
+    fn provides(&self) -> &'static [&'static str] {
+        &["agent-loop"]
+    }
+    fn requires(&self) -> &'static [&'static str] {
+        &["policy", "model"]
+    }
+    async fn start(&mut self, mut context: Context<'_>) -> Result<(), String> {
+        let _: Arc<crate::policy::PolicyService> = context.dependency("policy")?;
+        context.register(
+            "agent-loop",
+            LoopService(Arc::new(ExecFixtureLoop {
+                model: context.dependency("model")?,
+            })),
+        )
     }
     async fn close(&mut self) -> Result<(), String> {
         Ok(())

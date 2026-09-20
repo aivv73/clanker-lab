@@ -154,7 +154,8 @@ export class PsiBridge {
       this.closing = true;
       this.child.stdin.end();
     }
-    const timer = setTimeout(() => this.child.kill("SIGKILL"), 2_000);
+    // Allow the executor's 2+2 second cleanup and durable terminal before fallback.
+    const timer = setTimeout(() => this.child.kill("SIGKILL"), 6_000);
     try { await this.exited; } finally { clearTimeout(timer); }
   }
 }

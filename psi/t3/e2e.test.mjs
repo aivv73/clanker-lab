@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { spawn, execFileSync } from "node:child_process";
-import { readFileSync, readlinkSync, writeFileSync } from "node:fs";
+import { readFileSync, readlinkSync, writeFileSync, symlinkSync, existsSync } from "node:fs";
+import { createServer } from "node:net";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "node:path";
@@ -26,8 +27,8 @@ function recordVersions(report) {
     report.os = execFileSync("uname", ["-srmo"], { encoding: "utf8" }).trim();
     report.source_revision = execFileSync("git", ["rev-parse", "HEAD"], { cwd: here, encoding: "utf8" }).trim();
     report.implementation_sha256 = Object.fromEntries([
-      "../src/policy.rs", "../tests/policy.rs", "../tests/fixtures/policy.py", "../policy/build.py", "../policy/Policy.bend", "../policy/LAWS.bend", "../policy/PROOF.bend", "../policy/Main.bend", "../src/store.rs", "../tests/durability.rs", "../tests/fixtures/durability.py", "PsiInbox.ts", "PsiProjection.ts", "inbox.test.ts", "durability-worker.ts", "../Cargo.toml", "../Cargo.lock", "../src/admission.rs", "../src/work.rs", "../src/core.rs", "../src/plugins.rs", "../src/protocol.rs", "../src/main.rs", "../src/lib.rs", "../src/codex.rs", "../src/model.rs", "../tests/codex.rs", "../tests/auth_runtime.rs", "../tests/fixtures/runtime_auth.py", "../tests/fixtures/oauth_server.py", "../tests/lifecycle.rs", "../tests/protocol.rs",
-      "PsiDriver.ts", "PsiBridge.ts", "adapter.test.ts", "t3.patch", "prepare.py", "run.py", "e2e.test.mjs", "package-lock.json",
+      "../src/executor.rs", "../tests/executor.rs", "../tests/fixtures/executor.py", "../src/policy.rs", "../tests/policy.rs", "../tests/fixtures/policy.py", "../policy/build.py", "../policy/Policy.bend", "../policy/LAWS.bend", "../policy/PROOF.bend", "../policy/Main.bend", "../src/store.rs", "../tests/durability.rs", "../tests/fixtures/durability.py", "PsiInbox.ts", "PsiProjection.ts", "inbox.test.ts", "durability-worker.ts", "../Cargo.toml", "../Cargo.lock", "../src/admission.rs", "../src/work.rs", "../src/core.rs", "../src/plugins.rs", "../src/protocol.rs", "../src/main.rs", "../src/lib.rs", "../src/codex.rs", "../src/model.rs", "../tests/codex.rs", "../tests/auth_runtime.rs", "../tests/fixtures/runtime_auth.py", "../tests/fixtures/oauth_server.py", "../tests/lifecycle.rs", "../tests/protocol.rs",
+      "PsiWorkspace.ts", "workspace.test.ts", "PsiDriver.ts", "PsiBridge.ts", "adapter.test.ts", "t3.patch", "prepare.py", "run.py", "e2e.test.mjs", "package-lock.json",
     ].map((name) => [name, createHash("sha256").update(readFileSync(resolve(here, name))).digest("hex")]));
     report.t3_lock_sha256 = createHash("sha256").update(readFileSync(resolve(checkout, "pnpm-lock.yaml"))).digest("hex");
 }
@@ -35,10 +36,13 @@ function recordVersions(report) {
 test("ordinary T3 browser message crosses WebSocket and Rust; viewer detach and controller cleanup", { timeout: 120_000 }, async () => {
   const port = Number(process.env.PSI_TEST_PORT ?? 8854);
   const webPort = port + 1;
+  const exec = process.env.PSI_TEST_EXEC === "1";
+  const listeners = [];
+  let connections = 0;
   const policy = process.env.PSI_TEST_POLICY;
   const policyCancel = policy === "cancel";
   const policyFault = policy && !["normal", "cancel"].includes(policy) ? policy : undefined;
-  const agentLoop = policy ? "policy-fixture" : process.env.PSI_TEST_LOOP ?? "single-response";
+  const agentLoop = exec ? "exec-fixture" : policy ? "policy-fixture" : process.env.PSI_TEST_LOOP ?? "single-response";
   const fault = process.env.PSI_TEST_STARTUP_FAULT;
   const lifecycle = process.env.PSI_TEST_LIFECYCLE === "1";
   const options = ["--agent-loop", agentLoop];
@@ -53,7 +57,7 @@ test("ordinary T3 browser message crosses WebSocket and Rust; viewer detach and 
   if (policyCancel) options.push("--hold-policy");
   if (policyFault) options.push("--policy-fault", policyFault);
   const policyErrors = {missing:"policy_unavailable", hang:"policy_timeout", invalid:"policy_invalid_response", mismatch:"policy_identity_mismatch", failed:"policy_process_failed"};
-  const expected = policyCancel ? "Cancelled. Policy admission is closed." : policyFault ? `Psi failed: ${policyErrors[policyFault]}` : policy ? "Psi policy fixture: counter=1; admitted by Bend." : oauth ? "Psi HTTP fixture: Привет 🌍" : "Psi fixture: Hello Psi issue 44";
+  const expected = exec ? "exec_command: exit\nisolated command complete" : policyCancel ? "Cancelled. Policy admission is closed." : policyFault ? `Psi failed: ${policyErrors[policyFault]}` : policy ? "Psi policy fixture: counter=1; admitted by Bend." : oauth ? "Psi HTTP fixture: Привет 🌍" : "Psi fixture: Hello Psi issue 44";
   if (fault) options.push("--startup-fault", fault);
   if (lifecycle) options.push("--hold-fixture");
   const launcher = spawn("python3", [resolve(here, "run.py"), checkout, "--port", String(port), "--web-port", String(webPort), ...options], { stdio: ["ignore", "pipe", "pipe"] });
@@ -99,7 +103,34 @@ test("ordinary T3 browser message crosses WebSocket and Rust; viewer detach and 
     await page.getByRole("button", { name: "Continue", exact: true }).click();
     await page.getByRole("button", { name: "Do not import projects", exact: true }).click();
     await page.getByRole("button", { name: "New thread", exact: true }).first().click();
-    await page.getByTestId("composer-editor").fill("Hello Psi issue 44");
+    if (exec) {
+      writeFileSync(resolve(root,"workspace/target.txt"),"value=old\n");
+      writeFileSync(resolve(root,"outside-control"),"unchanged");
+      symlinkSync(resolve(root,"outside-control"),resolve(root,"workspace/escape"));
+      const unix = createServer(socket=>{connections++;socket.destroy();});
+      const tcp = createServer(socket=>{connections++;socket.destroy();});
+      listeners.push(unix,tcp);
+      await new Promise(r=>unix.listen(resolve(root,"workspace/host.sock"),r));
+      await new Promise(r=>tcp.listen(0,"127.0.0.1",r));
+      writeFileSync(resolve(root,"workspace/isolation.py"),`
+import socket,pathlib,ctypes,errno,os,stat
+for path in ['escape','/home','/sys/fs/cgroup','/run/user']:
+ try: pathlib.Path(path).read_bytes(); raise AssertionError(path)
+ except OSError: pass
+try: pathlib.Path('/usr/psi-control').write_text('bad'); raise AssertionError('system write')
+except OSError: pass
+try: pathlib.Path('.git/psi-write').write_text('bad'); raise AssertionError('Git metadata write')
+except OSError: pass
+for fn in [lambda:socket.socket(socket.AF_UNIX),socket.socketpair,lambda:socket.create_connection(('127.0.0.1',${tcp.address().port}),.1)]:
+ try: fn(); raise AssertionError('host IPC')
+ except OSError: pass
+lib=ctypes.CDLL(None,use_errno=True)
+assert lib.syscall(425,1,0)==-1 and ctypes.get_errno()==errno.EPERM
+assert all(not stat.S_ISSOCK(os.fstat(fd).st_mode) for fd in (0,1,2))
+print('isolated command complete',end='')
+`);
+    }
+    await page.getByTestId("composer-editor").fill(exec ? JSON.stringify({cmd:"printf 'value=new\\n' > target.txt; python3 isolation.py"}) : "Hello Psi issue 44");
     await page.getByTestId("composer-editor").press("Enter");
     if (oauth) {
       const signIn = page.getByRole("link", { name: /127\.0\.0\.1.*authorize/ });
@@ -156,15 +187,15 @@ test("ordinary T3 browser message crosses WebSocket and Rust; viewer detach and 
       assert(!log.includes("Psi plugin closed:"), "session close must preserve shared plugins");
       writeFileSync(resolve(root, "release-fixture"), "release");
       await page.getByTestId("composer-editor").fill("Hello Psi issue 44");
-      await page.getByTestId("composer-editor").press("Enter");
+    await page.getByTestId("composer-editor").press("Enter");
     }
     if (policyCancel) {
       await page.getByText("Psi policy: Permit received; waiting for fixture release.").waitFor();
       await page.getByRole("button", {name:"Stop generation", exact:true}).click();
       assert(frames.some(frame => frame.payload?.type === "thread.turn.interrupt"));
     }
-    await page.getByText(expected, { exact: !oauth && !policyCancel && !policyFault }).waitFor();
-    assert.equal(await page.getByText(expected, { exact: !oauth && !policyCancel && !policyFault }).count(), 1);
+    await page.getByText(expected, { exact: !exec && !oauth && !policyCancel && !policyFault }).waitFor();
+    assert.equal(await page.getByText(expected, { exact: !exec && !oauth && !policyCancel && !policyFault }).count(), 1);
     if (cancelStream) {
       await page.getByRole("button", { name: "Stop generation", exact: true }).click();
       await page.getByText(/Cancelled locally\. Server processing and billing may continue\./).waitFor();
@@ -185,6 +216,56 @@ test("ordinary T3 browser message crosses WebSocket and Rust; viewer detach and 
       assert(cancelStream ? answer.text.includes("Cancelled locally. Server processing and billing may continue.") : policyFault ? answer.text.includes(expected) : answer.text.endsWith(expected));
       assert(!JSON.stringify(messages).includes("synthetic-refresh"));
     } finally { db.close(); }
+    if (exec) {
+      assert.equal(connections,0,"independent host listeners must receive no connection");
+      assert.equal(readFileSync(resolve(root,"outside-control"),"utf8"),"unchanged");
+      assert.equal(await page.getByRole("button",{name:"Edit from here",exact:true}).count(),0,"rollback is absent from UI");
+      assert.equal(readFileSync(resolve(root,"workspace/target.txt"),"utf8"),"value=new\n");
+      const database = new DatabaseSync(resolve(root,"userdata/state.sqlite"), {readOnly:true});
+      try {
+        let checkpoint;
+        for (let i=0;i<100;i++) {
+          checkpoint=database.prepare("SELECT * FROM projection_turns WHERE checkpoint_ref IS NOT NULL").all().find(r=>r.turn_id===`psi-turn:${sent.payload.commandId}`);
+          if(checkpoint) break;
+          await new Promise(r=>setTimeout(r,50));
+        }
+        assert(checkpoint,"terminal checkpoint must be captured");
+        const refs=execFileSync("git",["for-each-ref","--format=%(refname)","refs/t3"],{cwd:resolve(root,"workspace"),encoding:"utf8"});
+        const baseline=refs.trim().split("\n").find(r=>r.endsWith("/0"));
+        assert(baseline,refs);
+        assert.equal(execFileSync("git",["show",`${baseline}:target.txt`],{cwd:resolve(root,"workspace"),encoding:"utf8"}),"value=old\n");
+        const diff=execFileSync("git",["diff",baseline,checkpoint.checkpoint_ref,"--","target.txt"],{cwd:resolve(root,"workspace"),encoding:"utf8"});
+        assert(diff.includes("-value=old") && diff.includes("+value=new"),diff);
+        await page.locator('[data-changed-files-state="tree"]').getByText("target.txt",{exact:true}).waitFor();
+        await page.getByRole("button",{name:"Open diff",exact:true}).click();
+        await page.getByRole("button",{name:"Expand target.txt",exact:true}).click();
+        try { await page.getByText(/value=old/).first().waitFor({timeout:10000}); }
+        catch (error) { writeFileSync(resolve(root,"diff-page.html"),await page.content()); await page.screenshot({path:resolve(root,"diff-failure.png"),fullPage:true}); throw error; }
+        await page.screenshot({path:resolve(root,"first-diff.png"),fullPage:true});
+        const before=JSON.stringify(database.prepare("SELECT * FROM projection_thread_messages ORDER BY rowid").all());
+        for (const [index,type] of ["thread.checkpoint.revert","thread.conversation.revert"].entries()) {
+          const commandId=`psi-rollback-probe-${index}`;
+          await page.evaluate(({frame,type,commandId,index})=>window.psiSocket.send(JSON.stringify({...frame,id:String(900003+index),payload:{type,commandId,threadId:frame.payload.threadId,turnCount:0,createdAt:new Date().toISOString()}})),{frame:sent,type,commandId,index});
+          let rejection;
+          for(let i=0;i<100;i++) {
+            rejection=database.prepare("SELECT status,error FROM orchestration_command_receipts WHERE command_id=?").get(commandId);
+            if(rejection)break;
+            await new Promise(r=>setTimeout(r,25));
+          }
+          assert.equal(rejection?.status,"rejected");
+          assert(rejection.error.includes("Psi rollback is unsupported"),rejection.error);
+        }
+        assert.equal(readFileSync(resolve(root,"workspace/target.txt"),"utf8"),"value=new\n");
+        assert.equal(JSON.stringify(database.prepare("SELECT * FROM projection_thread_messages ORDER BY rowid").all()),before);
+        assert.equal(execFileSync("git",["for-each-ref","--format=%(refname)","refs/t3"],{cwd:resolve(root,"workspace"),encoding:"utf8"}),refs);
+      } finally { database.close(); }
+      await page.getByTestId("composer-editor").fill(JSON.stringify({cmd:"touch /workspace/must-not-run",workdir:"/workspace/absent"}));
+      await page.getByTestId("composer-editor").press("Enter");
+      await page.getByText(/exec_command: launch_failure/).waitFor();
+      assert(!existsSync(resolve(root,"workspace/must-not-run")),"preflight failure must not run the command");
+      assert.equal(readFileSync(resolve(root,"workspace/target.txt"),"utf8"),"value=new\n");
+      await page.screenshot({path:resolve(root,"exec-and-preflight.png"),fullPage:true});
+    }
     let policyEvidence;
     if (policy) {
       const state = resolve(root,"psi",createHash("sha256").update("psi").digest("hex"),"history.sqlite");
@@ -223,11 +304,12 @@ test("ordinary T3 browser message crosses WebSocket and Rust; viewer detach and 
     assert(!alive(runtimePid), "Rust must be reaped after the controller server closes");
     assert(log.includes("Psi runtime stopped"), "EOF must run Rust lifecycle cleanup");
     assert.deepEqual(pageErrors, []);
-    const report = { passed: true, policy_fixture: policy, policy_evidence: policyEvidence, policy_build: policy ? JSON.parse(readFileSync(resolve(here,"../policy/.build/manifest.json"),"utf8")) : undefined, oauth_fixture: oauth, local_stream_cancellation: cancelStream, agent_loop: agentLoop, lifecycle, t3: "dfbb11bdd7c3f1a5575cb55d3e3abb12be025727", node: process.version, chromium: execFileSync(executablePath, ["--version"], { encoding: "utf8" }).trim(), normal_websocket: true, visible_response: true, stable_origin_command_id: true, one_runtime: true, viewer_detach_preserves_runtime: true, controller_close_reaps_runtime: true };
+    const report = { passed: true, exec_fixture: exec, policy_fixture: policy, policy_evidence: policyEvidence, policy_build: (policy || exec) ? JSON.parse(readFileSync(resolve(here,"../policy/.build/manifest.json"),"utf8")) : undefined, oauth_fixture: oauth, local_stream_cancellation: cancelStream, agent_loop: agentLoop, lifecycle, t3: "dfbb11bdd7c3f1a5575cb55d3e3abb12be025727", node: process.version, chromium: execFileSync(executablePath, ["--version"], { encoding: "utf8" }).trim(), normal_websocket: true, visible_response: true, stable_origin_command_id: true, one_runtime: true, viewer_detach_preserves_runtime: true, controller_close_reaps_runtime: true };
     recordVersions(report);
     writeFileSync(resolve(root, "report.json"), JSON.stringify(report, null, 2) + "\n");
     console.log(`Evidence: ${root}/report.json`);
   } finally {
+    for (const listener of listeners) listener.close();
     if (fixture) fixture.kill("SIGTERM");
     if (browser) await browser.close();
     if (launcher.exitCode === null && launcher.signalCode === null) launcher.kill("SIGTERM");
