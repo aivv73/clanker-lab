@@ -275,3 +275,22 @@ and requesting admission. Each call/result is emitted as a durable `output_item`
 event and its result is displayed through the normal T3 text projection. Remaining
 work is polled automatically after the scripted sequence. This is a local fixture
 model, not live Codex tool integration.
+
+## Cancellation evidence (#51)
+
+An isolated command's final `tool_result` includes `cleanup` observations:
+`populated` (false only after explicit kernel confirmation),
+`observation_error`, `direct_child_reaped`, `owned_processes_reaped`,
+`reaped_descendants`, `output_pipes_drained`, `soft_termination_ms`,
+`forced_termination`, and `stop_elapsed_ms`. Timing is measured by the supervisor;
+terminal persistence, T3 checkpoint processing and rendering follow it.
+
+Unconfirmed cleanup produces a failed terminal with
+`error: executor_cleanup_unconfirmed`, `cleanup_error`, and `remaining_resources`.
+Resources identify the cgroup and observed members, or the named systemd supervisor
+unit when the supervisor cannot be observed. Unknown observations remain null;
+absence of a reply is never converted into successful cleanup. T3 displays this
+list and the unhealthy state. Later turns across all sessions receive
+`runtime_unhealthy`, including after the external resources subsequently disappear.
+The command-process result is committed before the terminal event. A previously
+returned running invocation result is retained as historical evidence.

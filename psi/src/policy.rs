@@ -464,11 +464,16 @@ async fn transition(
     use std::os::fd::AsRawFd;
     use std::process::Stdio;
     let config = &backend.config;
+    // Host-controlled transition fault injection for active-tool cleanup scenarios.
+    let fault = config.fault.clone().or_else(|| {
+        std::env::var_os("PSI_TEST_POLICY_FAULT_FILE")
+            .and_then(|path| std::fs::read_to_string(path).ok())
+    });
     let start = tokio::time::Instant::now();
     if *cancelled.borrow() {
         return Err("policy_cancelled".into());
     }
-    if config.fault.as_deref() == Some("missing") {
+    if fault.as_deref() == Some("missing") {
         return Err("policy_unavailable: injected missing executable".into());
     }
     let executable = backend.executable.as_ref().map_err(Clone::clone)?;
@@ -483,7 +488,7 @@ async fn transition(
         &format!("{state:?}"),
         &format!("{event:?}"),
     ]);
-    if config.fault.as_deref() == Some("failed") {
+    if fault.as_deref() == Some("failed") {
         command.args(["unexpected-extra-argument"]);
     }
     command
@@ -497,7 +502,7 @@ async fn transition(
         .map_err(|e| format!("policy_launch_failed: {e}"))?;
     let pid = child.id().unwrap();
     eprintln!("Psi policy child: {pid}");
-    if config.fault.as_deref() == Some("hang") {
+    if fault.as_deref() == Some("hang") {
         unsafe {
             libc::kill(pid as i32, libc::SIGSTOP);
         }
@@ -528,10 +533,10 @@ async fn transition(
     if !stderr.is_empty() {
         return Err("policy_invalid_response".into());
     }
-    if config.fault.as_deref() == Some("invalid") {
+    if fault.as_deref() == Some("invalid") {
         stdout = b"invalid\n".to_vec();
     }
-    if config.fault.as_deref() == Some("mismatch") {
+    if fault.as_deref() == Some("mismatch") {
         stdout = String::from_utf8_lossy(&stdout)
             .replace(&identity.request, "wrong-request")
             .into_bytes();

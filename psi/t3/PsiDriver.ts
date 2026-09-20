@@ -144,7 +144,7 @@ export const PsiDriver: ProviderDriver<typeof Config.Type> = {
           await start();
           if (reply.status !== "completed") {
             const cancelled = reply.status === "cancelled";
-            await emit("content.delta", { streamKind: "assistant_text", delta: cancelled ? (reply.cancellation_scope === "local_tools" ? "\nCancelled. Command cleanup is confirmed; applied changes remain." : reply.cancellation_scope === "local_policy" ? "\nCancelled. Policy admission is closed." : "\nCancelled locally. Server processing and billing may continue.") : `\nPsi failed: ${reply.error ?? "model_failed"}` });
+            await emit("content.delta", { streamKind: "assistant_text", delta: cancelled ? (reply.cancellation_scope === "local_tools" ? "\nCancelled. Command cleanup is confirmed; applied changes remain." : reply.cancellation_scope === "local_policy" ? "\nCancelled. Policy admission is closed." : "\nCancelled locally. Server processing and billing may continue.") : `\nPsi failed: ${reply.error ?? "model_failed"}${reply.remaining_resources ? "\nCleanup unconfirmed; runtime unhealthy. Remaining or unobserved resources: " + JSON.stringify(reply.remaining_resources) : ""}` });
             await emit("item.completed", { itemType: "assistant_message", status: "failed" });
             await emit("turn.completed", { state: cancelled ? "interrupted" : "failed" });
             return { threadId: input.threadId, turnId };

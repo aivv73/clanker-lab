@@ -78,9 +78,12 @@ print(json.dumps(checks))
     assert result['reason']=='output_limit' and result['truncated'],result
     result=python("import time; time.sleep(10)",timeout_ms=100)
     assert result['reason']=='timeout',result
-    # Normal exit must clean an independently-sessioned surviving child.
+    # Normal exit must promptly clean an independently-sessioned surviving child.
+    normal_exit_start=time.monotonic()
     result=python("import os,time\nif os.fork()==0:\n os.setsid(); time.sleep(30)\nelse: print('parent exited',flush=True)")
     assert result['reason']=='exit' and result['exit_code']==0,result
+    assert time.monotonic()-normal_exit_start<4.5,result
+    assert result['cleanup']['populated'] is False and result['cleanup']['owned_processes_reaped'] and result['cleanup']['output_pipes_drained'],result
     # A temp ENOSPC is an executed command result; no invented workspace quota.
     result=python("import errno\ntry:\n f=open('/tmp/full','wb',buffering=0)\n for _ in range(257): f.write(b'x'*1048576)\nexcept OSError as e:\n assert e.errno==errno.ENOSPC; print('ENOSPC')")
     assert result['exit_code']==0 and 'ENOSPC' in result['output'],result

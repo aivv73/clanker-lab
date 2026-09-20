@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { spawn, execFileSync } from "node:child_process";
-import { readFileSync, readlinkSync, writeFileSync, symlinkSync, existsSync } from "node:fs";
+import { readFileSync, readlinkSync, writeFileSync, symlinkSync, existsSync, mkdtempSync } from "node:fs";
 import { createServer } from "node:net";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
@@ -37,6 +37,8 @@ test("ordinary T3 browser message crosses WebSocket and Rust; viewer detach and 
   const port = Number(process.env.PSI_TEST_PORT ?? 8854);
   const webPort = port + 1;
   const exec = process.env.PSI_TEST_EXEC === "1";
+  const cleanupFaultFile = resolve(mkdtempSync("/tmp/psi-cleanup-fault-"), "fault");
+  let cancellationEvidence;
   const listeners = [];
   let connections = 0;
   const policy = process.env.PSI_TEST_POLICY;
@@ -60,7 +62,7 @@ test("ordinary T3 browser message crosses WebSocket and Rust; viewer detach and 
   const expected = exec ? "exec_command: exit\nisolated command complete" : policyCancel ? "Cancelled. Policy admission is closed." : policyFault ? `Psi failed: ${policyErrors[policyFault]}` : policy ? "Psi policy fixture: counter=1; admitted by Bend." : oauth ? "Psi HTTP fixture: Привет 🌍" : "Psi fixture: Hello Psi issue 44";
   if (fault) options.push("--startup-fault", fault);
   if (lifecycle) options.push("--hold-fixture");
-  const launcher = spawn("python3", [resolve(here, "run.py"), checkout, "--port", String(port), "--web-port", String(webPort), ...options], { stdio: ["ignore", "pipe", "pipe"] });
+  const launcher = spawn("python3", [resolve(here, "run.py"), checkout, "--port", String(port), "--web-port", String(webPort), ...options], { stdio: ["ignore", "pipe", "pipe"], env: {...process.env, PSI_TEST_CLEANUP_FAULT_FILE: cleanupFaultFile} });
   const closed = once(launcher, "close");
   let log = "";
   let root;
@@ -293,6 +295,69 @@ print('isolated command complete',end='')
         assert.equal(terminal.policy.transitions.filter(t=>t.event==="Request").length,5);
       } finally { runtime.close(); }
       await page.screenshot({path:resolve(root,"continuation.png"),fullPage:true});
+      cancellationEvidence = [];
+      for (const cleanupFault of [false, true]) {
+        if (cleanupFault) writeFileSync(cleanupFaultFile,"observation");
+        const marker = cleanupFault ? "fault-ready" : "cancel-ready";
+        const code = `import os,signal,time,pathlib
+signal.signal(signal.SIGTERM,signal.SIG_IGN)
+if os.fork()==0: os.setsid()
+pathlib.Path('${marker}-'+str(os.getpid())).write_text('applied')
+while True: time.sleep(.1)`;
+        const command = {cmd:"python3 -c '"+code.replaceAll("'", "'\"'\"'")+"'",yield_time_ms:20};
+        await page.getByRole("button",{name:"Stop generation",exact:true}).waitFor({state:"hidden"});
+        await page.getByTestId("composer-editor").fill(JSON.stringify(command));
+        await page.getByTestId("composer-editor").press("Enter");
+        const registry = `/tmp/psi-external-command-${process.getuid()}.lock`;
+        let cgroup, members;
+        for(let i=0;i<400;i++) {
+          cgroup=readFileSync(registry,"utf8");
+          if(cgroup && existsSync(resolve(cgroup,"cgroup.procs"))) {
+            members=readFileSync(resolve(cgroup,"cgroup.procs"),"utf8").trim().split(/\s+/).map(Number);
+            // Observe both effects before asking the actual UI to cancel.
+            const files=execFileSync("find",[resolve(root,"workspace"),"-maxdepth","1","-name",marker+"-*"],{encoding:"utf8"}).trim().split("\n");
+            if(files.length>=2) break;
+          }
+          await new Promise(r=>setTimeout(r,25));
+        }
+        assert(cgroup && members.length>=3);
+        assert(readFileSync(resolve(cgroup,"cgroup.events"),"utf8").includes("populated 1"));
+        const started=performance.now();
+        await page.getByRole("button",{name:"Stop generation",exact:true}).click();
+        await page.getByText(cleanupFault ? /Cleanup unconfirmed; runtime unhealthy/ : /Cancelled. Command cleanup is confirmed/).waitFor();
+        const elapsed=performance.now()-started;
+        // UI projection/checkpoint delivery follows the supervisor deadline.
+        // Record its latency separately from the measured 2+2 second stop.
+        const db=new DatabaseSync(statePath(),{readOnly:true});
+        let terminal;
+        try {
+          terminal=JSON.parse(db.prepare("SELECT result FROM commands WHERE turn IS NOT NULL ORDER BY rowid DESC LIMIT 1").get().result);
+          assert.equal(terminal.status,cleanupFault ? "failed" : "cancelled");
+          assert.equal(terminal.tool_result.cleanup_confirmed,!cleanupFault);
+          assert(terminal.tool_result.cleanup.stop_elapsed_ms < 4100, JSON.stringify(terminal.tool_result.cleanup));
+          assert.equal(terminal.policy.closed,true);
+          assert.equal(terminal.policy.state,"Cancelled");
+          const saved=JSON.parse(db.prepare("SELECT result FROM command_processes WHERE turn=?").get(terminal.turn_id).result);
+          assert.deepEqual(saved,terminal.tool_result);
+        } finally {db.close();}
+        if(!cleanupFault) {
+          assert.equal(existsSync(cgroup),false);
+          assert(members.every(pid=>!alive(pid)));
+          assert.equal(terminal.tool_result.cleanup.populated,false);
+        } else {
+          assert(terminal.remaining_resources.length);
+          await page.getByRole("button",{name:"Stop generation",exact:true}).waitFor({state:"hidden"});
+          await page.getByTestId("composer-editor").fill(JSON.stringify({cmd:"touch forbidden-after-cleanup"}));
+          await page.getByTestId("composer-editor").press("Enter");
+          await page.getByText(/runtime_unhealthy/).first().waitFor();
+          assert(!existsSync(resolve(root,"workspace/forbidden-after-cleanup")));
+        }
+        cancellationEvidence.push({fault:cleanupFault,elapsed_ms:elapsed,cgroup,members,terminal,rejected_later_action:cleanupFault});
+      }
+      assert(frames.some(f=>f.payload?.type==="thread.turn.interrupt"));
+      await page.screenshot({path:resolve(root,"cancellation.png"),fullPage:true});
+      function statePath() { return resolve(root,"psi",createHash("sha256").update("psi").digest("hex"),"history.sqlite"); }
+
 
     }
     let policyEvidence;
@@ -333,7 +398,7 @@ print('isolated command complete',end='')
     assert(!alive(runtimePid), "Rust must be reaped after the controller server closes");
     assert(log.includes("Psi runtime stopped"), "EOF must run Rust lifecycle cleanup");
     assert.deepEqual(pageErrors, []);
-    const report = { passed: true, exec_fixture: exec, continuation_fixture: exec, policy_fixture: policy, policy_evidence: policyEvidence, policy_build: (policy || exec) ? JSON.parse(readFileSync(resolve(here,"../policy/.build/manifest.json"),"utf8")) : undefined, oauth_fixture: oauth, local_stream_cancellation: cancelStream, agent_loop: agentLoop, lifecycle, t3: "dfbb11bdd7c3f1a5575cb55d3e3abb12be025727", node: process.version, chromium: execFileSync(executablePath, ["--version"], { encoding: "utf8" }).trim(), normal_websocket: true, visible_response: true, stable_origin_command_id: true, one_runtime: true, viewer_detach_preserves_runtime: true, controller_close_reaps_runtime: true };
+    const report = { passed: true, cancellation_evidence: cancellationEvidence, exec_fixture: exec, continuation_fixture: exec, policy_fixture: policy, policy_evidence: policyEvidence, policy_build: (policy || exec) ? JSON.parse(readFileSync(resolve(here,"../policy/.build/manifest.json"),"utf8")) : undefined, oauth_fixture: oauth, local_stream_cancellation: cancelStream, agent_loop: agentLoop, lifecycle, t3: "dfbb11bdd7c3f1a5575cb55d3e3abb12be025727", node: process.version, chromium: execFileSync(executablePath, ["--version"], { encoding: "utf8" }).trim(), normal_websocket: true, visible_response: true, stable_origin_command_id: true, one_runtime: true, viewer_detach_preserves_runtime: true, controller_close_reaps_runtime: true };
     recordVersions(report);
     writeFileSync(resolve(root, "report.json"), JSON.stringify(report, null, 2) + "\n");
     console.log(`Evidence: ${root}/report.json`);

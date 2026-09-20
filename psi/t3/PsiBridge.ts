@@ -22,6 +22,7 @@ const Reply = Schema.Struct({
   status: Schema.optional(Schema.String),
   output: Schema.optional(Schema.String),
   cancellation_scope: Schema.optional(Schema.String),
+  remaining_resources: Schema.optional(Schema.Array(Schema.Unknown)),
   duplicate: Schema.optional(Schema.Boolean),
   event: Schema.optional(Schema.Struct({ kind: Schema.String, delta: Schema.optional(Schema.String), url: Schema.optional(Schema.String) })),
 });

@@ -86,7 +86,7 @@ export const drainPsiInbox = (
             assistant,
             f.status === "cancelled"
               ? (f.cancellation_scope === "local_tools" ? "\nCancelled. Command cleanup is confirmed; applied changes remain." : f.cancellation_scope === "local_policy" ? "\nCancelled. Policy admission is closed." : "\nCancelled locally. Server processing and billing may continue.")
-              : `\nPsi failed: ${f.error ?? "model_failed"}`,
+              : `\nPsi failed: ${f.error ?? "model_failed"}${f.remaining_resources ? "\nCleanup unconfirmed; runtime unhealthy. Remaining or unobserved resources: " + JSON.stringify(f.remaining_resources) : ""}`,
           );
         complete(assistant);
         if (prior.some((r) => r.event?.kind === "reasoning" && r.event.delta))
