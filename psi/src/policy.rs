@@ -333,7 +333,12 @@ impl Gate {
     }
     /// The executor receives exactly the immutable admitted action. No await or
     /// cancellable gap between consuming authorization and this harmless effect.
-    pub fn fixture_handoff(&self, permit: Permit, action: &Action) -> Result<u64, String> {
+    pub fn handoff<T>(
+        &self,
+        permit: Permit,
+        action: &Action,
+        execute: impl FnOnce() -> Result<T, String>,
+    ) -> Result<T, String> {
         let mut inner = self.inner.lock().unwrap();
         if inner.closed
             || inner.generation != permit.generation
@@ -345,11 +350,16 @@ impl Gate {
             return Err("policy_invalid_permit".into());
         }
         inner.issued.remove(&permit.identity.request);
+        inner.handoffs += 1;
+        execute()
+    }
+    pub fn fixture_handoff(&self, permit: Permit, action: &Action) -> Result<u64, String> {
         if action.name != "fixture_counter" || action.arguments != json!({"increment":1}) {
             return Err("fixture_action_unsupported".into());
         }
-        inner.handoffs += 1;
-        Ok(self.service.counter.fetch_add(1, Ordering::SeqCst) + 1)
+        self.handoff(permit, action, || {
+            Ok(self.service.counter.fetch_add(1, Ordering::SeqCst) + 1)
+        })
     }
     pub async fn fixture(
         self: &Arc<Self>,

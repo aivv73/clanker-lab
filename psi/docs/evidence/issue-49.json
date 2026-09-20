@@ -1,0 +1,204 @@
+{
+  "issue": 49,
+  "recorded_utc": "2026-09-20T16:32:43.188533+00:00",
+  "source_base_revision": "939c6edcbfa9ae5e1e162c12718112fd26ca32fb",
+  "source_identity": "Uncommitted implementation identified by file hashes on this base revision.",
+  "implementation_sha256": {
+    "psi/Cargo.lock": "446155cb1e66194537fae4d6da4679a99cf7ce32510f3fab1d8d2b73b56c0f0e",
+    "psi/Cargo.toml": "5278fbf7197a6c3b24fae316f46780e74a885e3e3ba6b4575e7843907482456c",
+    "psi/README.md": "ead9493b5c45b03dc1b026cfb841e815dde142d58c64d715d2afba6c6c8576bc",
+    "psi/docs/evidence/issue-49-first-diff.png": "36b0d99139ede18390c94072332e368439634c0158486f3ede03126128d49dcb",
+    "psi/docs/issue-49-validation.md": "e578c25f576e438d9d35414c199489b1591d9c15941cc2296932163f58d7b57f",
+    "psi/policy/LAWS.bend": "4d477065d920d6229a7e4c8f3a5b38f0006608a1a66251730d50ee1a367cccb6",
+    "psi/policy/Main.bend": "a46db74a02b652bfe338d1b890d4b1a0af78743c36ce9fabf65eae106c6d7b50",
+    "psi/policy/PROOF.bend": "5669e0b2cfe45c101c24e28c8457666a02085d802e8cf8a09814916ea34eb0bb",
+    "psi/policy/Policy.bend": "43d01758a533eaf2954dea62984dc3d244e53a7805e7188e4a5a92abd048da29",
+    "psi/src/admission.rs": "2efae6e56c539a485b8ed30558b1b45edf7a7e92f4f813364f1a787d58b3fdd2",
+    "psi/src/executor.rs": "caa1040fd51be3285166aad4363db2bcfd41c53bdd208e6bd5606fe7413f675e",
+    "psi/src/lib.rs": "bf935954600a4144bacf96d72e7c7063016ad873f9905fbb0783cba6239b12fd",
+    "psi/src/main.rs": "797f19537fdac96845e53b8dd38a460c167bf6e4742e6fe916b3e4cbc22a2a9f",
+    "psi/src/plugins.rs": "111c3b0ceb5932911b149cfa3263f376f17e6c91c67a4d526fb46f4c92cc87ca",
+    "psi/src/policy.rs": "f565f7392e26e5aed3538057418baa9e9b86b22a36431fd09e2b23cb67358090",
+    "psi/src/protocol.rs": "833e793780e0359fd5f69992aa7f1a73760efe202aab752500e41dabf044e61f",
+    "psi/src/store.rs": "c904e93fde794b7290c7cfda8fb34e48ba531ead6b0828965a736ff27668c993",
+    "psi/t3/PROTOCOL.md": "a6be13a0ab3025bccd8a0c5497577f3bdf80e897abe341d6c826de6fe01c2189",
+    "psi/t3/PsiBridge.ts": "a9cda71d55d39ce57bb657328511f3dd9251f1f55eee595cb3c4087723debea5",
+    "psi/t3/PsiDriver.ts": "a7ea1149349fab50bd840e751e7aa8c725fa7e5c8127066623d345be51be19ec",
+    "psi/t3/PsiProjection.ts": "bd903394e6f35a8b68cd848847e4630104e3e195f869355ba9329e5f051fbdac",
+    "psi/t3/PsiWorkspace.ts": "4da438a5c804a818790e77e7cf02220218eeafeabe3694c546c7264931ca631d",
+    "psi/t3/e2e.test.mjs": "c33ad2dbf9014522cdaea53734cef2db12a2a87429b8e3cad16aaf186137a777",
+    "psi/t3/package-lock.json": "5b6889a9e0aebc60cca078c1956acc9ee23a7d8e69844ab85aa09cec83177a94",
+    "psi/t3/prepare.py": "99a41646dc1a1f9aade7fdbd10826a1f23f3273e67f0e1f88afe8d96d2265cf1",
+    "psi/t3/run.py": "cf02dab7aabe400c9e71a11c594a5caa5180adec2d98541e80ab0419284c44fd",
+    "psi/t3/t3.patch": "dee82ed9a70731c695a841868b5725561be7b68f52686f701426fb62e80adc6c",
+    "psi/t3/workspace.test.ts": "b7b0b695b5d4d9dcb864e483729d94ca83ee8803408d5c922a7e1aa4f5e50be1",
+    "psi/tests/executor.rs": "7c5aec4e012cdb3784f6271212868ed4afb51b9ef5004c7e910b9763d7c49efc",
+    "psi/tests/fixtures/executor.py": "62ee9f0f9dafb9ebc26ffbed07a7816d9c2945ee984560e5da62e8578b7d7941"
+  },
+  "proof": {
+    "compiler_commit": "15ae0c86f3193b8f645b4bedbc438655b648d0da",
+    "compiler_tree": "44f7a1bc24bcd1346bcec642fa0016a605dfe7b2",
+    "compiler_entrypoint_sha256": "f722bcd7a56807d356aaa8033c3d6bc151f406d9f75c2146baa5b60fef228d4f",
+    "bun_binary_sha256": "db71e1b396d06047e9cd835ef2776437e3b4c029234090eb9d99d8450bd6ed60",
+    "compiler_version": "bend 2.0.16",
+    "bun": "1.4.0",
+    "clang": "clang version 22.1.8",
+    "os": "Linux-7.2.2-1-cachyos-x86_64-with-glibc2.44",
+    "proof_stdout": "All terms check.\n",
+    "proof_stderr": "",
+    "mutation_exit": 1,
+    "mutation_output": "Error:\n- expected : Policy.Result{Policy.Cancelled{}, Policy.Permit{}}\n- observed : Policy.Result{Policy.Cancelled{}, Policy.Deny{}}\nContext:\n- e : Policy.Event\nLocation: LAWS.cancelled_step\n3 | def Laws.cancelled_step(e):\n4>|   {==}\n5 | \n",
+    "source_sha256": {
+      "Policy.bend": "43d01758a533eaf2954dea62984dc3d244e53a7805e7188e4a5a92abd048da29",
+      "LAWS.bend": "4d477065d920d6229a7e4c8f3a5b38f0006608a1a66251730d50ee1a367cccb6",
+      "PROOF.bend": "5669e0b2cfe45c101c24e28c8457666a02085d802e8cf8a09814916ea34eb0bb",
+      "Main.bend": "a46db74a02b652bfe338d1b890d4b1a0af78743c36ce9fabf65eae106c6d7b50"
+    },
+    "binary_sha256": "51517d3a08390c446a4891412d082a6ede5b52d0cae764e4fdb4f23641664c34",
+    "proof_dependencies": {
+      "Policy.bend": [],
+      "LAWS.bend": [
+        "import ./Policy.bend as Policy"
+      ],
+      "PROOF.bend": [
+        "import ./LAWS.bend as Laws"
+      ]
+    },
+    "recorded_utc": "2026-09-20T11:24:11Z"
+  },
+  "versions": {
+    "systemd": "systemd 261 (261.2-1-arch)",
+    "bubblewrap": "bubblewrap 0.12.0"
+  },
+  "checks": {
+    "cargo_fmt": "passed",
+    "cargo_check_locked": "passed",
+    "cargo_test_locked": {
+      "outcome": "passed",
+      "tests": 27,
+      "skipped": 0
+    },
+    "node_adapter_inbox_workspace": {
+      "outcome": "passed",
+      "tests": 20,
+      "skipped": 0
+    },
+    "typescript_expanded": "passed; non-failing Effect suggestions",
+    "browser_exec": {
+      "outcome": "passed",
+      "tests": 1,
+      "skipped": 0,
+      "artifact_directory": "/tmp/psi-t3-cejqwck2",
+      "report": {
+        "passed": true,
+        "exec_fixture": true,
+        "policy_build": {
+          "compiler_commit": "15ae0c86f3193b8f645b4bedbc438655b648d0da",
+          "compiler_tree": "44f7a1bc24bcd1346bcec642fa0016a605dfe7b2",
+          "compiler_entrypoint_sha256": "f722bcd7a56807d356aaa8033c3d6bc151f406d9f75c2146baa5b60fef228d4f",
+          "bun_binary_sha256": "db71e1b396d06047e9cd835ef2776437e3b4c029234090eb9d99d8450bd6ed60",
+          "compiler_version": "bend 2.0.16",
+          "bun": "1.4.0",
+          "clang": "clang version 22.1.8",
+          "os": "Linux-7.2.2-1-cachyos-x86_64-with-glibc2.44",
+          "proof_stdout": "All terms check.\n",
+          "proof_stderr": "",
+          "mutation_exit": 1,
+          "mutation_output": "Error:\n- expected : Policy.Result{Policy.Cancelled{}, Policy.Permit{}}\n- observed : Policy.Result{Policy.Cancelled{}, Policy.Deny{}}\nContext:\n- e : Policy.Event\nLocation: LAWS.cancelled_step\n3 | def Laws.cancelled_step(e):\n4>|   {==}\n5 | \n",
+          "source_sha256": {
+            "Policy.bend": "43d01758a533eaf2954dea62984dc3d244e53a7805e7188e4a5a92abd048da29",
+            "LAWS.bend": "4d477065d920d6229a7e4c8f3a5b38f0006608a1a66251730d50ee1a367cccb6",
+            "PROOF.bend": "5669e0b2cfe45c101c24e28c8457666a02085d802e8cf8a09814916ea34eb0bb",
+            "Main.bend": "a46db74a02b652bfe338d1b890d4b1a0af78743c36ce9fabf65eae106c6d7b50"
+          },
+          "binary_sha256": "51517d3a08390c446a4891412d082a6ede5b52d0cae764e4fdb4f23641664c34",
+          "proof_dependencies": {
+            "Policy.bend": [],
+            "LAWS.bend": [
+              "import ./Policy.bend as Policy"
+            ],
+            "PROOF.bend": [
+              "import ./LAWS.bend as Laws"
+            ]
+          },
+          "recorded_utc": "2026-09-20T11:24:11Z"
+        },
+        "oauth_fixture": false,
+        "local_stream_cancellation": false,
+        "agent_loop": "exec-fixture",
+        "lifecycle": false,
+        "t3": "dfbb11bdd7c3f1a5575cb55d3e3abb12be025727",
+        "node": "v24.13.1",
+        "chromium": "Google Chrome 152.0.7977.82",
+        "normal_websocket": true,
+        "visible_response": true,
+        "stable_origin_command_id": true,
+        "one_runtime": true,
+        "viewer_detach_preserves_runtime": true,
+        "controller_close_reaps_runtime": true,
+        "psi_binary_sha256": "7e5dad682bd7204cf342b66b554ac0bb82423d09e494e8345a4f52af86861d86",
+        "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+        "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+        "os": "Linux 7.2.2-1-cachyos x86_64 GNU/Linux",
+        "source_revision": "939c6edcbfa9ae5e1e162c12718112fd26ca32fb",
+        "implementation_sha256": {
+          "../src/executor.rs": "caa1040fd51be3285166aad4363db2bcfd41c53bdd208e6bd5606fe7413f675e",
+          "../tests/executor.rs": "7c5aec4e012cdb3784f6271212868ed4afb51b9ef5004c7e910b9763d7c49efc",
+          "../tests/fixtures/executor.py": "62ee9f0f9dafb9ebc26ffbed07a7816d9c2945ee984560e5da62e8578b7d7941",
+          "../src/policy.rs": "f565f7392e26e5aed3538057418baa9e9b86b22a36431fd09e2b23cb67358090",
+          "../tests/policy.rs": "c67fa60b951b07c13e98b13f64afa35818b63ffbb8e354ea383672836265cb5e",
+          "../tests/fixtures/policy.py": "4b797e26591842e08ec7dcb1a3ba52df520d001c27b3b3142a4a5009bc0e9db2",
+          "../policy/build.py": "97393edef35c4c3f9078303e4b3cd844a5befa0eece612442fc3192ecd96ae70",
+          "../policy/Policy.bend": "43d01758a533eaf2954dea62984dc3d244e53a7805e7188e4a5a92abd048da29",
+          "../policy/LAWS.bend": "4d477065d920d6229a7e4c8f3a5b38f0006608a1a66251730d50ee1a367cccb6",
+          "../policy/PROOF.bend": "5669e0b2cfe45c101c24e28c8457666a02085d802e8cf8a09814916ea34eb0bb",
+          "../policy/Main.bend": "a46db74a02b652bfe338d1b890d4b1a0af78743c36ce9fabf65eae106c6d7b50",
+          "../src/store.rs": "c904e93fde794b7290c7cfda8fb34e48ba531ead6b0828965a736ff27668c993",
+          "../tests/durability.rs": "8319f8bbfba25eff8ab012b6604441097490a67e1fa50c5833b8d934e10bc9ea",
+          "../tests/fixtures/durability.py": "0e8f0e1aa884c93e7f0c7e067da0522024d4f1bca2af6626a0408085c088408e",
+          "PsiInbox.ts": "b61e718fdb9f2c1eda21b288056f1977c2d9b5b6aee39ff16987318187b5f29b",
+          "PsiProjection.ts": "bd903394e6f35a8b68cd848847e4630104e3e195f869355ba9329e5f051fbdac",
+          "inbox.test.ts": "a4b627135a2cf408182b07c279adb9ae873711b22682d6e0a40dbc19be222aff",
+          "durability-worker.ts": "a74e4ac27b89165d8c07ef2342e6b1d983ff8bf8b9a483a65238ef66fc4d497f",
+          "../Cargo.toml": "5278fbf7197a6c3b24fae316f46780e74a885e3e3ba6b4575e7843907482456c",
+          "../Cargo.lock": "446155cb1e66194537fae4d6da4679a99cf7ce32510f3fab1d8d2b73b56c0f0e",
+          "../src/admission.rs": "2efae6e56c539a485b8ed30558b1b45edf7a7e92f4f813364f1a787d58b3fdd2",
+          "../src/work.rs": "e84583b1e5a522f036986ad72955aef7f98f7aec8a0641f78102de4cdb1f0214",
+          "../src/core.rs": "7d78950ea9ab461b42fb409509338db351c27eead01d98622a1f89a9b6548746",
+          "../src/plugins.rs": "111c3b0ceb5932911b149cfa3263f376f17e6c91c67a4d526fb46f4c92cc87ca",
+          "../src/protocol.rs": "833e793780e0359fd5f69992aa7f1a73760efe202aab752500e41dabf044e61f",
+          "../src/main.rs": "797f19537fdac96845e53b8dd38a460c167bf6e4742e6fe916b3e4cbc22a2a9f",
+          "../src/lib.rs": "bf935954600a4144bacf96d72e7c7063016ad873f9905fbb0783cba6239b12fd",
+          "../src/codex.rs": "dadb58ba17c60286061df79cf3e289158cbaee367352e1855db99d1fff044c9e",
+          "../src/model.rs": "fb133101bb7c632d7fbfbc5d2f5327c19a192fb814fbbf6bfa19a926dd5e3e95",
+          "../tests/codex.rs": "d5397d5090c8b3372327c5d6265703557519ebd9efbe4afcc1b17fd401d3f165",
+          "../tests/auth_runtime.rs": "737baa8951ea3aa8cfba36be1f247e019dbe5c6573306e5b803aecd5c7e3910b",
+          "../tests/fixtures/runtime_auth.py": "d93a73a6cdc06267f70ebd31ff1cd054ddc35d3d8b8475d605f37a85b252326a",
+          "../tests/fixtures/oauth_server.py": "deb805e86a75d4248c01bb6a12a1c554ae629a3345df40c313f47ec0a3c89256",
+          "../tests/lifecycle.rs": "c16855a76c34746de5b0ef57ca863e9bb456fd4ceb3d91f54c0fc11d92358832",
+          "../tests/protocol.rs": "4480c8dc4c2e1c47b3f1c82b69405d5c12d84644b39035ddb364e8076ba87da7",
+          "PsiWorkspace.ts": "4da438a5c804a818790e77e7cf02220218eeafeabe3694c546c7264931ca631d",
+          "workspace.test.ts": "b7b0b695b5d4d9dcb864e483729d94ca83ee8803408d5c922a7e1aa4f5e50be1",
+          "PsiDriver.ts": "a7ea1149349fab50bd840e751e7aa8c725fa7e5c8127066623d345be51be19ec",
+          "PsiBridge.ts": "a9cda71d55d39ce57bb657328511f3dd9251f1f55eee595cb3c4087723debea5",
+          "adapter.test.ts": "c8973b7935c9113a518efa027bfc8d6357d5c455f0910abf67061ddaa2bbc736",
+          "t3.patch": "dee82ed9a70731c695a841868b5725561be7b68f52686f701426fb62e80adc6c",
+          "prepare.py": "99a41646dc1a1f9aade7fdbd10826a1f23f3273e67f0e1f88afe8d96d2265cf1",
+          "run.py": "cf02dab7aabe400c9e71a11c594a5caa5180adec2d98541e80ab0419284c44fd",
+          "e2e.test.mjs": "c33ad2dbf9014522cdaea53734cef2db12a2a87429b8e3cad16aaf186137a777",
+          "package-lock.json": "5b6889a9e0aebc60cca078c1956acc9ee23a7d8e69844ab85aa09cec83177a94"
+        },
+        "t3_lock_sha256": "cdf7f23158631e7cb34b279a9792ef28eb3418c453ec58508e3d91919a4b5a12"
+      }
+    }
+  },
+  "not_run": [
+    "Live account/model tool use (later slice)",
+    "write_stdin/apply_patch (later slices)",
+    "Individual missing memory/pids-controller and cgroup.kill variants",
+    "2 GiB OOM and full-duration 120/600 second runs",
+    "Exhaustive cancellation/crash/cleanup-failure matrix",
+    "Other OS/architectures/hosts"
+  ],
+  "scope": "Isolated exec fixture with real T3 diff and rollback guards; not full A01-A28 MVP acceptance."
+}

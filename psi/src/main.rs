@@ -4,8 +4,24 @@ use psi::{
     protocol::Controller,
 };
 
-#[tokio::main(flavor = "current_thread")]
-async fn main() {
+fn main() {
+    if std::env::args().nth(1).as_deref() == Some("--sandbox-payload") {
+        psi::executor::payload_main(&std::env::args().nth(2).expect("command"));
+    }
+    if std::env::args().nth(1).as_deref() == Some("--exec-supervisor") {
+        psi::executor::supervisor_main(std::path::Path::new(
+            &std::env::args().nth(2).expect("workspace"),
+        ));
+        return;
+    }
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime")
+        .block_on(runtime_main());
+}
+
+async fn runtime_main() {
     let mut directory = std::env::var_os("PSI_STATE_DIR")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| {
@@ -50,12 +66,13 @@ async fn main() {
     }
     if model.trim().is_empty()
         || (model == "fixture" && oauth_fixture.is_some())
-        || (selection == "policy-fixture" && model != "fixture")
+        || (["policy-fixture", "exec-fixture"].contains(&selection.as_str()) && model != "fixture")
     {
         eprintln!("invalid model configuration");
         std::process::exit(1);
     }
     let agent: Box<dyn Plugin> = match selection.as_str() {
+        "exec-fixture" => Box::new(psi::plugins::ExecFixturePlugin),
         "policy-fixture" => Box::new(psi::plugins::PolicyFixturePlugin),
         "single-response" => Box::new(SingleResponsePlugin),
         "buffered-response" => Box::new(BufferedResponsePlugin),
@@ -65,7 +82,10 @@ async fn main() {
         }
     };
     let provider: Box<dyn Plugin> = if model == "fixture" {
-        Box::new(FixtureModelPlugin { gate })
+        Box::new(FixtureModelPlugin {
+            gate,
+            exec: selection == "exec-fixture",
+        })
     } else {
         let config = match oauth_fixture {
             Some(base) => match psi::codex::Config::fixture(&base, model.clone()) {
@@ -113,12 +133,15 @@ async fn main() {
             directory,
         ) {
             Ok(controller) => {
-                let controller = controller.with_model(model);
-                let mut controller = if selection == "policy-fixture" {
-                    controller.with_policy(runtime.service("policy").unwrap())
-                } else {
-                    controller
-                };
+                let controller = controller
+                    .with_model(model)
+                    .with_exec(selection == "exec-fixture");
+                let mut controller =
+                    if ["policy-fixture", "exec-fixture"].contains(&selection.as_str()) {
+                        controller.with_policy(runtime.service("policy").unwrap())
+                    } else {
+                        controller
+                    };
                 controller.serve().await
             }
             Err(error) => Err(error),

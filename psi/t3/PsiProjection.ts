@@ -1,6 +1,8 @@
 // @effect-diagnostics preferSchemaOverJson:off - Stable IDs encode a tuple, not an external payload.
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
+import type { CheckpointReactorShape } from "../orchestration/Services/CheckpointReactor.ts";
+import { ProviderRuntimeEvent } from "@t3tools/contracts";
 import { OrchestrationCommand } from "@t3tools/contracts";
 import type { OrchestrationEngineShape } from "../orchestration/Services/OrchestrationEngine.ts";
 import { PsiInbox } from "./PsiInbox.ts";
@@ -9,6 +11,7 @@ import { PsiInbox } from "./PsiInbox.ts";
 export const drainPsiInbox = (
   inbox: PsiInbox,
   engine: Pick<OrchestrationEngineShape, "dispatch">,
+  checkpoint?: CheckpointReactorShape["psiComplete"],
 ) =>
   Effect.gen(function* () {
     for (const row of inbox.pending()) {
@@ -82,7 +85,7 @@ export const drainPsiInbox = (
           delta(
             assistant,
             f.status === "cancelled"
-              ? (f.cancellation_scope === "local_policy" ? "\nCancelled. Policy admission is closed." : "\nCancelled locally. Server processing and billing may continue.")
+              ? (f.cancellation_scope === "local_tools" ? "\nCancelled. Command cleanup is confirmed; applied changes remain." : f.cancellation_scope === "local_policy" ? "\nCancelled. Policy admission is closed." : "\nCancelled locally. Server processing and billing may continue.")
               : `\nPsi failed: ${f.error ?? "model_failed"}`,
           );
         complete(assistant);
@@ -92,6 +95,15 @@ export const drainPsiInbox = (
         commands.push(commands.shift()!);
       }
       for (const [ordinal, command] of commands.entries()) {
+        if (["completed", "failed", "cancelled"].includes(f.status) && checkpoint && ordinal === commands.length - 1) {
+          const checkpointEvent = yield* Schema.decodeUnknownEffect(ProviderRuntimeEvent)({
+          eventId: `psi-checkpoint:${JSON.stringify([row.instance,row.session,row.seq])}`,
+          provider: "psi", providerInstanceId: row.instance, threadId: row.session,
+          turnId: f.turn_id, createdAt: row.created, type: "turn.completed",
+          payload: {state: f.status === "completed" ? "completed" : f.status === "cancelled" ? "interrupted" : "failed"},
+        });
+          if (checkpointEvent.type === "turn.completed") yield* checkpoint(checkpointEvent);
+        }
         const commandId = `psi:${JSON.stringify([row.instance, row.session, row.seq, ordinal])}`;
         const decoded = yield* Schema.decodeUnknownEffect(OrchestrationCommand)({
           ...(command as object),

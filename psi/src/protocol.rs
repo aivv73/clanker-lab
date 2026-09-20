@@ -98,6 +98,8 @@ impl Command {
 pub struct Controller {
     policy: Option<Arc<crate::policy::PolicyService>>,
     gate: Option<Arc<crate::policy::Gate>>,
+    exec: bool,
+    tools: Option<Arc<crate::executor::ToolTurn>>,
     unhealthy: bool,
     store: crate::store::Store,
     directory: std::path::PathBuf,
@@ -127,6 +129,8 @@ impl Controller {
         let (done_tx, done_rx) = tokio::sync::mpsc::unbounded_channel();
         Ok(Self {
             policy: None,
+            exec: false,
+            tools: None,
             gate: None,
             unhealthy: false,
             store,
@@ -144,6 +148,10 @@ impl Controller {
             model: "fixture".into(),
             event_rx: None,
         })
+    }
+    pub fn with_exec(mut self, enabled: bool) -> Self {
+        self.exec = enabled;
+        self
     }
     pub fn with_policy(mut self, policy: Arc<crate::policy::PolicyService>) -> Self {
         self.policy = Some(policy);
@@ -305,6 +313,23 @@ impl Controller {
                 if self.store.blocked(session_id).map_err(|e| e.to_string())? {
                     return Ok(Some(self.error("session_outcome_unknown")));
                 }
+                let tools = if self.exec {
+                    let Some(workspace) = self
+                        .store
+                        .workspace(session_id)
+                        .map_err(|e| e.to_string())?
+                    else {
+                        return Ok(Some(self.error("workspace_required")));
+                    };
+                    Some(crate::executor::ToolTurn::new(
+                        workspace.into(),
+                        self.directory.clone(),
+                        session_id.clone(),
+                        turn_id.clone(),
+                    ))
+                } else {
+                    None
+                };
                 let lease = match TurnLease::acquire() {
                     Ok(lease) => lease,
                     Err(error) => return Ok(Some(self.error(&error))),
@@ -328,10 +353,14 @@ impl Controller {
                 };
                 let gate = self.policy.as_ref().map(|policy| policy.turn(turn_id));
                 self.gate = gate.clone();
+                self.tools = tools.clone();
                 self.active = Some((command.clone(), lease));
                 if let Err(error) = self.spawner.spawn(owner, async move {
                     let result = match gate {
-                        Some(gate) => agent.0.run_with_policy(input, events, gate).await,
+                        Some(gate) => match tools {
+                            Some(tools) => agent.0.run_with_tools(input, events, gate, tools).await,
+                            None => agent.0.run_with_policy(input, events, gate).await,
+                        },
                         None => agent.0.run(input, events).await,
                     };
                     let _ = tx.send((id, result));
@@ -404,6 +433,17 @@ impl Controller {
             })
             .await;
         let mut reply = json!({"version": VERSION, "runtime_id": self.runtime_id, "request_id": request_id, "session_id": session_id, "turn_id": turn_id});
+        if let Some(tools) = self.tools.take() {
+            match tools.cleanup().await {
+                Ok(Some(value)) => reply["tool_result"] = value,
+                Ok(None) => {}
+                Err(error) => {
+                    self.unhealthy = true;
+                    reply["cleanup_error"] = json!(error);
+                    result = Err(error);
+                }
+            }
+        }
         if let Some(gate) = self.gate.take() {
             let event = if result.is_ok() {
                 crate::policy::Event::Finish
@@ -439,7 +479,9 @@ impl Controller {
                 });
                 reply["error"] = json!(reason);
                 if reply["status"] == "cancelled" {
-                    reply["cancellation_scope"] = json!(if reply.get("policy").is_some() {
+                    reply["cancellation_scope"] = json!(if reply.get("tool_result").is_some() {
+                        "local_tools"
+                    } else if reply.get("policy").is_some() {
                         "local_policy"
                     } else {
                         "local_only_server_processing_and_billing_unknown"

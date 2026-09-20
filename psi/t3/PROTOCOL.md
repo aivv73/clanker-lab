@@ -2,7 +2,7 @@
 
 One UTF-8 JSON object per line. Each command and reply carries `version: 1`.
 Stdout is exclusively protocol traffic; stderr is diagnostics. The controller
-owns stdin. EOF closes admission, joins active cooperative work, reaps policy children, closes plugins and exits; there are no external tool children.
+owns stdin. EOF closes admission, joins active work, reaps policy children, confirms cleanup of any isolated command, closes plugins and exits.
 Maximum frame size is 1 MiB. Unknown operations/fields and invalid JSON are errors.
 
 First command:
@@ -26,7 +26,7 @@ required capabilities and version; no compatibility fallback exists.
 | `session_id` | T3 thread ID, separate conversation scope within the shared runtime. |
 | `request_id` | Identity of the originating command, not prompt text or a delivery attempt. Turn requests use the persisted T3 `commandId` (persisted `eventId` fallback). |
 | `turn_id` | Work scope for one turn, derived as `psi-turn:<originating command ID>`. Distinct field and role from the request identity. |
-| `invocation_id` | Reserved for a future tool execution inside a turn. This slice invokes no tools and fabricates no invocation IDs. Model responses are not tool invocations. |
+| `invocation_id` | Reserved for a future tool execution inside a turn. The exec fixture records `<turn_id>:exec:1` as its action identity; model responses themselves are not tool invocations. |
 
 Lifecycle requests have independent `psi-lifecycle:<UUID>` identities. They are
 generated for lifecycle operations and stored by Psi; turn retries use the original
@@ -83,8 +83,8 @@ registration/task counts, turn admission, and cleanup, but not model input.
 `Runtime → Session → Turn → Invocation` ownership is represented separately from
 plugin ownership. No tool invocation is fabricated for a model call. The normal
 loops run the selected model; the policy fixture runs its harmless counter action.
-Arbitrary tool execution, tool process-tree cleanup, and tool resource quotas
-remain subsequent slices. Forced safe termination of
+The `exec-fixture` loop executes isolated commands with process-tree cleanup and
+resource bounds; continuation and patches remain subsequent slices. Forced safe termination of
 arbitrary in-process plugin code is not promised.
 
 ## Streaming and authentication
@@ -149,7 +149,7 @@ its own request. A cursor beyond the stored log or a log gap fails explicitly.
 History returns `status: history`, exact provider `history`, and saved terminal
 `turns`. Model requests use only Psi history; UI snapshots are not model input.
 `open` accepts `workspace`, whose canonical path must not contain the state store.
-The adapter supplies it. Standalone fixture clients may omit it; no tools exist.
+The adapter supplies it. Standalone text-only clients may omit it; exec turns reject an absent workspace.
 
 The T3 inbox scopes sequences by instance/session and rejects gaps or conflicting
 payloads. It commits the frame, then advances the cursor. Projection completion is
@@ -189,3 +189,47 @@ responses, and timeouts never grant fallback authorization. Cleanup failure adds
 
 The [policy validation document](../docs/issue-46-validation.md) describes the
 250 ms B1 deadline, proof boundary, build provenance, startup settings, and tests.
+
+## exec_command slice (#49)
+
+`--agent-loop exec-fixture` selects a deterministic model that emits one function
+call from the composer's JSON input. The loop consumes that call through the
+executor; no fixture file effects substitute for execution. The normal text model
+and live Codex model retain their existing behavior. Workspace assignment happens
+at `open`; T3's awaited baseline happens before `turn` is sent.
+
+| Argument | Supported behavior |
+| --- | --- |
+| `cmd` | Required nonempty shell source, at most 65536 bytes, no NUL. |
+| `workdir` | Optional sandbox path under `/workspace`, no parent traversal; default `/workspace`. Symlinks resolve inside the same sandbox. |
+| `shell` | Omitted or `/bin/sh`. |
+| `login`, `tty` | Omitted or `false`; `true` is rejected. |
+| `timeout_ms` | 1–600000 milliseconds; default 120000. No read extends it. |
+| `max_output_tokens` | 1–16000, default 16000; conservative output byte ceiling, not a tokenizer estimate. |
+
+All other fields are rejected, including `sandbox_permissions`, `justification`,
+`prefix_rule`, `yield_time_ms`, and environment/access overrides. Privilege or
+access expansion has no approval/fallback route. Command continuation and
+`write_stdin` are intentionally unavailable in this slice; a short command returns
+its final result, never a fabricated live session ID.
+
+The function result and terminal `tool_result` contain `output`, `exit_code`,
+`reason`, `truncated`, and `cleanup_confirmed`. Executed results additionally carry
+`launched`, measured `output_bytes`, cgroup identity, configured limits, and
+memory/pids event counters. Reasons distinguish `exit` (including nonzero exit),
+`launch_failure`, `timeout`, `cancelled`, `output_limit`, `resource_limit`, and
+`cleanup_failure`. A missing launch marker means launcher failure, not an executed
+shell exit. A temp filesystem ENOSPC is observable in the executed program's
+output/exit; exhaustive syscall/limit diagnosis belongs to later slices.
+
+Action intent precedes handoff, and action result commits after supervisor cleanup
+and before terminal. A missing supervisor reply is uncertain and makes the runtime
+unhealthy rather than inventing cleanup. Cancelled exec turns retain `tool_result`
+when available and use `cancellation_scope: local_tools`. Action records survive
+cancellation; automatic action replay is forbidden. The existing unknown-outcome
+block remains; acknowledgement and complete context recovery are not added here.
+
+T3's terminal cursor means inbox acceptance. Its separate done marker follows
+message projection **and** the awaited standard checkpoint handler. A captured
+checkpoint ref is preserved on replay. Psi rollback is rejected in the engine
+before domain effects, in addition to the adapter rejection and UI capability.

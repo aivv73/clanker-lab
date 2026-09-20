@@ -18,8 +18,9 @@ The [#46](https://github.com/aivv73/clanker-lab/issues/46) slice adds a checked 
 policy plugin and a deterministic, harmless action through the real T3 path.
 See [the proof, runtime contract, and validation](docs/issue-46-validation.md).
 
-This is **not the full MVP**: tools, checkpoint/unknown-outcome recovery,
-process-tree cancellation, and sandboxing are not implemented yet.
+This is **not the full MVP**: command continuation, patches, integrated live tool use,
+and unknown-outcome acknowledgement remain later slices. Issue #49 adds isolated
+commands and awaited Git checkpoints through the deterministic `exec-fixture` loop.
 The full contract is in the [specification](docs/mvp-spec.md) and [glossary](CONTEXT.md).
 
 ## Build and checks
@@ -120,9 +121,9 @@ of implementation files.
   shared plugins. Repeated close is safe; an explicit open can reopen the conversation.
 - Both sides validate the handshake before accepting work. Frames are limited to
   1 MiB; the bridge allows 10 seconds for lifecycle replies, 660 seconds for a turn
-  (including sign-in), and 2 seconds
-  for process shutdown before forcing termination if needed. These limits apply to
-  the fixture and do not establish cancellation guarantees for future tools.
+  (including sign-in), and 6 seconds
+  for process shutdown before forcing termination if needed. The shutdown grace
+  accommodates the executor’s 2+2 second cleanup bound and durable terminal.
 - Turn commands and acceptance are durable before model execution. Identical retries
   return the saved acceptance/result; changed content conflicts. Completed model
   history survives restart, independently of T3 text. Sequenced events enter a
@@ -131,7 +132,7 @@ of implementation files.
   exactly-once external effects.
 - Model support, attachments, rollback, and auxiliary generation are not silently
   broadened: `fixture` and the configured ChatGPT model are supported; attachments and unsupported operations are
-  rejected. Full verification of disabled rollback and checkpoints belongs to later slices.
+  rejected. Psi rollback is rejected before orchestration effects; #49 verifies checkpoints and disabled rollback.
 
 ## Session ownership and lifecycle checks (#45)
 
@@ -176,10 +177,9 @@ Core tests verify provider protection and separate invocation ownership, without
 adding a plugin-specific test protocol.
 
 Safe forced termination of arbitrary blocking or hung in-process plugin code is
-**not guaranteed**. Cooperative future cleanup is verified; external tool children,
-process-tree cancellation, and unhealthy-runtime recovery for arbitrary tools
-remain subsequent slices. Bend policy-child cleanup is covered by #46. Killing the process is not proof of external
-resource cleanup. No conflicts with the existing MVP specification were identified.
+**not guaranteed**. Cooperative future cleanup is verified. Bend policy-child
+cleanup is covered by #46; isolated command cleanup and unhealthy-runtime rejection
+are covered by #49. Killing Rust is not itself proof of external resource cleanup. No conflicts with the existing MVP specification were identified.
 
 [Issue #45 validation](docs/issue-45-validation.md).
 
@@ -285,7 +285,7 @@ Closing a session keeps its saved history. Reopening restores it.
 
 After an ambiguous crash, accepted unfinished work is marked with unknown outcome
 and is never automatically executed again. That session blocks continuation;
-explicit recovery acknowledgement belongs to #49. Access and refresh tokens are
+explicit recovery acknowledgement remains a later recovery slice. Access and refresh tokens are
 not persisted, so model authentication is still required after restart.
 
 Psi projects streamed conversation text directly from the durable inbox, using
@@ -295,3 +295,63 @@ not UI rendering. Action intent/result and terminal-processing records are exten
 points for tools and checkpoints; they do not establish atomic file effects.
 
 [Protocol](t3/PROTOCOL.md) and [validation with crash tests](docs/issue-48-validation.md).
+
+## Isolated commands and first diffs (#49)
+
+On **Linux x86-64**, select the deterministic command model/loop at startup:
+
+```sh
+python3 t3/run.py /path/to/pinned/t3 --agent-loop exec-fixture
+```
+
+Send this JSON through the ordinary T3 composer:
+
+```json
+{"cmd":"printf 'value=new\\n' > target.txt; cat target.txt"}
+```
+
+The fixture model emits one `exec_command` call. Bend admits its immutable
+arguments; Rust saves intent, executes, saves the result, and returns a paired
+function call/result in exact model history. The selected session workspace is
+mounted at `/workspace`. T3 awaits its baseline Git snapshot before sending work;
+terminal inbox processing awaits the completion checkpoint before making the
+session ready. Replaying a completion preserves an already captured checkpoint.
+Git metadata is read-only inside commands because T3 owns checkpoints. Psi requires
+a workspace with a `.git` entry and rejects mutable Git configuration/includes and
+external Git filter/diff/fsmonitor programs before handoff, so a changed file
+cannot invoke those programs through T3’s host-side checkpoint processing. Worktree
+`.git` files do not grant access to their external Git directory.
+
+The supervisor runs in a transient **delegated user systemd service**, outside
+the command cgroup. It verifies delegation, unified cgroup v2, memory/pids
+controllers, `cgroup.kill`, and limit readback before placing bubblewrap in the
+command cgroup. No shell runs before membership. Bubblewrap provides user, PID,
+network, IPC and mount isolation, a read-only program/library tree, workspace
+writes, and a separate 256 MiB tmpfs. An effective seccomp filter denies sockets
+(including AF_UNIX/socketpair), io_uring and descriptor/process-memory theft;
+foreign syscall ABIs are rejected. Ambient descriptors close on exec. A trusted
+trampoline verifies seccomp before recording payload launch. Missing prerequisites
+fail closed, including on hosts without a user systemd manager.
+
+Commands use pipes, `/bin/sh -c`, no profiles, explicit environment, a 120-second
+default deadline (maximum 600 seconds), 2 GiB memory, no swap, and 128 tasks.
+Output is bounded to 10 MiB total; crossing it terminates the command. Response
+text uses a conservative byte ceiling no greater than the requested token ceiling
+(maximum 16000), with explicit truncation. There is no workspace-size quota.
+Home roots, secret directories and host-control trees cannot be selected as tool
+workspaces; ordinary project directories beneath home are supported.
+
+Cancellation/control-channel loss closes admission and the supervisor's control
+pipe. It allows at most two seconds of graceful termination, then uses
+`cgroup.kill` and waits up to two more seconds for an empty cgroup, closed pipes,
+and the direct child to be reaped. Normal parent exit also cleans descendants.
+The supervisor holds a separate per-user lease across Rust crashes; a persisted
+cgroup record prevents another runtime treating a restart as proof of cleanup.
+Unconfirmed cleanup blocks the runtime. Applied changes remain; rollback is not
+available in the UI and is rejected by the server.
+
+Supported arguments/results and intentional reductions are in
+[PROTOCOL.md](t3/PROTOCOL.md#exec_command-slice-49). This fixture is enabled only by
+startup configuration, never by a prompt sent to the ordinary text-only model.
+There is no `write_stdin`, patch execution, PTY, or live model tool loop in this
+slice. [Validation and reproduction](docs/issue-49-validation.md).
