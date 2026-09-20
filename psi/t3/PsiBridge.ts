@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off globalTimers:off - This Promise-based JSONL transport owns Node child handles and shutdown timers outside Effect fibers.
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import * as Schema from "effect/Schema";
@@ -15,11 +16,12 @@ const Reply = Schema.Struct({
   status: Schema.optional(Schema.String),
   output: Schema.optional(Schema.String),
   duplicate: Schema.optional(Schema.Boolean),
+  event: Schema.optional(Schema.Struct({ kind: Schema.String, delta: Schema.optional(Schema.String), url: Schema.optional(Schema.String) })),
 });
 export type PsiReply = typeof Reply.Type;
-const capabilities = ["fixture-model", "sessions", "origin-command-id"];
+const capabilities = ["sessions", "origin-command-id", "model-stream"];
 
-export type PsiOptions = { agentLoop?: string | undefined; fixtureGate?: string | undefined; startupFault?: string | undefined };
+export type PsiOptions = { model?: string | undefined; oauthFixture?: string | undefined; agentLoop?: string | undefined; fixtureGate?: string | undefined; startupFault?: string | undefined };
 
 /** One controller process per provider instance, shared by every session. */
 export class PsiBridge {
@@ -35,10 +37,15 @@ export class PsiBridge {
     resolve: (reply: PsiReply) => void;
     reject: (error: Error) => void;
     timer: ReturnType<typeof setTimeout>;
+    onEvent?: ((reply: PsiReply) => void) | undefined;
   }[] = [];
 
+  private readonly options: PsiOptions;
   constructor(binary: string, options: PsiOptions = {}) {
+    this.options = options;
     const args = ["--agent-loop", options.agentLoop ?? "single-response"];
+    args.push("--model", options.model ?? "fixture");
+    if (options.oauthFixture) args.push("--oauth-fixture", options.oauthFixture);
     if (options.fixtureGate) args.push("--fixture-gate", options.fixtureGate);
     if (options.startupFault) args.push("--startup-fault", options.startupFault);
     this.child = spawn(binary, args, { stdio: "pipe" });
@@ -67,9 +74,10 @@ export class PsiBridge {
             throw new Error("Psi incompatible or unsolicited reply");
           }
           if (next.requestId !== reply.request_id) throw new Error("Psi request identity mismatch");
+          if (reply.status === "streaming") { next.onEvent?.(reply); continue; }
           this.pending.splice(index, 1);
           clearTimeout(next.timer);
-          if (reply.error) next.reject(new Error(`Psi: ${reply.error}`));
+          if (reply.error && !reply.status) next.reject(new Error(`Psi: ${reply.error}`));
           else next.resolve(reply);
         } catch (error) { this.fail(error instanceof Error ? error : new Error(String(error))); }
       }
@@ -94,7 +102,7 @@ export class PsiBridge {
   async hello() {
     try {
       const reply = await this.send({ op: "hello", capabilities });
-      if (!reply.capabilities || capabilities.some((c) => !reply.capabilities!.includes(c)) || reply.model !== "fixture") {
+      if (!reply.capabilities || capabilities.some((c) => !reply.capabilities!.includes(c)) || reply.model !== (this.options.model ?? "fixture")) {
         throw new Error("Psi incompatible capabilities");
       }
       this.runtimeId = reply.runtime_id;
@@ -105,16 +113,16 @@ export class PsiBridge {
     }
   }
 
-  send(command: { op: string; request_id?: string; [key: string]: unknown }): Promise<PsiReply> {
+  send(command: { op: string; request_id?: string; [key: string]: unknown }, onEvent?: (reply: PsiReply) => void): Promise<PsiReply> {
     if (this.failure || this.closing) return Promise.reject(this.failure ?? new Error("Psi is closing"));
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => this.fail(new Error("Psi response timeout")), 10_000);
+      const timer = setTimeout(() => this.fail(new Error("Psi response timeout")), command.op === "turn" ? 660_000 : 10_000);
       if (this.pending.some((pending) => pending.requestId === command.request_id)) {
         clearTimeout(timer);
         reject(new Error("Psi: request_in_progress"));
         return;
       }
-      this.pending.push({ requestId: command.request_id, resolve, reject, timer });
+      this.pending.push({ requestId: command.request_id, resolve, reject, timer, onEvent });
       this.child.stdin.write(JSON.stringify({ ...command, version: 1 }) + "\n");
     });
   }

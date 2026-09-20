@@ -3,11 +3,14 @@
 A standalone Rust agent runtime, separate from `paclang`. The first implemented
 slice ([#44](https://github.com/aivv73/clanker-lab/issues/44)) lets you send an ordinary
 message in the real T3 Web application and see `Psi fixture: <message>` in response.
-The model is deterministic; no account or tools are required. The
+The default model is deterministic; no account or tools are required. The
 [#45](https://github.com/aivv73/clanker-lab/issues/45) slice adds runtime-owned turn
 admission, execution scopes, tracked plugin work, and startup loop selection.
 
-This is **not the full MVP**: tools, Bend, Codex sign-in, durable Psi history,
+The [#47](https://github.com/aivv73/clanker-lab/issues/47) slice adds independent
+ChatGPT OAuth/PKCE, memory-only refresh, and streamed model responses through T3.
+
+This is **not the full MVP**: tools, Bend, durable Psi history,
 recovery, process-tree cancellation, and sandboxing are not implemented yet.
 The full contract is in the [specification](docs/mvp-spec.md) and [glossary](CONTEXT.md).
 
@@ -90,7 +93,8 @@ of implementation files.
 - The core manages service contracts and plugin lifecycles: it validates the
   dependency graph before startup, starts providers first, and closes plugins in
   reverse order, including a partially started plugin. Orchestration belongs to
-  `SingleResponsePlugin`; the model belongs to `FixtureModelPlugin`. Both expose
+  `SingleResponsePlugin`; the model belongs to `FixtureModelPlugin` or
+  `CodexModelPlugin`. Both expose
   replaceable trait contracts. `Context::spawner()` associates tracked tasks with
   the supplying plugin and a runtime/session/turn/invocation owner. Closing a scope
   aborts and joins its cooperative futures before releasing admission. Plugin close
@@ -101,7 +105,8 @@ of implementation files.
   workspaces). Closing a session cleans its work but preserves other sessions and
   shared plugins. Repeated close is safe; an explicit open can reopen the conversation.
 - Both sides validate the handshake before accepting work. Frames are limited to
-  1 MiB; the bridge times out a stalled response after 10 seconds and allows 2 seconds
+  1 MiB; the bridge allows 10 seconds for lifecycle replies, 660 seconds for a turn
+  (including sign-in), and 2 seconds
   for process shutdown before forcing termination if needed. These limits apply to
   the fixture and do not establish cancellation guarantees for future tools.
 - Repeated IDs are deduplicated **only in the current process's memory**. There is no
@@ -109,7 +114,7 @@ of implementation files.
   remains in T3, but it is not recovered model history. Do not use this slice for
   actions with side effects.
 - Model support, attachments, rollback, and auxiliary generation are not silently
-  broadened: only `fixture` is supported; attachments and unsupported operations are
+  broadened: `fixture` and the configured ChatGPT model are supported; attachments and unsupported operations are
   rejected. Full verification of disabled rollback and checkpoints belongs to later slices.
 
 ## Session ownership and lifecycle checks (#45)
@@ -161,3 +166,94 @@ records remain subsequent slices. Killing the process is not proof of external
 resource cleanup. No conflicts with the existing MVP specification were identified.
 
 [Issue #45 validation](docs/issue-45-validation.md).
+
+## ChatGPT sign-in and streamed answers (#47)
+
+Use the same pinned T3 preparation, then choose a model available to your account:
+
+```sh
+python3 t3/run.py t3/.checkout --model gpt-5.6-luna
+```
+
+Send a normal message in T3. Psi displays a sign-in link in the response; open it
+on the same machine, complete browser sign-in, and return to the conversation.
+The runtime listens on `127.0.0.1:1455`, using the registered
+`http://localhost:1455/auth/callback` redirect. An occupied callback port fails
+explicitly. Sign-in expires after five minutes. No installed Codex process,
+credential file, keychain, or API key is used. Model availability is account-specific;
+the named model follows the pinned prototype, not a live availability guarantee.
+
+T3 provider settings `model` and `oauthFixture` correspond to Rust's `--model` and
+`--oauth-fixture` options. Only the chosen model is advertised. Authentication is
+reported as unknown in the provider snapshot; the turn displays sign-in/failure
+state. This slice initiates sign-in from the conversation, not T3's provider setup
+wizard. Credentials never travel through T3. After a Rust restart, send a new
+message and sign in again; existing T3 conversation records remain independent.
+Psi's exact model history is still in memory and is **not** recovered from T3 text.
+
+The launcher selects T3 token streaming; other T3 streaming preferences remain
+available. Sign-in is its own completed message item so that buffering cannot hide
+the actionable link. The normal loop streams text and reasoning as received. The buffered loop forwards
+sign-in immediately but buffers model deltas. Completed provider output items,
+including encrypted reasoning, item IDs, call IDs and exact argument strings, are
+preserved in `ModelResponse` and in subsequent in-memory model input. Completed
+items also cross the model event boundary before any later stream failure; failed
+streams do not append a fabricated successful response to session history. This slice
+advertises no tools and does not execute tool calls. Durable context, budget checks,
+and integrated tool use remain later slices.
+
+Access/refresh tokens live only in the Rust model service. Refresh replaces both
+tokens; failed or cancelled rotation drops the old token. A 401 is explicit, clears
+authentication, and is never transparently replayed. The next turn signs in again.
+Error bodies and HTTP library errors are not sent to diagnostics or conversation
+history. Memory-only storage does not promise erasure from RAM or protection from
+swap. The live client honors standard proxy environment settings (`HTTPS_PROXY`,
+`HTTP_PROXY`, `ALL_PROXY`, and `NO_PROXY`, including lowercase variants). Redirects
+remain disabled. Only explicit HTTP `127.0.0.1` fixtures bypass proxies. Endpoints
+are fixed for live use; a fixture origin must be explicitly selected.
+
+When Content-Type is present, the client requires `text/event-stream`
+(case-insensitive, parameters allowed). It
+handles UTF-8 split across chunks, LF/CRLF/CR lines, multiline SSE data, and preserved
+output items. Missing Content-Type is tolerated, matching the pinned backend
+reference; explicitly incompatible MIME is an error. Every stream must contain an
+explicit completed response with consistent output; EOF, `[DONE]` alone, incomplete
+responses, broken transport, malformed events, and provider failures never become
+success. Responses are bounded to 512 KiB of SSE and five minutes; token responses
+to 64 KiB and 30 seconds. These are current client limits, separate from later tool
+limits. Absence of MIME metadata never substitutes for stream validation or completion.
+Live backend compatibility has not yet been confirmed end to end.
+
+Use T3's **Stop generation** to close the local request. The turn reports that
+server processing and billing may continue. Cancellation also closes a pending
+sign-in callback listener; session close and controller EOF clean up owned futures.
+There is no claim of remote cancellation.
+
+### Account-free validation
+
+`cargo test --locked` requires Python 3 for loopback HTTP fixtures. It checks PKCE,
+state/duplicate-state rejection, sign-in/refresh failure, refresh rotation, lossless
+items, follow-up requests, SSE framing and error classification. Real process tests
+check restart sign-in, cancellation, unchanged synthetic home files, inotify evidence
+that installed credentials were not accessed, and absence of synthetic tokens in
+protocol output and stderr. No account is needed.
+
+After preparing T3, run these browser scenarios **sequentially**:
+
+```sh
+PSI_TEST_OAUTH=1 PSI_T3_CHECKOUT="$PWD/t3/.checkout" \
+  PSI_CHROMIUM=/absolute/path/to/chrome node --test t3/e2e.test.mjs
+PSI_TEST_OAUTH=hold PSI_T3_CHECKOUT="$PWD/t3/.checkout" \
+  PSI_CHROMIUM=/absolute/path/to/chrome node --test t3/e2e.test.mjs
+```
+
+The first follows the actual link shown in T3 through synthetic OAuth and receives
+an HTTP/SSE answer. The second holds completion after a visible delta, then clicks
+**Stop generation**, verifying the ordinary interrupt WebSocket command and local
+cancellation in persisted T3 conversation text. Both use the real Rust process.
+
+For a manual fixture run, start `python3 tests/fixtures/oauth_server.py` and pass its
+printed origin to `run.py --model fixture-codex --oauth-fixture <origin>`. The fixture
+accepts synthetic sign-in without an account; never use it for a real account.
+
+[Issue #47 validation and remaining live checks](docs/issue-47-validation.md).

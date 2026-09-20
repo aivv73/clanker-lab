@@ -25,7 +25,7 @@ function recordVersions(report) {
     report.os = execFileSync("uname", ["-srmo"], { encoding: "utf8" }).trim();
     report.source_revision = execFileSync("git", ["rev-parse", "HEAD"], { cwd: here, encoding: "utf8" }).trim();
     report.implementation_sha256 = Object.fromEntries([
-      "../Cargo.toml", "../Cargo.lock", "../src/admission.rs", "../src/work.rs", "../src/core.rs", "../src/plugins.rs", "../src/protocol.rs", "../src/main.rs", "../src/lib.rs", "../tests/lifecycle.rs", "../tests/protocol.rs",
+      "../Cargo.toml", "../Cargo.lock", "../src/admission.rs", "../src/work.rs", "../src/core.rs", "../src/plugins.rs", "../src/protocol.rs", "../src/main.rs", "../src/lib.rs", "../src/codex.rs", "../src/model.rs", "../tests/codex.rs", "../tests/auth_runtime.rs", "../tests/fixtures/runtime_auth.py", "../tests/fixtures/oauth_server.py", "../tests/lifecycle.rs", "../tests/protocol.rs",
       "PsiDriver.ts", "PsiBridge.ts", "adapter.test.ts", "t3.patch", "prepare.py", "run.py", "e2e.test.mjs", "package-lock.json",
     ].map((name) => [name, createHash("sha256").update(readFileSync(resolve(here, name))).digest("hex")]));
     report.t3_lock_sha256 = createHash("sha256").update(readFileSync(resolve(checkout, "pnpm-lock.yaml"))).digest("hex");
@@ -38,6 +38,15 @@ test("ordinary T3 browser message crosses WebSocket and Rust; viewer detach and 
   const fault = process.env.PSI_TEST_STARTUP_FAULT;
   const lifecycle = process.env.PSI_TEST_LIFECYCLE === "1";
   const options = ["--agent-loop", agentLoop];
+  const oauth = Boolean(process.env.PSI_TEST_OAUTH);
+  const cancelStream = process.env.PSI_TEST_OAUTH === "hold";
+  let fixture;
+  if (oauth) {
+    fixture = spawn("python3", [resolve(here, "../tests/fixtures/oauth_server.py"), cancelStream ? "hold" : "normal"], { stdio: ["ignore", "pipe", "inherit"] });
+    const [chunk] = await once(fixture.stdout, "data");
+    options.push("--model", "fixture-codex", "--oauth-fixture", chunk.toString().trim());
+  }
+  const expected = oauth ? "Psi HTTP fixture: Привет 🌍" : "Psi fixture: Hello Psi issue 44";
   if (fault) options.push("--startup-fault", fault);
   if (lifecycle) options.push("--hold-fixture");
   const launcher = spawn("python3", [resolve(here, "run.py"), checkout, "--port", String(port), "--web-port", String(webPort), ...options], { stdio: ["ignore", "pipe", "pipe"] });
@@ -85,9 +94,19 @@ test("ordinary T3 browser message crosses WebSocket and Rust; viewer detach and 
     await page.getByRole("button", { name: "New thread", exact: true }).first().click();
     await page.getByTestId("composer-editor").fill("Hello Psi issue 44");
     await page.getByTestId("composer-editor").press("Enter");
+    if (oauth) {
+      const signIn = page.getByRole("link", { name: /127\.0\.0\.1.*authorize/ });
+      await signIn.waitFor();
+      const url = await signIn.getAttribute("href");
+      assert(url);
+      const authPage = await browser.newPage();
+      await authPage.goto(url);
+      await authPage.getByText("Sign-in received. Return to Psi.").waitFor();
+      await authPage.close();
+    }
     if (fault) {
       await page.getByText(/Psi startup failed/).first().waitFor();
-      assert(!log.includes("Psi fixture runtime started"));
+      assert(!log.includes("Psi runtime started"));
       if (fault === "partial") {
         assert(log.includes("probe resource dropped"));
         assert(log.includes("registrations=0 tasks=0"));
@@ -132,8 +151,13 @@ test("ordinary T3 browser message crosses WebSocket and Rust; viewer detach and 
       await page.getByTestId("composer-editor").fill("Hello Psi issue 44");
       await page.getByTestId("composer-editor").press("Enter");
     }
-    await page.getByText("Psi fixture: Hello Psi issue 44", { exact: true }).waitFor();
-    assert.equal(await page.getByText("Psi fixture: Hello Psi issue 44", { exact: true }).count(), 1);
+    await page.getByText(expected, { exact: !oauth }).waitFor();
+    assert.equal(await page.getByText(expected, { exact: !oauth }).count(), 1);
+    if (cancelStream) {
+      await page.getByRole("button", { name: "Stop generation", exact: true }).click();
+      await page.getByText(/Cancelled locally\. Server processing and billing may continue\./).waitFor();
+      assert(frames.some((frame) => frame.payload?.type === "thread.turn.interrupt"));
+    }
     await page.screenshot({ path: resolve(root, "conversation.png"), fullPage: true });
     const sent = frames.findLast((frame) => frame.tag === "orchestration.dispatchCommand" && frame.payload?.type === "thread.turn.start");
     assert(sent, "normal composer must dispatch the ordinary WebSocket command");
@@ -142,7 +166,12 @@ test("ordinary T3 browser message crosses WebSocket and Rust; viewer detach and 
       const origin = db.prepare("SELECT command_id FROM orchestration_events WHERE event_type='thread.turn-start-requested' AND command_id=?").get(sent.payload.commandId);
       assert(origin, "originating command must exist in T3's durable event log");
       const messages = db.prepare("SELECT turn_id, text FROM projection_thread_messages WHERE role='assistant'").all();
-      assert.deepEqual(messages.map((m) => ({ ...m })), [{ turn_id: `psi-turn:${origin.command_id}`, text: "Psi fixture: Hello Psi issue 44" }]);
+      assert.equal(messages.length, oauth ? 2 : 1);
+      assert(messages.every((message) => message.turn_id === `psi-turn:${origin.command_id}`));
+      const answer = messages.find((message) => message.text.includes(expected));
+      assert(answer);
+      assert(cancelStream ? answer.text.includes("Cancelled locally. Server processing and billing may continue.") : answer.text.endsWith(expected));
+      assert(!JSON.stringify(messages).includes("synthetic-refresh"));
     } finally { db.close(); }
     const children = readFileSync(`/proc/${serverPid}/task/${serverPid}/children`, "utf8").trim().split(/\s+/).filter(Boolean).map(Number);
     const runtimes = children.filter((pid) => {
@@ -159,11 +188,12 @@ test("ordinary T3 browser message crosses WebSocket and Rust; viewer detach and 
     assert(!alive(runtimePid), "Rust must be reaped after the controller server closes");
     assert(log.includes("Psi runtime stopped"), "EOF must run Rust lifecycle cleanup");
     assert.deepEqual(pageErrors, []);
-    const report = { passed: true, agent_loop: agentLoop, lifecycle, t3: "dfbb11bdd7c3f1a5575cb55d3e3abb12be025727", node: process.version, chromium: execFileSync(executablePath, ["--version"], { encoding: "utf8" }).trim(), normal_websocket: true, visible_response: true, stable_origin_command_id: true, one_runtime: true, viewer_detach_preserves_runtime: true, controller_close_reaps_runtime: true };
+    const report = { passed: true, oauth_fixture: oauth, local_stream_cancellation: cancelStream, agent_loop: agentLoop, lifecycle, t3: "dfbb11bdd7c3f1a5575cb55d3e3abb12be025727", node: process.version, chromium: execFileSync(executablePath, ["--version"], { encoding: "utf8" }).trim(), normal_websocket: true, visible_response: true, stable_origin_command_id: true, one_runtime: true, viewer_detach_preserves_runtime: true, controller_close_reaps_runtime: true };
     recordVersions(report);
     writeFileSync(resolve(root, "report.json"), JSON.stringify(report, null, 2) + "\n");
     console.log(`Evidence: ${root}/report.json`);
   } finally {
+    if (fixture) fixture.kill("SIGTERM");
     if (browser) await browser.close();
     if (launcher.exitCode === null && launcher.signalCode === null) launcher.kill("SIGTERM");
     await closed;

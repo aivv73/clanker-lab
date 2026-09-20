@@ -1,0 +1,246 @@
+{
+  "schema_version": 1,
+  "issue": 47,
+  "recorded_at_utc": "2026-09-20T07:04:45.643056+00:00",
+  "source_base": "dd650d556ceeb781d8f489a7388943106a787cf1",
+  "source_state": "uncommitted implementation; original browser snapshots are followed by separately recorded proxy and MIME corrections",
+  "scope": [
+    "A26 local",
+    "A28 authentication portion",
+    "T3 fixture sign-in/answer",
+    "T3 local stream cancellation"
+  ],
+  "checks": [
+    {
+      "command": "cargo fmt --check",
+      "outcome": "passed"
+    },
+    {
+      "command": "cargo check --locked",
+      "outcome": "passed"
+    },
+    {
+      "command": "cargo test --locked",
+      "outcome": "passed",
+      "tests": 16
+    },
+    {
+      "command": "tsc -p tsconfig.psi.json --pretty false",
+      "outcome": "passed",
+      "notes": "Effect suggestions, no errors"
+    },
+    {
+      "command": "PSI_BINARY=<built psi> node --test <pinned T3>/apps/server/src/psi/adapter.test.ts",
+      "outcome": "passed",
+      "tests": 15
+    },
+    {
+      "command": "PSI_TEST_OAUTH=1 node --test psi/t3/e2e.test.mjs",
+      "outcome": "passed"
+    },
+    {
+      "command": "PSI_TEST_OAUTH=hold node --test psi/t3/e2e.test.mjs",
+      "outcome": "passed"
+    },
+    {
+      "command": "real account A27 sign-in, refresh, integrated tool roundtrip",
+      "outcome": "not_run",
+      "notes": "Real account path provided; live acceptance is a separate ticket."
+    }
+  ],
+  "model_fixture_scenarios": [
+    "PKCE/state",
+    "duplicate-state",
+    "denied",
+    "sign-in-failed",
+    "refresh-failed",
+    "rotation",
+    "401 and subsequent sign-in without transparent retry",
+    "mime",
+    "missing-mime",
+    "unfinished",
+    "done-only",
+    "broken transport",
+    "incomplete with preserved item event",
+    "provider failed",
+    "invalid UTF-8",
+    "invalid JSON",
+    "output mismatch",
+    "size limit",
+    "CR-only",
+    "multiline",
+    "item fallback",
+    "every UTF-8/CRLF split",
+    "lossless reasoning/call items and synthetic result follow-up",
+    "local stream disconnect"
+  ],
+  "process_checks": [
+    "new process requires sign-in",
+    "refresh rotation discards prior token",
+    "failed refresh signs in again",
+    "inotify: fake installed credential directory unaccessed",
+    "synthetic home file bytes unchanged",
+    "protocol/stderr contain no synthetic credentials",
+    "local cancellation scope explicit",
+    "exact successful provider items used in next request"
+  ],
+  "browser_reports": [
+    {
+      "passed": true,
+      "oauth_fixture": true,
+      "local_stream_cancellation": false,
+      "agent_loop": "single-response",
+      "lifecycle": false,
+      "t3": "dfbb11bdd7c3f1a5575cb55d3e3abb12be025727",
+      "node": "v24.13.1",
+      "chromium": "Google Chrome 152.0.7977.82",
+      "normal_websocket": true,
+      "visible_response": true,
+      "stable_origin_command_id": true,
+      "one_runtime": true,
+      "viewer_detach_preserves_runtime": true,
+      "controller_close_reaps_runtime": true,
+      "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+      "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+      "os": "Linux 7.2.2-1-cachyos x86_64 GNU/Linux",
+      "source_revision": "dd650d556ceeb781d8f489a7388943106a787cf1",
+      "implementation_sha256": {
+        "../Cargo.toml": "471c799e0b88289bbc8b012485b4d6b6a91ae88402089b502940c754ea50c580",
+        "../Cargo.lock": "c40e043063b0994053c9709be816254396a54dc6d3c682b84746789f34c9fec4",
+        "../src/admission.rs": "749c2ff58f9f6364e83c3b6526845cce8faa537b32fddd43eaadc6563a8a200b",
+        "../src/work.rs": "e84583b1e5a522f036986ad72955aef7f98f7aec8a0641f78102de4cdb1f0214",
+        "../src/core.rs": "7d78950ea9ab461b42fb409509338db351c27eead01d98622a1f89a9b6548746",
+        "../src/plugins.rs": "189d91884654cbd9f46f72b24c2bef481f152006e5cad0eeb2940bc7021c2903",
+        "../src/protocol.rs": "6fa6bd2d86b430d23e18a5df08553213ea95738d6f89304ecdf76adcef0cad98",
+        "../src/main.rs": "5da38bbb667acd01fa7ed6a76442280add526f48a96256e62a927e56c3d936fa",
+        "../src/lib.rs": "49b06864dd8dfab0a4528a453a3901689b9d89b63ba212ccf36698538f81b7dc",
+        "../src/codex.rs": "d25a2c1416d60fb37e16c45a4564e04a9b421bdef434a1ffa3f90bee71f18871",
+        "../src/model.rs": "fb133101bb7c632d7fbfbc5d2f5327c19a192fb814fbbf6bfa19a926dd5e3e95",
+        "../tests/codex.rs": "71853a0b9ca5afacc3c3e58075ec42728cfc3b25dce29e6f2b89843e958e4542",
+        "../tests/auth_runtime.rs": "737baa8951ea3aa8cfba36be1f247e019dbe5c6573306e5b803aecd5c7e3910b",
+        "../tests/fixtures/runtime_auth.py": "cfc146589fea5673e46faef503fa44f636e7ac4ed038b3694d9650e191e86b0d",
+        "../tests/fixtures/oauth_server.py": "6ea258a1e71814e2571a31ccee3837b569c344c3c3ab0b10b189da7908059ca4",
+        "../tests/lifecycle.rs": "c16855a76c34746de5b0ef57ca863e9bb456fd4ceb3d91f54c0fc11d92358832",
+        "../tests/protocol.rs": "b5a13c3e80a798f279ffe14b62f5456f1bca87d32c5d72684a257188a4cce646",
+        "PsiDriver.ts": "19cdf90cdeacdb9528232a07a60fad4e7031fc3062cea12457a5b28e3f4ef8f8",
+        "PsiBridge.ts": "a1cb707a7db50ed5d6721838be8039b70f18af59c8c40938c2f4b652864a225d",
+        "adapter.test.ts": "b84099a1a7eaf228facd0ede2d65de95bf3608b1f95e79c66dc9e29936a67b6e",
+        "t3.patch": "19a50f781c976d649d1b672a8644e893ab65522ee4591244cf1cbbdcd39534f6",
+        "prepare.py": "982aafa11a62bc911fc05e64c5ec119b73d658c49afea7ec3f6025f57f557dd0",
+        "run.py": "394d277fd16a08b088f17ccf503224c4a8395e118f9acca3d182102a550587c0",
+        "e2e.test.mjs": "4904cf50f9cf2b2dc538e7d2c3619f97ea70d66983697089701ba16a73307a21",
+        "package-lock.json": "5b6889a9e0aebc60cca078c1956acc9ee23a7d8e69844ab85aa09cec83177a94"
+      },
+      "t3_lock_sha256": "cdf7f23158631e7cb34b279a9792ef28eb3418c453ec58508e3d91919a4b5a12"
+    },
+    {
+      "passed": true,
+      "oauth_fixture": true,
+      "local_stream_cancellation": true,
+      "agent_loop": "single-response",
+      "lifecycle": false,
+      "t3": "dfbb11bdd7c3f1a5575cb55d3e3abb12be025727",
+      "node": "v24.13.1",
+      "chromium": "Google Chrome 152.0.7977.82",
+      "normal_websocket": true,
+      "visible_response": true,
+      "stable_origin_command_id": true,
+      "one_runtime": true,
+      "viewer_detach_preserves_runtime": true,
+      "controller_close_reaps_runtime": true,
+      "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+      "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+      "os": "Linux 7.2.2-1-cachyos x86_64 GNU/Linux",
+      "source_revision": "dd650d556ceeb781d8f489a7388943106a787cf1",
+      "implementation_sha256": {
+        "../Cargo.toml": "471c799e0b88289bbc8b012485b4d6b6a91ae88402089b502940c754ea50c580",
+        "../Cargo.lock": "c40e043063b0994053c9709be816254396a54dc6d3c682b84746789f34c9fec4",
+        "../src/admission.rs": "749c2ff58f9f6364e83c3b6526845cce8faa537b32fddd43eaadc6563a8a200b",
+        "../src/work.rs": "e84583b1e5a522f036986ad72955aef7f98f7aec8a0641f78102de4cdb1f0214",
+        "../src/core.rs": "7d78950ea9ab461b42fb409509338db351c27eead01d98622a1f89a9b6548746",
+        "../src/plugins.rs": "189d91884654cbd9f46f72b24c2bef481f152006e5cad0eeb2940bc7021c2903",
+        "../src/protocol.rs": "6fa6bd2d86b430d23e18a5df08553213ea95738d6f89304ecdf76adcef0cad98",
+        "../src/main.rs": "5da38bbb667acd01fa7ed6a76442280add526f48a96256e62a927e56c3d936fa",
+        "../src/lib.rs": "49b06864dd8dfab0a4528a453a3901689b9d89b63ba212ccf36698538f81b7dc",
+        "../src/codex.rs": "d25a2c1416d60fb37e16c45a4564e04a9b421bdef434a1ffa3f90bee71f18871",
+        "../src/model.rs": "fb133101bb7c632d7fbfbc5d2f5327c19a192fb814fbbf6bfa19a926dd5e3e95",
+        "../tests/codex.rs": "71853a0b9ca5afacc3c3e58075ec42728cfc3b25dce29e6f2b89843e958e4542",
+        "../tests/auth_runtime.rs": "737baa8951ea3aa8cfba36be1f247e019dbe5c6573306e5b803aecd5c7e3910b",
+        "../tests/fixtures/runtime_auth.py": "cfc146589fea5673e46faef503fa44f636e7ac4ed038b3694d9650e191e86b0d",
+        "../tests/fixtures/oauth_server.py": "6ea258a1e71814e2571a31ccee3837b569c344c3c3ab0b10b189da7908059ca4",
+        "../tests/lifecycle.rs": "c16855a76c34746de5b0ef57ca863e9bb456fd4ceb3d91f54c0fc11d92358832",
+        "../tests/protocol.rs": "b5a13c3e80a798f279ffe14b62f5456f1bca87d32c5d72684a257188a4cce646",
+        "PsiDriver.ts": "19cdf90cdeacdb9528232a07a60fad4e7031fc3062cea12457a5b28e3f4ef8f8",
+        "PsiBridge.ts": "a1cb707a7db50ed5d6721838be8039b70f18af59c8c40938c2f4b652864a225d",
+        "adapter.test.ts": "b84099a1a7eaf228facd0ede2d65de95bf3608b1f95e79c66dc9e29936a67b6e",
+        "t3.patch": "19a50f781c976d649d1b672a8644e893ab65522ee4591244cf1cbbdcd39534f6",
+        "prepare.py": "982aafa11a62bc911fc05e64c5ec119b73d658c49afea7ec3f6025f57f557dd0",
+        "run.py": "394d277fd16a08b088f17ccf503224c4a8395e118f9acca3d182102a550587c0",
+        "e2e.test.mjs": "4904cf50f9cf2b2dc538e7d2c3619f97ea70d66983697089701ba16a73307a21",
+        "package-lock.json": "5b6889a9e0aebc60cca078c1956acc9ee23a7d8e69844ab85aa09cec83177a94"
+      },
+      "t3_lock_sha256": "cdf7f23158631e7cb34b279a9792ef28eb3418c453ec58508e3d91919a4b5a12"
+    }
+  ],
+  "limitations": [
+    "No live account run",
+    "No tool execution, sandbox, Bend, durable Psi history/context recovery, or context budgets in this slice",
+    "Inotify/home/output checks are not a full filesystem trace or proof of memory erasure",
+    "Live backend/account/model compatibility remains unverified end to end; missing MIME is supported by the recorded correction",
+    "Local cancellation makes no claim about remote processing or billing"
+  ],
+  "proxy_correction": {
+    "recorded_at_utc": "2026-09-20T07:32:53.264310+00:00",
+    "observed_error": "sign_in_failed in the running T3 projection",
+    "credential_free_token_endpoint_probe": {
+      "method": "GET",
+      "direct_status": 403,
+      "configured_proxy_status": 405
+    },
+    "change": "Honor proxy environment for live auth/model requests; bypass proxies only for local fixtures",
+    "checks": {
+      "cargo_fmt_check": "passed",
+      "cargo_check_locked": "passed",
+      "cargo_test_locked": {
+        "outcome": "passed",
+        "tests": 17
+      },
+      "cargo_build_locked": "passed",
+      "git_diff_check": "passed"
+    },
+    "regression": "Subprocess-isolated proxy environment; independent loopback listeners verify live-client proxy routing and fixture direct routing without external requests",
+    "sha256": {
+      "psi/src/codex.rs": "3fbf6f09e2ae6135af5891f052610c14a465d551046d857051f402b67b4a8a13",
+      "psi/Cargo.lock": "c40e043063b0994053c9709be816254396a54dc6d3c682b84746789f34c9fec4"
+    },
+    "live_account_retry": "not_run; running old process needs restart",
+    "browser_reports": "retained from original snapshot; browser checks not rerun for this Rust network-client configuration fix"
+  },
+  "mime_correction": {
+    "recorded_at_utc": "2026-09-20T07:37:37.558697+00:00",
+    "reported_error": "model_mime after browser sign-in",
+    "diagnosis": "Initial MIME check rejected missing Content-Type despite known pinned-reference support; the old error did not identify absent versus explicit incompatible MIME",
+    "change": "Allow missing Content-Type only with valid SSE and explicit completion; reject explicit incompatible MIME using sanitized json/html/other classes",
+    "checks": {
+      "cargo_fmt_check": "passed",
+      "cargo_check_locked": "passed",
+      "cargo_test_locked": {
+        "outcome": "passed",
+        "tests": 17
+      },
+      "cargo_build_locked": "passed"
+    },
+    "regressions": [
+      "headerless complete SSE succeeds",
+      "headerless unfinished SSE fails",
+      "headerless JSON and HTML cannot become success",
+      "explicit JSON/HTML MIME rejected"
+    ],
+    "sha256": {
+      "psi/src/codex.rs": "dadb58ba17c60286061df79cf3e289158cbaee367352e1855db99d1fff044c9e",
+      "psi/tests/codex.rs": "d5397d5090c8b3372327c5d6265703557519ebd9efbe4afcc1b17fd401d3f165",
+      "psi/tests/fixtures/oauth_server.py": "deb805e86a75d4248c01bb6a12a1c554ae629a3345df40c313f47ec0a3c89256"
+    },
+    "live_account_retry": "not_run; restart required to load corrected binary"
+  }
+}

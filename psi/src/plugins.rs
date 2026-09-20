@@ -1,11 +1,13 @@
 //! The model and orchestration are replaceable services, outside the lifecycle core.
 use crate::core::{Context, Plugin};
+use crate::model::{Events, ModelEvent, ModelRequest, ModelResponse};
 use async_trait::async_trait;
 use std::sync::Arc;
 
 #[async_trait]
 pub trait Model: Send + Sync {
-    async fn respond(&self, input: &str) -> Result<String, String>;
+    async fn respond(&self, request: ModelRequest, events: Events)
+    -> Result<ModelResponse, String>;
 }
 pub struct ModelService(pub Arc<dyn Model>);
 struct FixtureModel {
@@ -13,13 +15,32 @@ struct FixtureModel {
 }
 #[async_trait]
 impl Model for FixtureModel {
-    async fn respond(&self, input: &str) -> Result<String, String> {
+    async fn respond(
+        &self,
+        request: ModelRequest,
+        events: Events,
+    ) -> Result<ModelResponse, String> {
         if let Some(gate) = &self.gate {
             while !gate.exists() {
                 tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             }
         }
-        Ok(format!("Psi fixture: {input}"))
+        let input = request
+            .input
+            .last()
+            .and_then(|v| v["content"].as_str())
+            .unwrap_or("");
+        let text = format!("Psi fixture: {input}");
+        let _ = events.send(ModelEvent::Text {
+            delta: text.clone(),
+        });
+        Ok(ModelResponse {
+            output: vec![
+                serde_json::json!({"type":"message","role":"assistant","content":[{"type":"output_text","text":text}]}),
+            ],
+            text,
+            response_id: None,
+        })
     }
 }
 pub struct FixtureModelPlugin {
@@ -51,7 +72,7 @@ impl Plugin for FixtureModelPlugin {
 
 #[async_trait]
 pub trait AgentLoop: Send + Sync {
-    async fn run(&self, input: &str) -> Result<String, String>;
+    async fn run(&self, input: ModelRequest, events: Events) -> Result<ModelResponse, String>;
 }
 pub struct LoopService(pub Arc<dyn AgentLoop>);
 struct SingleResponseLoop {
@@ -59,8 +80,8 @@ struct SingleResponseLoop {
 }
 #[async_trait]
 impl AgentLoop for SingleResponseLoop {
-    async fn run(&self, input: &str) -> Result<String, String> {
-        self.model.0.respond(input).await
+    async fn run(&self, input: ModelRequest, events: Events) -> Result<ModelResponse, String> {
+        self.model.0.respond(input, events).await
     }
 }
 pub struct SingleResponsePlugin;
@@ -93,10 +114,23 @@ struct BufferedResponseLoop {
 }
 #[async_trait]
 impl AgentLoop for BufferedResponseLoop {
-    async fn run(&self, input: &str) -> Result<String, String> {
-        let mut responses = Vec::new();
-        responses.push(self.model.0.respond(input).await?);
-        Ok(responses.join(""))
+    async fn run(&self, input: ModelRequest, events: Events) -> Result<ModelResponse, String> {
+        let (buffer, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let forward = async {
+            let mut buffered = Vec::new();
+            while let Some(event) = receiver.recv().await {
+                if matches!(event, ModelEvent::SignIn { .. }) {
+                    let _ = events.send(event);
+                } else {
+                    buffered.push(event);
+                }
+            }
+            for event in buffered {
+                let _ = events.send(event);
+            }
+        };
+        let (result, ()) = tokio::join!(self.model.0.respond(input, buffer), forward);
+        result
     }
 }
 pub struct BufferedResponsePlugin;

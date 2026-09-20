@@ -25,12 +25,17 @@ impl Process {
     }
     fn send(&mut self, command: Value) -> Value {
         writeln!(self.input.as_mut().unwrap(), "{command}").unwrap();
-        let mut line = String::new();
-        self.output.read_line(&mut line).unwrap();
-        serde_json::from_str(&line).unwrap()
+        loop {
+            let mut line = String::new();
+            self.output.read_line(&mut line).unwrap();
+            let reply: Value = serde_json::from_str(&line).unwrap();
+            if reply["status"] != "streaming" {
+                return reply;
+            }
+        }
     }
     fn hello(&mut self) -> Value {
-        self.send(json!({"op":"hello","version":1,"capabilities":["fixture-model","sessions","origin-command-id"]}))
+        self.send(json!({"op":"hello","version":1,"capabilities":["fixture-model","sessions","origin-command-id","model-stream"]}))
     }
 }
 impl Drop for Process {
