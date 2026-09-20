@@ -426,6 +426,9 @@ impl Controller {
         else {
             unreachable!()
         };
+        if let Some(tools) = &self.tools {
+            tools.cancel();
+        }
         self.work
             .close_owner(Owner::Turn {
                 session: session_id.clone(),
@@ -435,11 +438,21 @@ impl Controller {
         let mut reply = json!({"version": VERSION, "runtime_id": self.runtime_id, "request_id": request_id, "session_id": session_id, "turn_id": turn_id});
         if let Some(tools) = self.tools.take() {
             match tools.cleanup().await {
-                Ok(Some(value)) => reply["tool_result"] = value,
+                Ok(Some(value)) => {
+                    if value["cleanup_confirmed"] != true {
+                        self.unhealthy = true;
+                        reply["cleanup_error"] = json!("executor_cleanup_unconfirmed");
+                        reply["remaining_resources"] = value["remaining_resources"].clone();
+                        result = Err("executor_cleanup_unconfirmed".into());
+                    }
+                    reply["tool_result"] = value;
+                }
                 Ok(None) => {}
                 Err(error) => {
                     self.unhealthy = true;
                     reply["cleanup_error"] = json!(error);
+                    reply["remaining_resources"] =
+                        json!([{"kind":"executor","turn_id":turn_id,"state":"unobserved"}]);
                     result = Err(error);
                 }
             }

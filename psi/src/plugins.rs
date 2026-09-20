@@ -369,6 +369,9 @@ impl AgentLoop for ExecFixtureLoop {
                 }
                 Err(error) => return Err(error),
             };
+            if result["reason"] != "running" && result["cleanup_confirmed"] == false {
+                return Err("executor_cleanup_unconfirmed".into());
+            }
             if result["reason"] == "running" {
                 process = result["session_id"].as_str().map(str::to_owned);
             } else if result["cleanup_confirmed"] == true {

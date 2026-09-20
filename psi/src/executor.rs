@@ -293,15 +293,15 @@ impl ToolTurn {
             .map_err(|_| "action_store_failed")?;
         Ok(db)
     }
-    pub async fn cleanup(&self) -> Result<Option<Value>, String> {
+    pub fn cancel(&self) {
         self.cancel.send_replace(true);
+    }
+    pub async fn cleanup(&self) -> Result<Option<Value>, String> {
+        self.cancel();
         let workers = std::mem::take(&mut *self.worker.lock().unwrap());
         let mut last = None;
         for worker in workers {
             let result = worker.await.map_err(|_| "executor_cleanup_unconfirmed")??;
-            if result["cleanup_confirmed"] != true {
-                return Err("executor_cleanup_unconfirmed".into());
-            }
             last = Some(result);
         }
         Ok(last)
@@ -317,7 +317,10 @@ async fn supervise(
     mut cancel: watch::Receiver<bool>,
 ) -> Result<Value, String> {
     let mut pending = Some(initial);
-    let result = supervise_io(owner, args, process, requests, &mut pending, &mut cancel).await;
+    let result = supervise_io(owner, args, process, requests, &mut pending, &mut cancel)
+        .await.or_else(|error| Ok::<_, String>(json!({"reason":"cleanup_failure",
+            "error":error,"cleanup_confirmed":false,"output":"",
+            "remaining_resources":[{"kind":"supervisor","process_id":process,"unit":format!("psi-command-{process}.service"),"state":"unobserved"}]})));
     let result = result.and_then(|value| {
         owner
             .db()?
@@ -374,9 +377,16 @@ async fn supervise_io(
             "-p",
             "KillMode=control-group",
         ])
+        .arg(format!("--unit=psi-command-{process}.service"))
         .arg(binary)
         .arg("--exec-supervisor")
         .arg(&owner.workspace)
+        // Fault injection is a host startup setting, never a tool argument.
+        .arg(std::env::var("PSI_TEST_CLEANUP_FAULT").unwrap_or_else(|_| {
+            std::env::var_os("PSI_TEST_CLEANUP_FAULT_FILE")
+                .and_then(|path| std::fs::read_to_string(path).ok())
+                .unwrap_or_default()
+        }))
         .kill_on_drop(true)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -392,7 +402,7 @@ async fn supervise_io(
     let mut stopping = None;
     if !sent {
         drop(input.take());
-        stopping = Some(tokio::time::Instant::now() + Duration::from_secs(6));
+        stopping = Some(tokio::time::Instant::now() + Duration::from_millis(4250));
     }
     let mut output = tokio::io::BufReader::new(child.stdout.take().unwrap()).lines();
     let deadline = tokio::time::sleep(Duration::from_millis(args.timeout_ms + 15000));
@@ -406,7 +416,15 @@ async fn supervise_io(
                 if running { value["session_id"] = json!(process); }
                 if !running {
                     drop(input.take());
-                    tokio::time::timeout(Duration::from_secs(6), child.wait()).await.map_err(|_| "executor_cleanup_unconfirmed")?.map_err(|_| "executor_cleanup_unconfirmed")?;
+                    let until = stopping.unwrap_or_else(|| tokio::time::Instant::now() + Duration::from_secs(2));
+                    if !matches!(tokio::time::timeout_at(until, child.wait()).await, Ok(Ok(_))) {
+                        value["cleanup_confirmed"] = json!(false);
+                        value["reason"] = json!("cleanup_failure");
+                        let resource = json!({"kind":"supervisor","unit":format!("psi-command-{process}.service"),"state":"unreaped"});
+                        value["remaining_resources"].as_array_mut().map(|r| r.push(resource.clone())).unwrap_or_else(|| {
+                            value["remaining_resources"] = json!([resource]);
+                        });
+                    }
                     return Ok(value);
                 }
                 if let Some(request) = pending.take() {
@@ -423,12 +441,12 @@ async fn supervise_io(
                 };
                 if !sent {
                     drop(input.take());
-                    stopping = Some(tokio::time::Instant::now() + Duration::from_secs(6));
+                    stopping = Some(tokio::time::Instant::now() + Duration::from_millis(4250));
                 }
             }
             _ = cancel.changed(), if input.is_some() => {
                 drop(input.take());
-                stopping = Some(tokio::time::Instant::now() + Duration::from_secs(6));
+                stopping = Some(tokio::time::Instant::now() + Duration::from_millis(4250));
             }
             _ = async { match stopping { Some(until) => tokio::time::sleep_until(until).await, None => std::future::pending().await } } => return Err("executor_cleanup_unconfirmed".into()),
             _ = &mut deadline => return Err("executor_cleanup_unconfirmed".into()),
@@ -493,10 +511,13 @@ mod linux {
         fs::write(path, value.to_string()).map_err(|_| "preflight_cgroup_write".into())
     }
     fn populated(cg: &Path) -> R<bool> {
-        Ok(fs::read_to_string(cg.join("cgroup.events"))
-            .map_err(|_| "cleanup_cgroup_unreadable")?
-            .lines()
-            .any(|l| l == "populated 1"))
+        let events = fs::read_to_string(cg.join("cgroup.events"))
+            .map_err(|_| "cleanup_cgroup_unreadable")?;
+        match events.lines().find(|line| line.starts_with("populated ")) {
+            Some("populated 0") => Ok(false),
+            Some("populated 1") => Ok(true),
+            _ => Err("cleanup_cgroup_invalid".into()),
+        }
     }
     fn filter() -> R<File> {
         // seccomp_data: nr at 0, arch at 4. Reject foreign ABIs, including x32.
@@ -760,6 +781,10 @@ mod linux {
         if control.revents != 0 {
             return Err("controller_closed_before_launch".into());
         }
+        // Adopt and reap orphaned descendants in addition to the direct child.
+        if unsafe { libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1) } != 0 {
+            return Err("preflight_subreaper".into());
+        }
         let mut child = cmd
             .spawn()
             .map_err(|_| "preflight_bubblewrap_or_membership")?;
@@ -807,6 +832,10 @@ mod linux {
         let mut graceful = None;
         let mut forced = None;
         let mut cleanup_ok = false;
+        let fault = std::env::args().nth(3).unwrap_or_default();
+        let mut observation = Err("cleanup_not_observed".to_string());
+        let mut reaped_descendants = 0;
+        let mut owned_reaped = false;
         loop {
             if exited.is_none() {
                 match child.try_wait() {
@@ -871,7 +900,7 @@ mod linux {
                 } else if exited.is_some() {
                     forced = Some(Instant::now());
                 }
-                if graceful.is_some() {
+                if graceful.is_some() && !["soft", "kill"].contains(&fault.as_str()) {
                     // pidfds pin identity against PID reuse. Supervisor remains outside.
                     if let Ok(members) = fs::read_to_string(&membership) {
                         for pid in members.lines().filter_map(|p| p.parse::<i32>().ok()) {
@@ -909,7 +938,7 @@ mod linux {
             if graceful.is_some_and(|t| t.elapsed() >= Duration::from_secs(2)) && forced.is_none() {
                 forced = Some(Instant::now());
             }
-            if forced.is_some() {
+            if forced.is_some() && fault != "kill" {
                 let _ = (&kill).write_all(b"1");
             }
             let mut buffer = [0u8; 8192];
@@ -940,7 +969,25 @@ mod linux {
                 }
                 true
             });
-            if exited.is_some() && pipes.is_empty() && populated(&child_cg) == Ok(false) {
+            observation = if fault == "observation" {
+                Err("injected_cleanup_observation_failure".into())
+            } else {
+                populated(&child_cg)
+            };
+            if exited.is_some() {
+                loop {
+                    let mut status = 0;
+                    let pid = unsafe { libc::waitpid(-1, &mut status, libc::WNOHANG) };
+                    if pid > 0 {
+                        reaped_descendants += 1;
+                        continue;
+                    }
+                    owned_reaped = pid == -1
+                        && std::io::Error::last_os_error().raw_os_error() == Some(libc::ECHILD);
+                    break;
+                }
+            }
+            if exited.is_some() && owned_reaped && pipes.is_empty() && observation == Ok(false) {
                 cleanup_ok = pipes_ok;
                 break;
             }
@@ -990,9 +1037,28 @@ mod linux {
             cleanup_ok = false;
             reason = "cleanup_failure";
         }
-        let _ = fs::remove_dir(&child_cg);
+        let remaining = if cleanup_ok {
+            vec![]
+        } else {
+            vec![json!({"kind":"command_cgroup","path":child_cg,
+                "members":fs::read_to_string(&membership).ok(),
+                "populated":observation.as_ref().ok(),
+                "observation_error":observation.as_ref().err(),
+                "direct_child_reaped":exited.is_some(),"owned_processes_reaped":owned_reaped,
+                "open_output_pipes":pipes.len()})]
+        };
+        let cleanup = json!({"populated":observation.as_ref().ok(),
+            "observation_error":observation.as_ref().err(),
+            "direct_child_reaped":exited.is_some(),"owned_processes_reaped":owned_reaped,
+            "reaped_descendants":reaped_descendants,"output_pipes_drained":pipes.is_empty() && pipes_ok,
+            "soft_termination_ms":graceful.map(|t| forced.unwrap_or_else(Instant::now).duration_since(t).as_millis()),
+            "forced_termination":forced.is_some(),
+            "stop_elapsed_ms":graceful.or(forced).map(|t| t.elapsed().as_millis())});
+        if cleanup_ok {
+            let _ = fs::remove_dir(&child_cg);
+        }
         Ok(
-            json!({"reason":reason,"exit_code":if marker_bytes==marker {exited.and_then(|s|s.code())} else {None},"launched":marker_bytes==marker,"output":String::from_utf8_lossy(&bytes),"output_bytes":total,"truncated":chunk_total>bytes.len(),"cleanup_confirmed":cleanup_ok,"cgroup":child_cg,"memory_max":2147483648u64,"swap_max":0,"pids_max":128,"tmp_bytes":268435456,"memory_events":memory,"pids_events":pids}),
+            json!({"reason":reason,"exit_code":if marker_bytes==marker {exited.and_then(|s|s.code())} else {None},"launched":marker_bytes==marker,"output":String::from_utf8_lossy(&bytes),"output_bytes":total,"truncated":chunk_total>bytes.len(),"cleanup_confirmed":cleanup_ok,"cleanup":cleanup,"remaining_resources":remaining,"cgroup":child_cg,"memory_max":2147483648u64,"swap_max":0,"pids_max":128,"tmp_bytes":268435456,"memory_events":memory,"pids_events":pids}),
         )
     }
 }

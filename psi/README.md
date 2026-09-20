@@ -385,3 +385,32 @@ Once scripted calls finish, the fixture model polls any remaining process until
 cleanup. This exercises the model/tool contract without a live account; live Codex
 tool orchestration remains outside this slice. See [validation](docs/issue-50-validation.md)
 and the [continuation schema](t3/PROTOCOL.md#write_stdin-and-continuations-50).
+
+## Confirmed cancellation (#51)
+
+T3's **Stop generation** closes action admission immediately and signals the
+independent command supervisor. It allows up to two seconds for SIGTERM, then uses
+`cgroup.kill` for the whole subtree and allows two more seconds to confirm cleanup.
+Confirmation requires an explicit `populated 0`, drained output pipes, and reaped
+owned processes. Normal parent exit also cleans descendants before releasing the
+slot. The supervisor adopts orphaned children for reaping.
+
+The command outcome and cleanup observations are saved before terminal delivery.
+Already-applied changes remain. Failed observation or termination preserves the
+remaining/unobserved resource list, which T3 displays, and blocks new turns in
+**every session** with `runtime_unhealthy`. Restart does not bypass the independent
+external-command lease and cgroup check. Cancellation does not depend on a working
+Bend transition; a late response cannot reopen admission.
+
+Host-only test settings `PSI_TEST_CLEANUP_FAULT=soft|observation|kill` suppress soft
+signals, fail observations, or suppress both termination mechanisms respectively.
+`PSI_TEST_CLEANUP_FAULT_FILE` reads that value from a host file at command launch;
+`PSI_TEST_POLICY_FAULT_FILE` injects existing policy faults at transition time.
+These settings are not tool arguments and are not exposed inside the sandbox.
+They exist for reproducible failure tests, including a failure introduced after a
+successful turn in the same T3 runtime.
+
+[Cancellation validation and evidence](docs/issue-51-validation.md) distinguish
+supervisor timing from subsequent durable delivery/checkpoint/UI latency. Arbitrary
+hung in-process plugins and remote model processing remain outside the command
+supervisor's termination guarantee.

@@ -1,0 +1,1136 @@
+{
+  "issue": 51,
+  "recorded_utc": "2026-09-20T19:02:45.170586+00:00",
+  "source_base_revision": "6c5d83b8d7f7951c21d923d51dcb9efa0edef745",
+  "source_identity": "Uncommitted implementation identified by file hashes on this base revision.",
+  "implementation_sha256": {
+    "psi/Cargo.lock": "446155cb1e66194537fae4d6da4679a99cf7ce32510f3fab1d8d2b73b56c0f0e",
+    "psi/Cargo.toml": "5278fbf7197a6c3b24fae316f46780e74a885e3e3ba6b4575e7843907482456c",
+    "psi/README.md": "bcae7a781a955770885450d665b84983f6667c98f357938cabc154403f429438",
+    "psi/docs/evidence/issue-51-cancellation.png": "2461ee9919573799b0e8f97230a588f17f80c13705fa6853de931665afc1c706",
+    "psi/docs/issue-51-validation.md": "0eeb8f848e865e626275377913c6e68db466abb634b829a27b2be357530032f8",
+    "psi/src/executor.rs": "abf6337cc8281b53fe68805dfacf12ec8f1cda2212273948473b8b28d96c68f0",
+    "psi/src/plugins.rs": "c9656ef174531371a259629d755ce3e3974e7042b962d010db1b524a22b3ad3a",
+    "psi/src/policy.rs": "50611165c8f09b225509c50660f2df2617eed6217ccca68f43ece085e932fe33",
+    "psi/src/protocol.rs": "fedc6950f037ada17ee213c34421f0c32745f07c8a9431d2d7112ed3d5ca6049",
+    "psi/t3/PROTOCOL.md": "712d4fc4aa84b1f4dbd8a12e1a9d67343328128a6226579720bb5828ca7616a0",
+    "psi/t3/PsiBridge.ts": "3aad6d55f0bedce48c4b9ca76a0820e86452bafd9ba2765859421af9232d8266",
+    "psi/t3/PsiDriver.ts": "06de25095f405757419e19a9b7b9758702065e48be767b76a5a3d7729a0f1962",
+    "psi/t3/PsiProjection.ts": "14f26caa82d7e6f706e8e4e198f3ad7dab5ea07b9a1e209771d24a636ea78a31",
+    "psi/t3/e2e.test.mjs": "6173662f7c18e72675e12aced45cdae13fb2e5de2f9a40d0d7829541aa8db6a9",
+    "psi/t3/package-lock.json": "5b6889a9e0aebc60cca078c1956acc9ee23a7d8e69844ab85aa09cec83177a94",
+    "psi/tests/executor.rs": "1191e2358506791dab69094f1c86e62bcdc598100f0a82bb5637e25442ce4af7",
+    "psi/tests/fixtures/cancellation.py": "3354c7d9bbd01eb0f2877c5795b0bbc84072ab8d538c7da01172e8b48221ec53",
+    "psi/tests/fixtures/executor.py": "5096794c927827054b03b75b2e6292a6a49a7846ecde7bd3155d2094038bd286"
+  },
+  "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+  "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+  "os": "Linux 7.2.2-1-cachyos x86_64 GNU/Linux",
+  "bubblewrap": "bubblewrap 0.12.0",
+  "systemd": "systemd 261 (261.2-1-arch)",
+  "checks": {
+    "policy_build": "passed; checked module and negative mutation",
+    "cargo_fmt": "passed",
+    "cargo_check": "passed",
+    "cargo_test": {
+      "status": "passed",
+      "tests": 29
+    },
+    "typescript": "passed; upstream Effect suggestions",
+    "adapter_inbox_workspace": {
+      "status": "passed",
+      "tests": 20
+    },
+    "t3_browser": {
+      "status": "passed",
+      "tests": 1
+    }
+  },
+  "policy_build": {
+    "compiler_commit": "15ae0c86f3193b8f645b4bedbc438655b648d0da",
+    "compiler_tree": "44f7a1bc24bcd1346bcec642fa0016a605dfe7b2",
+    "compiler_entrypoint_sha256": "f722bcd7a56807d356aaa8033c3d6bc151f406d9f75c2146baa5b60fef228d4f",
+    "bun_binary_sha256": "db71e1b396d06047e9cd835ef2776437e3b4c029234090eb9d99d8450bd6ed60",
+    "compiler_version": "bend 2.0.16",
+    "bun": "1.4.0",
+    "clang": "clang version 22.1.8",
+    "os": "Linux-7.2.2-1-cachyos-x86_64-with-glibc2.44",
+    "proof_stdout": "All terms check.\n",
+    "proof_stderr": "",
+    "mutation_exit": 1,
+    "mutation_output": "Error:\n- expected : Policy.Result{Policy.Cancelled{}, Policy.Permit{}}\n- observed : Policy.Result{Policy.Cancelled{}, Policy.Deny{}}\nContext:\n- e : Policy.Event\nLocation: LAWS.cancelled_step\n3 | def Laws.cancelled_step(e):\n4>|   {==}\n5 | \n",
+    "source_sha256": {
+      "Policy.bend": "43d01758a533eaf2954dea62984dc3d244e53a7805e7188e4a5a92abd048da29",
+      "LAWS.bend": "4d477065d920d6229a7e4c8f3a5b38f0006608a1a66251730d50ee1a367cccb6",
+      "PROOF.bend": "5669e0b2cfe45c101c24e28c8457666a02085d802e8cf8a09814916ea34eb0bb",
+      "Main.bend": "a46db74a02b652bfe338d1b890d4b1a0af78743c36ce9fabf65eae106c6d7b50"
+    },
+    "binary_sha256": "51517d3a08390c446a4891412d082a6ede5b52d0cae764e4fdb4f23641664c34",
+    "proof_dependencies": {
+      "Policy.bend": [],
+      "LAWS.bend": [
+        "import ./Policy.bend as Policy"
+      ],
+      "PROOF.bend": [
+        "import ./LAWS.bend as Laws"
+      ]
+    },
+    "recorded_utc": "2026-09-20T18:56:14Z"
+  },
+  "process_cancellation": [
+    {
+      "fault": null,
+      "elapsed_seconds": 0.021914037999522407,
+      "pids": [
+        260397,
+        260398,
+        260399,
+        260400
+      ],
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/psi-command-03cfa89f-c47b-4c8e-83bc-71e93d219be1.service/command",
+      "terminal": {
+        "cancellation_scope": "local_tools",
+        "error": "local_cancelled",
+        "policy": {
+          "closed": true,
+          "epoch": "8920af49-1d9e-42a8-a2bd-c4bd1ba4dfb5",
+          "handoffs": 1,
+          "runtime_counter": 0,
+          "state": "Cancelled",
+          "transitions": [
+            {
+              "action": {
+                "arguments": {
+                  "cmd": "python3 -c 'import os,signal,time,pathlib\nsignal.signal(signal.SIGTERM,signal.SIG_IGN)\nif os.fork()==0:\n os.setsid(); pathlib.Path('\"'\"'child-ready'\"'\"').write_text('\"'\"'child'\"'\"')\nelse:\n pathlib.Path('\"'\"'parent-ready'\"'\"').write_text('\"'\"'applied change remains'\"'\"')\nwhile True: time.sleep(.1)'",
+                  "yield_time_ms": 200
+                },
+                "id": "tool-cc252b38-c832-4c57-b26b-33a71c0e72cb",
+                "name": "exec_command"
+              },
+              "epoch": "8920af49-1d9e-42a8-a2bd-c4bd1ba4dfb5",
+              "event": "Request",
+              "request_id": "193d8b96-3035-405f-ba7f-06a698191cc6",
+              "result": {
+                "Ok": [
+                  "Active",
+                  true
+                ]
+              },
+              "turn_id": "hung"
+            },
+            {
+              "action": {
+                "arguments": {
+                  "event": "Cancel"
+                },
+                "id": "fdda293a-ee4b-457e-ab45-4fe6c2e7f110",
+                "name": "lifecycle"
+              },
+              "epoch": "8920af49-1d9e-42a8-a2bd-c4bd1ba4dfb5",
+              "event": "Cancel",
+              "request_id": "63fc392f-7aad-4799-90bb-1a08fa7d49c6",
+              "result": {
+                "Ok": [
+                  "Cancelled",
+                  false
+                ]
+              },
+              "turn_id": "hung"
+            }
+          ],
+          "turn": "hung"
+        },
+        "request_id": "hung",
+        "runtime_id": "11ea6c62-4e3a-47ea-a54c-66c46e97dcce",
+        "seq": 3,
+        "session_id": "s",
+        "status": "cancelled",
+        "tool_result": {
+          "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/psi-command-03cfa89f-c47b-4c8e-83bc-71e93d219be1.service/command",
+          "cleanup": {
+            "direct_child_reaped": true,
+            "forced_termination": false,
+            "observation_error": null,
+            "output_pipes_drained": true,
+            "owned_processes_reaped": true,
+            "populated": false,
+            "reaped_descendants": 1,
+            "soft_termination_ms": 5,
+            "stop_elapsed_ms": 5
+          },
+          "cleanup_confirmed": true,
+          "exit_code": null,
+          "launched": true,
+          "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+          "memory_max": 2147483648,
+          "output": "",
+          "output_bytes": 0,
+          "pids_events": "max 0\n",
+          "pids_max": 128,
+          "reason": "cancelled",
+          "remaining_resources": [],
+          "swap_max": 0,
+          "tmp_bytes": 268435456,
+          "truncated": false
+        },
+        "turn_id": "hung",
+        "version": 1
+      },
+      "restart_probe": {
+        "rejection": {
+          "error": "busy",
+          "request_id": "after-restart",
+          "runtime_id": "85416b61-79e1-4b0a-ae9e-8aeee2c4fe30",
+          "version": 1
+        },
+        "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/psi-command-5e0ffa2e-0c1e-47ac-ba8f-7519f8f3c61e.service/command"
+      }
+    },
+    {
+      "fault": "soft",
+      "elapsed_seconds": 2.034751115999825,
+      "pids": [
+        260440,
+        260441,
+        260442,
+        260443
+      ],
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/psi-command-0644dbcf-8f79-4d9b-b15b-c8e50076d537.service/command",
+      "terminal": {
+        "cancellation_scope": "local_tools",
+        "error": "local_cancelled",
+        "policy": {
+          "closed": true,
+          "epoch": "93f9222b-97cc-460e-bf83-3327279ee264",
+          "handoffs": 1,
+          "runtime_counter": 0,
+          "state": "Cancelled",
+          "transitions": [
+            {
+              "action": {
+                "arguments": {
+                  "cmd": "python3 -c 'import os,signal,time,pathlib\nsignal.signal(signal.SIGTERM,signal.SIG_IGN)\nif os.fork()==0:\n os.setsid(); pathlib.Path('\"'\"'child-ready'\"'\"').write_text('\"'\"'child'\"'\"')\nelse:\n pathlib.Path('\"'\"'parent-ready'\"'\"').write_text('\"'\"'applied change remains'\"'\"')\nwhile True: time.sleep(.1)'",
+                  "yield_time_ms": 200
+                },
+                "id": "tool-1775e785-0ed2-48ca-a6ab-751135e9760f",
+                "name": "exec_command"
+              },
+              "epoch": "93f9222b-97cc-460e-bf83-3327279ee264",
+              "event": "Request",
+              "request_id": "51bdc31b-57ce-49b0-bdd6-8419b95ac93b",
+              "result": {
+                "Ok": [
+                  "Active",
+                  true
+                ]
+              },
+              "turn_id": "hung"
+            },
+            {
+              "action": {
+                "arguments": {
+                  "event": "Cancel"
+                },
+                "id": "050fcda5-35d3-49e4-bb4a-59e418c30b25",
+                "name": "lifecycle"
+              },
+              "epoch": "93f9222b-97cc-460e-bf83-3327279ee264",
+              "event": "Cancel",
+              "request_id": "cb47f797-4610-497a-a02f-3f352b5244c6",
+              "result": {
+                "Ok": [
+                  "Cancelled",
+                  false
+                ]
+              },
+              "turn_id": "hung"
+            }
+          ],
+          "turn": "hung"
+        },
+        "request_id": "hung",
+        "runtime_id": "23e6ccae-318c-4978-8898-0c930bb067ef",
+        "seq": 3,
+        "session_id": "s",
+        "status": "cancelled",
+        "tool_result": {
+          "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/psi-command-0644dbcf-8f79-4d9b-b15b-c8e50076d537.service/command",
+          "cleanup": {
+            "direct_child_reaped": true,
+            "forced_termination": true,
+            "observation_error": null,
+            "output_pipes_drained": true,
+            "owned_processes_reaped": true,
+            "populated": false,
+            "reaped_descendants": 1,
+            "soft_termination_ms": 2002,
+            "stop_elapsed_ms": 2008
+          },
+          "cleanup_confirmed": true,
+          "exit_code": null,
+          "launched": true,
+          "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+          "memory_max": 2147483648,
+          "output": "",
+          "output_bytes": 0,
+          "pids_events": "max 0\n",
+          "pids_max": 128,
+          "reason": "cancelled",
+          "remaining_resources": [],
+          "swap_max": 0,
+          "tmp_bytes": 268435456,
+          "truncated": false
+        },
+        "turn_id": "hung",
+        "version": 1
+      },
+      "restart_probe": null
+    },
+    {
+      "fault": "observation",
+      "elapsed_seconds": 4.0223374039997,
+      "pids": [
+        260471,
+        260472,
+        260473,
+        260474
+      ],
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/psi-command-60a4871c-8a5d-41ee-9876-fcfa43562f54.service/command",
+      "terminal": {
+        "cleanup_error": "executor_cleanup_unconfirmed",
+        "error": "executor_cleanup_unconfirmed",
+        "policy": {
+          "closed": true,
+          "epoch": "da390fa8-0d3e-4215-a273-f8bbde8ecf4e",
+          "handoffs": 1,
+          "runtime_counter": 0,
+          "state": "Cancelled",
+          "transitions": [
+            {
+              "action": {
+                "arguments": {
+                  "cmd": "python3 -c 'import os,signal,time,pathlib\nsignal.signal(signal.SIGTERM,signal.SIG_IGN)\nif os.fork()==0:\n os.setsid(); pathlib.Path('\"'\"'child-ready'\"'\"').write_text('\"'\"'child'\"'\"')\nelse:\n pathlib.Path('\"'\"'parent-ready'\"'\"').write_text('\"'\"'applied change remains'\"'\"')\nwhile True: time.sleep(.1)'",
+                  "yield_time_ms": 200
+                },
+                "id": "tool-ebff947f-c71e-4235-847b-22273ab8f5cf",
+                "name": "exec_command"
+              },
+              "epoch": "da390fa8-0d3e-4215-a273-f8bbde8ecf4e",
+              "event": "Request",
+              "request_id": "cdf03c0c-023c-4cda-84cf-8ac293f2ae17",
+              "result": {
+                "Ok": [
+                  "Active",
+                  true
+                ]
+              },
+              "turn_id": "hung"
+            },
+            {
+              "action": {
+                "arguments": {
+                  "event": "Cancel"
+                },
+                "id": "992dd982-bd69-4f7d-8c04-303755790e07",
+                "name": "lifecycle"
+              },
+              "epoch": "da390fa8-0d3e-4215-a273-f8bbde8ecf4e",
+              "event": "Cancel",
+              "request_id": "eba8dcfd-7312-4952-b9f5-000a56981ee5",
+              "result": {
+                "Ok": [
+                  "Cancelled",
+                  false
+                ]
+              },
+              "turn_id": "hung"
+            }
+          ],
+          "turn": "hung"
+        },
+        "remaining_resources": [
+          {
+            "direct_child_reaped": true,
+            "kind": "command_cgroup",
+            "members": "",
+            "observation_error": "injected_cleanup_observation_failure",
+            "open_output_pipes": 0,
+            "owned_processes_reaped": true,
+            "path": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/psi-command-60a4871c-8a5d-41ee-9876-fcfa43562f54.service/command",
+            "populated": null
+          }
+        ],
+        "request_id": "hung",
+        "runtime_id": "292a4bf4-877c-48dc-8e10-5c48114e780b",
+        "seq": 3,
+        "session_id": "s",
+        "status": "failed",
+        "tool_result": {
+          "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/psi-command-60a4871c-8a5d-41ee-9876-fcfa43562f54.service/command",
+          "cleanup": {
+            "direct_child_reaped": true,
+            "forced_termination": true,
+            "observation_error": "injected_cleanup_observation_failure",
+            "output_pipes_drained": true,
+            "owned_processes_reaped": true,
+            "populated": null,
+            "reaped_descendants": 1,
+            "soft_termination_ms": 2000,
+            "stop_elapsed_ms": 4001
+          },
+          "cleanup_confirmed": false,
+          "exit_code": null,
+          "launched": true,
+          "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+          "memory_max": 2147483648,
+          "output": "",
+          "output_bytes": 0,
+          "pids_events": "max 0\n",
+          "pids_max": 128,
+          "reason": "cleanup_failure",
+          "remaining_resources": [
+            {
+              "direct_child_reaped": true,
+              "kind": "command_cgroup",
+              "members": "",
+              "observation_error": "injected_cleanup_observation_failure",
+              "open_output_pipes": 0,
+              "owned_processes_reaped": true,
+              "path": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/psi-command-60a4871c-8a5d-41ee-9876-fcfa43562f54.service/command",
+              "populated": null
+            }
+          ],
+          "swap_max": 0,
+          "tmp_bytes": 268435456,
+          "truncated": false
+        },
+        "turn_id": "hung",
+        "version": 1
+      },
+      "restart_probe": null
+    },
+    {
+      "fault": "kill",
+      "elapsed_seconds": 4.029342176996579,
+      "pids": [
+        260533,
+        260534,
+        260535,
+        260536
+      ],
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/psi-command-98eb5aa5-853b-4218-bc3a-456af37d6c6c.service/command",
+      "terminal": {
+        "cleanup_error": "executor_cleanup_unconfirmed",
+        "error": "executor_cleanup_unconfirmed",
+        "policy": {
+          "closed": true,
+          "epoch": "e01416e5-d124-4d87-9858-22404c924de7",
+          "handoffs": 1,
+          "runtime_counter": 0,
+          "state": "Cancelled",
+          "transitions": [
+            {
+              "action": {
+                "arguments": {
+                  "cmd": "python3 -c 'import os,signal,time,pathlib\nsignal.signal(signal.SIGTERM,signal.SIG_IGN)\nif os.fork()==0:\n os.setsid(); pathlib.Path('\"'\"'child-ready'\"'\"').write_text('\"'\"'child'\"'\"')\nelse:\n pathlib.Path('\"'\"'parent-ready'\"'\"').write_text('\"'\"'applied change remains'\"'\"')\nwhile True: time.sleep(.1)'",
+                  "yield_time_ms": 200
+                },
+                "id": "tool-c15f0095-df24-4637-b80e-6ffec8cbf6a9",
+                "name": "exec_command"
+              },
+              "epoch": "e01416e5-d124-4d87-9858-22404c924de7",
+              "event": "Request",
+              "request_id": "70e268de-84c8-4b13-90fc-180d7b57a745",
+              "result": {
+                "Ok": [
+                  "Active",
+                  true
+                ]
+              },
+              "turn_id": "hung"
+            },
+            {
+              "action": {
+                "arguments": {
+                  "event": "Cancel"
+                },
+                "id": "c047827e-15d2-429f-a4f6-28c071812499",
+                "name": "lifecycle"
+              },
+              "epoch": "e01416e5-d124-4d87-9858-22404c924de7",
+              "event": "Cancel",
+              "request_id": "090142da-ead7-49fd-97a1-df963fc71d35",
+              "result": {
+                "Ok": [
+                  "Cancelled",
+                  false
+                ]
+              },
+              "turn_id": "hung"
+            }
+          ],
+          "turn": "hung"
+        },
+        "remaining_resources": [
+          {
+            "direct_child_reaped": false,
+            "kind": "command_cgroup",
+            "members": "260533\n260534\n260535\n260536\n",
+            "observation_error": null,
+            "open_output_pipes": 2,
+            "owned_processes_reaped": false,
+            "path": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/psi-command-98eb5aa5-853b-4218-bc3a-456af37d6c6c.service/command",
+            "populated": true
+          }
+        ],
+        "request_id": "hung",
+        "runtime_id": "7f3c23f5-fd9d-4c32-b158-5d7549ec0151",
+        "seq": 3,
+        "session_id": "s",
+        "status": "failed",
+        "tool_result": {
+          "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/psi-command-98eb5aa5-853b-4218-bc3a-456af37d6c6c.service/command",
+          "cleanup": {
+            "direct_child_reaped": false,
+            "forced_termination": true,
+            "observation_error": null,
+            "output_pipes_drained": false,
+            "owned_processes_reaped": false,
+            "populated": true,
+            "reaped_descendants": 0,
+            "soft_termination_ms": 2003,
+            "stop_elapsed_ms": 4004
+          },
+          "cleanup_confirmed": false,
+          "exit_code": null,
+          "launched": true,
+          "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+          "memory_max": 2147483648,
+          "output": "",
+          "output_bytes": 0,
+          "pids_events": "max 0\n",
+          "pids_max": 128,
+          "reason": "cleanup_failure",
+          "remaining_resources": [
+            {
+              "direct_child_reaped": false,
+              "kind": "command_cgroup",
+              "members": "260533\n260534\n260535\n260536\n",
+              "observation_error": null,
+              "open_output_pipes": 2,
+              "owned_processes_reaped": false,
+              "path": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/psi-command-98eb5aa5-853b-4218-bc3a-456af37d6c6c.service/command",
+              "populated": true
+            }
+          ],
+          "swap_max": 0,
+          "tmp_bytes": 268435456,
+          "truncated": false
+        },
+        "turn_id": "hung",
+        "version": 1
+      },
+      "restart_probe": null
+    },
+    {
+      "fault": "policy-hang",
+      "elapsed_seconds": 0.2780017240002053,
+      "pids": [
+        260612,
+        260613,
+        260614,
+        260615
+      ],
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/psi-command-0ec1999c-83a4-423a-87cd-6bffd5ef0a57.service/command",
+      "terminal": {
+        "cancellation_scope": "local_tools",
+        "error": "local_cancelled",
+        "policy": {
+          "closed": true,
+          "epoch": "6dc28a7b-1320-49c6-b96b-5feb931f2d61",
+          "handoffs": 1,
+          "runtime_counter": 0,
+          "state": "Active",
+          "transitions": [
+            {
+              "action": {
+                "arguments": {
+                  "cmd": "python3 -c 'import os,signal,time,pathlib\nsignal.signal(signal.SIGTERM,signal.SIG_IGN)\nif os.fork()==0:\n os.setsid(); pathlib.Path('\"'\"'child-ready'\"'\"').write_text('\"'\"'child'\"'\"')\nelse:\n pathlib.Path('\"'\"'parent-ready'\"'\"').write_text('\"'\"'applied change remains'\"'\"')\nwhile True: time.sleep(.1)'",
+                  "yield_time_ms": 200
+                },
+                "id": "tool-16551de8-ee75-42c9-a489-244a06bd884d",
+                "name": "exec_command"
+              },
+              "epoch": "6dc28a7b-1320-49c6-b96b-5feb931f2d61",
+              "event": "Request",
+              "request_id": "1566ca2f-3c6b-450b-adf9-7d6bd0a43c23",
+              "result": {
+                "Ok": [
+                  "Active",
+                  true
+                ]
+              },
+              "turn_id": "hung"
+            },
+            {
+              "action": {
+                "arguments": {
+                  "session_id": "0ec1999c-83a4-423a-87cd-6bffd5ef0a57"
+                },
+                "id": "tool-c91db222-0fed-4b20-b046-cca02e5c38fe",
+                "name": "write_stdin"
+              },
+              "epoch": "6dc28a7b-1320-49c6-b96b-5feb931f2d61",
+              "event": "Request",
+              "request_id": "8df57689-9098-4a08-ab80-a97485ac08fe",
+              "result": {
+                "Err": "policy_cancelled"
+              },
+              "turn_id": "hung"
+            },
+            {
+              "action": {
+                "arguments": {
+                  "event": "Cancel"
+                },
+                "id": "e0921ebf-0ebe-4223-974f-840b7fa43b34",
+                "name": "lifecycle"
+              },
+              "epoch": "6dc28a7b-1320-49c6-b96b-5feb931f2d61",
+              "event": "Cancel",
+              "request_id": "b788b556-7c38-4a58-a9e7-edd89ad6bef9",
+              "result": {
+                "Err": "policy_timeout"
+              },
+              "turn_id": "hung"
+            }
+          ],
+          "turn": "hung"
+        },
+        "request_id": "hung",
+        "runtime_id": "9d0bd8c0-5933-4b7b-a044-53878e803531",
+        "seq": 6,
+        "session_id": "s",
+        "status": "cancelled",
+        "tool_result": {
+          "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/psi-command-0ec1999c-83a4-423a-87cd-6bffd5ef0a57.service/command",
+          "cleanup": {
+            "direct_child_reaped": true,
+            "forced_termination": false,
+            "observation_error": null,
+            "output_pipes_drained": true,
+            "owned_processes_reaped": true,
+            "populated": false,
+            "reaped_descendants": 1,
+            "soft_termination_ms": 10,
+            "stop_elapsed_ms": 10
+          },
+          "cleanup_confirmed": true,
+          "exit_code": null,
+          "launched": true,
+          "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+          "memory_max": 2147483648,
+          "output": "",
+          "output_bytes": 0,
+          "pids_events": "max 0\n",
+          "pids_max": 128,
+          "reason": "cancelled",
+          "remaining_resources": [],
+          "swap_max": 0,
+          "tmp_bytes": 268435456,
+          "truncated": false
+        },
+        "turn_id": "hung",
+        "version": 1
+      },
+      "restart_probe": null
+    },
+    {
+      "fault": "policy-missing",
+      "elapsed_seconds": 0.00022665600408799946,
+      "pids": [
+        260644,
+        260645,
+        260646,
+        260647
+      ],
+      "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/psi-command-c86ab240-1603-4197-92ac-8255ac8a3d9e.service/command",
+      "terminal": {
+        "error": "policy_unavailable: injected missing executable",
+        "policy": {
+          "closed": true,
+          "epoch": "f48c9920-1a54-4e39-bec8-4f569aa6725e",
+          "handoffs": 1,
+          "runtime_counter": 0,
+          "state": "Active",
+          "transitions": [
+            {
+              "action": {
+                "arguments": {
+                  "cmd": "python3 -c 'import os,signal,time,pathlib\nsignal.signal(signal.SIGTERM,signal.SIG_IGN)\nif os.fork()==0:\n os.setsid(); pathlib.Path('\"'\"'child-ready'\"'\"').write_text('\"'\"'child'\"'\"')\nelse:\n pathlib.Path('\"'\"'parent-ready'\"'\"').write_text('\"'\"'applied change remains'\"'\"')\nwhile True: time.sleep(.1)'",
+                  "yield_time_ms": 200
+                },
+                "id": "tool-87decd26-d1f8-4f55-8490-6458cd889377",
+                "name": "exec_command"
+              },
+              "epoch": "f48c9920-1a54-4e39-bec8-4f569aa6725e",
+              "event": "Request",
+              "request_id": "14d1550f-26cb-42a8-96aa-493b4b1d8bf3",
+              "result": {
+                "Ok": [
+                  "Active",
+                  true
+                ]
+              },
+              "turn_id": "hung"
+            },
+            {
+              "action": {
+                "arguments": {
+                  "session_id": "c86ab240-1603-4197-92ac-8255ac8a3d9e"
+                },
+                "id": "tool-be3a947a-5376-4b54-9c89-a470791778e8",
+                "name": "write_stdin"
+              },
+              "epoch": "f48c9920-1a54-4e39-bec8-4f569aa6725e",
+              "event": "Request",
+              "request_id": "7023dbb5-e930-4f08-a63f-41109c0e855a",
+              "result": {
+                "Err": "policy_unavailable: injected missing executable"
+              },
+              "turn_id": "hung"
+            },
+            {
+              "action": {
+                "arguments": {
+                  "event": "Cancel"
+                },
+                "id": "7672ec46-456b-4f02-81cb-76207685bc2c",
+                "name": "lifecycle"
+              },
+              "epoch": "f48c9920-1a54-4e39-bec8-4f569aa6725e",
+              "event": "Cancel",
+              "request_id": "9bfc58f0-bd7b-453e-9d89-0dcca8813d09",
+              "result": {
+                "Err": "policy_unavailable: injected missing executable"
+              },
+              "turn_id": "hung"
+            }
+          ],
+          "turn": "hung"
+        },
+        "request_id": "hung",
+        "runtime_id": "e69fd2d7-4163-4135-ac70-63e46b56c542",
+        "seq": 6,
+        "session_id": "s",
+        "status": "failed",
+        "tool_result": {
+          "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/psi-command-c86ab240-1603-4197-92ac-8255ac8a3d9e.service/command",
+          "cleanup": {
+            "direct_child_reaped": true,
+            "forced_termination": false,
+            "observation_error": null,
+            "output_pipes_drained": true,
+            "owned_processes_reaped": true,
+            "populated": false,
+            "reaped_descendants": 1,
+            "soft_termination_ms": 5,
+            "stop_elapsed_ms": 5
+          },
+          "cleanup_confirmed": true,
+          "exit_code": null,
+          "launched": true,
+          "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+          "memory_max": 2147483648,
+          "output": "",
+          "output_bytes": 0,
+          "pids_events": "max 0\n",
+          "pids_max": 128,
+          "reason": "cancelled",
+          "remaining_resources": [],
+          "swap_max": 0,
+          "tmp_bytes": 268435456,
+          "truncated": false
+        },
+        "turn_id": "hung",
+        "version": 1
+      },
+      "restart_probe": null
+    }
+  ],
+  "t3_browser": {
+    "passed": true,
+    "cancellation_evidence": [
+      {
+        "fault": false,
+        "elapsed_ms": 1712.4614980000042,
+        "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/psi-command-81a5eb1d-fa32-4ea7-a9e0-69b262b1fe06.service/command",
+        "members": [
+          262563,
+          262564,
+          262565,
+          262567
+        ],
+        "terminal": {
+          "cancellation_scope": "local_tools",
+          "error": "local_cancelled",
+          "policy": {
+            "closed": true,
+            "epoch": "de69b3ff-bc2e-4de1-b461-ff661dab0d9c",
+            "handoffs": 2,
+            "runtime_counter": 0,
+            "state": "Cancelled",
+            "transitions": [
+              {
+                "action": {
+                  "arguments": {
+                    "cmd": "python3 -c 'import os,signal,time,pathlib\nsignal.signal(signal.SIGTERM,signal.SIG_IGN)\nif os.fork()==0: os.setsid()\npathlib.Path('\"'\"'cancel-ready-'\"'\"'+str(os.getpid())).write_text('\"'\"'applied'\"'\"')\nwhile True: time.sleep(.1)'",
+                    "yield_time_ms": 20
+                  },
+                  "id": "tool-b8d74ccc-5715-4b35-8f99-85045b48c210",
+                  "name": "exec_command"
+                },
+                "epoch": "de69b3ff-bc2e-4de1-b461-ff661dab0d9c",
+                "event": "Request",
+                "request_id": "78286522-9cae-41e9-9c0f-1b08bea84c17",
+                "result": {
+                  "Ok": [
+                    "Active",
+                    true
+                  ]
+                },
+                "turn_id": "psi-turn:c49d72f0-5e9e-446c-94d2-d554b5a437df"
+              },
+              {
+                "action": {
+                  "arguments": {
+                    "session_id": "81a5eb1d-fa32-4ea7-a9e0-69b262b1fe06"
+                  },
+                  "id": "tool-914bdc69-6315-4b86-b59a-057eacea9647",
+                  "name": "write_stdin"
+                },
+                "epoch": "de69b3ff-bc2e-4de1-b461-ff661dab0d9c",
+                "event": "Request",
+                "request_id": "e11bbd3f-28aa-44d8-9dac-76e811ce9363",
+                "result": {
+                  "Ok": [
+                    "Active",
+                    true
+                  ]
+                },
+                "turn_id": "psi-turn:c49d72f0-5e9e-446c-94d2-d554b5a437df"
+              },
+              {
+                "action": {
+                  "arguments": {
+                    "event": "Cancel"
+                  },
+                  "id": "f7620e02-dfa3-46fd-afd2-9711f229f282",
+                  "name": "lifecycle"
+                },
+                "epoch": "de69b3ff-bc2e-4de1-b461-ff661dab0d9c",
+                "event": "Cancel",
+                "request_id": "6d478406-303b-47e3-9fb9-111442bae031",
+                "result": {
+                  "Ok": [
+                    "Cancelled",
+                    false
+                  ]
+                },
+                "turn_id": "psi-turn:c49d72f0-5e9e-446c-94d2-d554b5a437df"
+              }
+            ],
+            "turn": "psi-turn:c49d72f0-5e9e-446c-94d2-d554b5a437df"
+          },
+          "request_id": "c49d72f0-5e9e-446c-94d2-d554b5a437df",
+          "runtime_id": "69e18989-eed4-4d7a-9fae-f142cbf1d4ed",
+          "seq": 33,
+          "session_id": "f7edb3af-c7bd-47f9-9ce5-b90081e2f21d",
+          "status": "cancelled",
+          "tool_result": {
+            "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/psi-command-81a5eb1d-fa32-4ea7-a9e0-69b262b1fe06.service/command",
+            "cleanup": {
+              "direct_child_reaped": true,
+              "forced_termination": false,
+              "observation_error": null,
+              "output_pipes_drained": true,
+              "owned_processes_reaped": true,
+              "populated": false,
+              "reaped_descendants": 1,
+              "soft_termination_ms": 5,
+              "stop_elapsed_ms": 5
+            },
+            "cleanup_confirmed": true,
+            "exit_code": null,
+            "launched": true,
+            "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+            "memory_max": 2147483648,
+            "output": "",
+            "output_bytes": 0,
+            "pids_events": "max 0\n",
+            "pids_max": 128,
+            "reason": "cancelled",
+            "remaining_resources": [],
+            "swap_max": 0,
+            "tmp_bytes": 268435456,
+            "truncated": false
+          },
+          "turn_id": "psi-turn:c49d72f0-5e9e-446c-94d2-d554b5a437df",
+          "version": 1
+        },
+        "rejected_later_action": false
+      },
+      {
+        "fault": true,
+        "elapsed_ms": 5668.317770999987,
+        "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/psi-command-c9066242-6015-4c37-bab9-1b3b0273171c.service/command",
+        "members": [
+          262624,
+          262625,
+          262626,
+          262629
+        ],
+        "terminal": {
+          "cleanup_error": "executor_cleanup_unconfirmed",
+          "error": "executor_cleanup_unconfirmed",
+          "policy": {
+            "closed": true,
+            "epoch": "de69b3ff-bc2e-4de1-b461-ff661dab0d9c",
+            "handoffs": 2,
+            "runtime_counter": 0,
+            "state": "Cancelled",
+            "transitions": [
+              {
+                "action": {
+                  "arguments": {
+                    "cmd": "python3 -c 'import os,signal,time,pathlib\nsignal.signal(signal.SIGTERM,signal.SIG_IGN)\nif os.fork()==0: os.setsid()\npathlib.Path('\"'\"'fault-ready-'\"'\"'+str(os.getpid())).write_text('\"'\"'applied'\"'\"')\nwhile True: time.sleep(.1)'",
+                    "yield_time_ms": 20
+                  },
+                  "id": "tool-655cdd57-ee7e-484f-85aa-690c7468435d",
+                  "name": "exec_command"
+                },
+                "epoch": "de69b3ff-bc2e-4de1-b461-ff661dab0d9c",
+                "event": "Request",
+                "request_id": "086190fd-d7e5-4ea8-97c9-2d4e86a4e87b",
+                "result": {
+                  "Ok": [
+                    "Active",
+                    true
+                  ]
+                },
+                "turn_id": "psi-turn:e9e85a0b-e6af-4a44-bdab-4de4b97d2d93"
+              },
+              {
+                "action": {
+                  "arguments": {
+                    "session_id": "c9066242-6015-4c37-bab9-1b3b0273171c"
+                  },
+                  "id": "tool-23ae9532-0295-4a9c-81dc-00e488d5d820",
+                  "name": "write_stdin"
+                },
+                "epoch": "de69b3ff-bc2e-4de1-b461-ff661dab0d9c",
+                "event": "Request",
+                "request_id": "bdda96ce-673a-40c2-a323-473a258346d7",
+                "result": {
+                  "Ok": [
+                    "Active",
+                    true
+                  ]
+                },
+                "turn_id": "psi-turn:e9e85a0b-e6af-4a44-bdab-4de4b97d2d93"
+              },
+              {
+                "action": {
+                  "arguments": {
+                    "event": "Cancel"
+                  },
+                  "id": "9025ab0f-75fc-4b80-b784-3f6972fb73de",
+                  "name": "lifecycle"
+                },
+                "epoch": "de69b3ff-bc2e-4de1-b461-ff661dab0d9c",
+                "event": "Cancel",
+                "request_id": "f20735cc-3389-46b8-bcc6-11847c64f72d",
+                "result": {
+                  "Ok": [
+                    "Cancelled",
+                    false
+                  ]
+                },
+                "turn_id": "psi-turn:e9e85a0b-e6af-4a44-bdab-4de4b97d2d93"
+              }
+            ],
+            "turn": "psi-turn:e9e85a0b-e6af-4a44-bdab-4de4b97d2d93"
+          },
+          "remaining_resources": [
+            {
+              "direct_child_reaped": true,
+              "kind": "command_cgroup",
+              "members": "",
+              "observation_error": "injected_cleanup_observation_failure",
+              "open_output_pipes": 0,
+              "owned_processes_reaped": true,
+              "path": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/psi-command-c9066242-6015-4c37-bab9-1b3b0273171c.service/command",
+              "populated": null
+            }
+          ],
+          "request_id": "e9e85a0b-e6af-4a44-bdab-4de4b97d2d93",
+          "runtime_id": "69e18989-eed4-4d7a-9fae-f142cbf1d4ed",
+          "seq": 39,
+          "session_id": "f7edb3af-c7bd-47f9-9ce5-b90081e2f21d",
+          "status": "failed",
+          "tool_result": {
+            "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/psi-command-c9066242-6015-4c37-bab9-1b3b0273171c.service/command",
+            "cleanup": {
+              "direct_child_reaped": true,
+              "forced_termination": true,
+              "observation_error": "injected_cleanup_observation_failure",
+              "output_pipes_drained": true,
+              "owned_processes_reaped": true,
+              "populated": null,
+              "reaped_descendants": 1,
+              "soft_termination_ms": 2003,
+              "stop_elapsed_ms": 4007
+            },
+            "cleanup_confirmed": false,
+            "exit_code": null,
+            "launched": true,
+            "memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+            "memory_max": 2147483648,
+            "output": "",
+            "output_bytes": 0,
+            "pids_events": "max 0\n",
+            "pids_max": 128,
+            "reason": "cleanup_failure",
+            "remaining_resources": [
+              {
+                "direct_child_reaped": true,
+                "kind": "command_cgroup",
+                "members": "",
+                "observation_error": "injected_cleanup_observation_failure",
+                "open_output_pipes": 0,
+                "owned_processes_reaped": true,
+                "path": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/psi-command-c9066242-6015-4c37-bab9-1b3b0273171c.service/command",
+                "populated": null
+              }
+            ],
+            "swap_max": 0,
+            "tmp_bytes": 268435456,
+            "truncated": false
+          },
+          "turn_id": "psi-turn:e9e85a0b-e6af-4a44-bdab-4de4b97d2d93",
+          "version": 1
+        },
+        "rejected_later_action": true
+      }
+    ],
+    "exec_fixture": true,
+    "continuation_fixture": true,
+    "policy_build": {
+      "compiler_commit": "15ae0c86f3193b8f645b4bedbc438655b648d0da",
+      "compiler_tree": "44f7a1bc24bcd1346bcec642fa0016a605dfe7b2",
+      "compiler_entrypoint_sha256": "f722bcd7a56807d356aaa8033c3d6bc151f406d9f75c2146baa5b60fef228d4f",
+      "bun_binary_sha256": "db71e1b396d06047e9cd835ef2776437e3b4c029234090eb9d99d8450bd6ed60",
+      "compiler_version": "bend 2.0.16",
+      "bun": "1.4.0",
+      "clang": "clang version 22.1.8",
+      "os": "Linux-7.2.2-1-cachyos-x86_64-with-glibc2.44",
+      "proof_stdout": "All terms check.\n",
+      "proof_stderr": "",
+      "mutation_exit": 1,
+      "mutation_output": "Error:\n- expected : Policy.Result{Policy.Cancelled{}, Policy.Permit{}}\n- observed : Policy.Result{Policy.Cancelled{}, Policy.Deny{}}\nContext:\n- e : Policy.Event\nLocation: LAWS.cancelled_step\n3 | def Laws.cancelled_step(e):\n4>|   {==}\n5 | \n",
+      "source_sha256": {
+        "Policy.bend": "43d01758a533eaf2954dea62984dc3d244e53a7805e7188e4a5a92abd048da29",
+        "LAWS.bend": "4d477065d920d6229a7e4c8f3a5b38f0006608a1a66251730d50ee1a367cccb6",
+        "PROOF.bend": "5669e0b2cfe45c101c24e28c8457666a02085d802e8cf8a09814916ea34eb0bb",
+        "Main.bend": "a46db74a02b652bfe338d1b890d4b1a0af78743c36ce9fabf65eae106c6d7b50"
+      },
+      "binary_sha256": "51517d3a08390c446a4891412d082a6ede5b52d0cae764e4fdb4f23641664c34",
+      "proof_dependencies": {
+        "Policy.bend": [],
+        "LAWS.bend": [
+          "import ./Policy.bend as Policy"
+        ],
+        "PROOF.bend": [
+          "import ./LAWS.bend as Laws"
+        ]
+      },
+      "recorded_utc": "2026-09-20T18:56:14Z"
+    },
+    "oauth_fixture": false,
+    "local_stream_cancellation": false,
+    "agent_loop": "exec-fixture",
+    "lifecycle": false,
+    "t3": "dfbb11bdd7c3f1a5575cb55d3e3abb12be025727",
+    "node": "v24.13.1",
+    "chromium": "Google Chrome for Testing 149.0.7827.22",
+    "normal_websocket": true,
+    "visible_response": true,
+    "stable_origin_command_id": true,
+    "one_runtime": true,
+    "viewer_detach_preserves_runtime": true,
+    "controller_close_reaps_runtime": true,
+    "psi_binary_sha256": "b213a4faff0a13e76966e043326a48d9ecaa79211cb0f74be0bafd8c75190e50",
+    "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+    "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+    "os": "Linux 7.2.2-1-cachyos x86_64 GNU/Linux",
+    "source_revision": "6c5d83b8d7f7951c21d923d51dcb9efa0edef745",
+    "implementation_sha256": {
+      "../src/executor.rs": "abf6337cc8281b53fe68805dfacf12ec8f1cda2212273948473b8b28d96c68f0",
+      "../tests/executor.rs": "1191e2358506791dab69094f1c86e62bcdc598100f0a82bb5637e25442ce4af7",
+      "../tests/fixtures/executor.py": "5096794c927827054b03b75b2e6292a6a49a7846ecde7bd3155d2094038bd286",
+      "../src/policy.rs": "50611165c8f09b225509c50660f2df2617eed6217ccca68f43ece085e932fe33",
+      "../tests/policy.rs": "c67fa60b951b07c13e98b13f64afa35818b63ffbb8e354ea383672836265cb5e",
+      "../tests/fixtures/policy.py": "4b797e26591842e08ec7dcb1a3ba52df520d001c27b3b3142a4a5009bc0e9db2",
+      "../policy/build.py": "97393edef35c4c3f9078303e4b3cd844a5befa0eece612442fc3192ecd96ae70",
+      "../policy/Policy.bend": "43d01758a533eaf2954dea62984dc3d244e53a7805e7188e4a5a92abd048da29",
+      "../policy/LAWS.bend": "4d477065d920d6229a7e4c8f3a5b38f0006608a1a66251730d50ee1a367cccb6",
+      "../policy/PROOF.bend": "5669e0b2cfe45c101c24e28c8457666a02085d802e8cf8a09814916ea34eb0bb",
+      "../policy/Main.bend": "a46db74a02b652bfe338d1b890d4b1a0af78743c36ce9fabf65eae106c6d7b50",
+      "../src/store.rs": "acae4abb916574839c68509547a275d0b38bb09d51350163198aa3742a4ce456",
+      "../tests/durability.rs": "8319f8bbfba25eff8ab012b6604441097490a67e1fa50c5833b8d934e10bc9ea",
+      "../tests/fixtures/durability.py": "0e8f0e1aa884c93e7f0c7e067da0522024d4f1bca2af6626a0408085c088408e",
+      "PsiInbox.ts": "b61e718fdb9f2c1eda21b288056f1977c2d9b5b6aee39ff16987318187b5f29b",
+      "PsiProjection.ts": "14f26caa82d7e6f706e8e4e198f3ad7dab5ea07b9a1e209771d24a636ea78a31",
+      "inbox.test.ts": "a4b627135a2cf408182b07c279adb9ae873711b22682d6e0a40dbc19be222aff",
+      "durability-worker.ts": "a74e4ac27b89165d8c07ef2342e6b1d983ff8bf8b9a483a65238ef66fc4d497f",
+      "../Cargo.toml": "5278fbf7197a6c3b24fae316f46780e74a885e3e3ba6b4575e7843907482456c",
+      "../Cargo.lock": "446155cb1e66194537fae4d6da4679a99cf7ce32510f3fab1d8d2b73b56c0f0e",
+      "../src/admission.rs": "2efae6e56c539a485b8ed30558b1b45edf7a7e92f4f813364f1a787d58b3fdd2",
+      "../src/work.rs": "e84583b1e5a522f036986ad72955aef7f98f7aec8a0641f78102de4cdb1f0214",
+      "../src/core.rs": "7d78950ea9ab461b42fb409509338db351c27eead01d98622a1f89a9b6548746",
+      "../src/plugins.rs": "c9656ef174531371a259629d755ce3e3974e7042b962d010db1b524a22b3ad3a",
+      "../src/protocol.rs": "fedc6950f037ada17ee213c34421f0c32745f07c8a9431d2d7112ed3d5ca6049",
+      "../src/main.rs": "797f19537fdac96845e53b8dd38a460c167bf6e4742e6fe916b3e4cbc22a2a9f",
+      "../src/lib.rs": "bf935954600a4144bacf96d72e7c7063016ad873f9905fbb0783cba6239b12fd",
+      "../src/codex.rs": "dadb58ba17c60286061df79cf3e289158cbaee367352e1855db99d1fff044c9e",
+      "../src/model.rs": "fb133101bb7c632d7fbfbc5d2f5327c19a192fb814fbbf6bfa19a926dd5e3e95",
+      "../tests/codex.rs": "d5397d5090c8b3372327c5d6265703557519ebd9efbe4afcc1b17fd401d3f165",
+      "../tests/auth_runtime.rs": "737baa8951ea3aa8cfba36be1f247e019dbe5c6573306e5b803aecd5c7e3910b",
+      "../tests/fixtures/runtime_auth.py": "d93a73a6cdc06267f70ebd31ff1cd054ddc35d3d8b8475d605f37a85b252326a",
+      "../tests/fixtures/oauth_server.py": "deb805e86a75d4248c01bb6a12a1c554ae629a3345df40c313f47ec0a3c89256",
+      "../tests/lifecycle.rs": "c16855a76c34746de5b0ef57ca863e9bb456fd4ceb3d91f54c0fc11d92358832",
+      "../tests/protocol.rs": "4480c8dc4c2e1c47b3f1c82b69405d5c12d84644b39035ddb364e8076ba87da7",
+      "PsiWorkspace.ts": "4da438a5c804a818790e77e7cf02220218eeafeabe3694c546c7264931ca631d",
+      "workspace.test.ts": "b7b0b695b5d4d9dcb864e483729d94ca83ee8803408d5c922a7e1aa4f5e50be1",
+      "PsiDriver.ts": "06de25095f405757419e19a9b7b9758702065e48be767b76a5a3d7729a0f1962",
+      "PsiBridge.ts": "3aad6d55f0bedce48c4b9ca76a0820e86452bafd9ba2765859421af9232d8266",
+      "adapter.test.ts": "c8973b7935c9113a518efa027bfc8d6357d5c455f0910abf67061ddaa2bbc736",
+      "t3.patch": "dee82ed9a70731c695a841868b5725561be7b68f52686f701426fb62e80adc6c",
+      "prepare.py": "99a41646dc1a1f9aade7fdbd10826a1f23f3273e67f0e1f88afe8d96d2265cf1",
+      "run.py": "cf02dab7aabe400c9e71a11c594a5caa5180adec2d98541e80ab0419284c44fd",
+      "e2e.test.mjs": "6173662f7c18e72675e12aced45cdae13fb2e5de2f9a40d0d7829541aa8db6a9",
+      "package-lock.json": "5b6889a9e0aebc60cca078c1956acc9ee23a7d8e69844ab85aa09cec83177a94"
+    },
+    "t3_lock_sha256": "cdf7f23158631e7cb34b279a9792ef28eb3418c453ec58508e3d91919a4b5a12"
+  },
+  "limits": [
+    "Local fixture model only; no full MVP or live-account acceptance.",
+    "Supervisor deadline and UI delivery latency are recorded separately.",
+    "Arbitrary blocking in-process plugins and remote processing are outside this supervisor guarantee."
+  ],
+  "validation_corrections": [
+    "Interrupted concurrent suite launch; final suites ran sequentially.",
+    "Separated UI delivery latency from the supervisor cleanup deadline.",
+    "Narrowed UI error selector that matched both displayed copies."
+  ]
+}
